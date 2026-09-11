@@ -14,7 +14,7 @@ import { formatCurrency } from '@/lib/financeUtils';
 import { parseBankCSV, parseNetBankMarkdown } from '@/lib/csvParser';
 import { format, startOfWeek, startOfMonth, isAfter } from 'date-fns';
 import { toast } from 'sonner';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase, SUPABASE_URL } from '@/integrations/supabase/client';
 import type { useFinanceData } from '@/hooks/useFinanceData';
 
 type Props = { finance: ReturnType<typeof useFinanceData> };
@@ -166,7 +166,7 @@ export default function FinanceAccounts({ finance }: Props) {
         return;
       }
 
-      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/parse-balance-snapshot`, {
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/parse-balance-snapshot`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${session.data.session.access_token}`,
@@ -267,7 +267,7 @@ export default function FinanceAccounts({ finance }: Props) {
           return;
         }
 
-        const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/parse-statement`, {
+        const response = await fetch(`${SUPABASE_URL}/functions/v1/parse-statement`, {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${session.data.session.access_token}`,

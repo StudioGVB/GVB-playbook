@@ -6,7 +6,7 @@ import { ArrowRight, Check, X, Loader2, ArrowLeftRight, Sparkles } from 'lucide-
 import { formatCurrency } from '@/lib/financeUtils';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase, SUPABASE_URL } from '@/integrations/supabase/client';
 import type { useFinanceData } from '@/hooks/useFinanceData';
 
 type Props = { finance: ReturnType<typeof useFinanceData> };
@@ -39,7 +39,7 @@ export default function TransferReview({ finance }: Props) {
     try {
       const session = await supabase.auth.getSession();
       if (!session.data.session) { toast.error('Not authenticated'); return; }
-      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/match-transfers`, {
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/match-transfers`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${session.data.session.access_token}`,
@@ -63,7 +63,7 @@ export default function TransferReview({ finance }: Props) {
     try {
       const session = await supabase.auth.getSession();
       if (!session.data.session) { toast.error('Not authenticated'); return; }
-      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/match-transfers`, {
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/match-transfers`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${session.data.session.access_token}`,

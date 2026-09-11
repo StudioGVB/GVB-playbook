@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useContext } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase, SUPABASE_URL } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import { computeTxFingerprint } from '@/lib/txFingerprint';
@@ -589,7 +589,7 @@ export function useFinanceDataState() {
       const session = await supabase.auth.getSession();
       if (!session.data.session) return { connected: false, error: 'not_authenticated' };
 
-      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/up-status`, {
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/up-status`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${session.data.session.access_token}`,
@@ -626,7 +626,7 @@ export function useFinanceDataState() {
         return;
       }
 
-      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/up-sync`, {
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/up-sync`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${session.data.session.access_token}`,
@@ -659,7 +659,7 @@ export function useFinanceDataState() {
       const session = await supabase.auth.getSession();
       if (!session.data.session) return { connected: false, error: 'not_authenticated' };
 
-      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/wise-status`, {
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/wise-status`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${session.data.session.access_token}`,
@@ -693,7 +693,7 @@ export function useFinanceDataState() {
       const session = await supabase.auth.getSession();
       if (!session.data.session) return false;
 
-      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/wise-connect`, {
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/wise-connect`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${session.data.session.access_token}`,
@@ -727,7 +727,7 @@ export function useFinanceDataState() {
         return;
       }
 
-      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/wise-sync`, {
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/wise-sync`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${session.data.session.access_token}`,
@@ -760,7 +760,7 @@ export function useFinanceDataState() {
       const session = await supabase.auth.getSession();
       if (!session.data.session) return { connected: false, error: 'not_authenticated' };
 
-      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/monzo-status`, {
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/monzo-status`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${session.data.session.access_token}`,
@@ -794,7 +794,7 @@ export function useFinanceDataState() {
       const session = await supabase.auth.getSession();
       if (!session.data.session) return false;
 
-      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/monzo-connect`, {
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/monzo-connect`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${session.data.session.access_token}`,
@@ -828,7 +828,7 @@ export function useFinanceDataState() {
         return;
       }
 
-      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/monzo-sync`, {
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/monzo-sync`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${session.data.session.access_token}`,
@@ -864,7 +864,7 @@ export function useFinanceDataState() {
         return;
       }
 
-      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/finance-categorize`, {
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/finance-categorize`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${session.data.session.access_token}`,
@@ -968,7 +968,7 @@ export function useFinanceDataState() {
       try {
         const session = await supabase.auth.getSession();
         if (!session.data.session) { toast.error('Not authenticated'); return; }
-        const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/match-transfers`, {
+        const response = await fetch(`${SUPABASE_URL}/functions/v1/match-transfers`, {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${session.data.session.access_token}`,
