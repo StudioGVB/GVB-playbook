@@ -5,11 +5,17 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { toast } from 'sonner';
-import { Mail, KeyRound, ArrowLeft, Loader2 } from 'lucide-react';
+import { Mail, KeyRound, Lock, ArrowLeft, Loader2, Eye, EyeOff } from 'lucide-react';
 
 export default function Auth() {
-  const { user, loading, sendOtpCode, verifyOtpCode } = useAuth();
+  const { user, loading, sendOtpCode, verifyOtpCode, signInWithPassword, signUpWithPassword } = useAuth();
+  
+  const [authMode, setAuthMode] = useState<'password' | 'otp'>('password');
+  const [isSignUp, setIsSignUp] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
   const [otpSent, setOtpSent] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -36,6 +42,37 @@ export default function Auth() {
   if (user) {
     return <Navigate to="/" replace />;
   }
+
+  const handlePasswordAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email.trim() || !password) {
+      toast.error('Please enter both email and password.');
+      return;
+    }
+    setSubmitting(true);
+
+    try {
+      if (isSignUp) {
+        const { error } = await signUpWithPassword(email.trim(), password);
+        if (error) {
+          toast.error(error.message);
+        } else {
+          toast.success('Account created! Signed in successfully.');
+        }
+      } else {
+        const { error } = await signInWithPassword(email.trim(), password);
+        if (error) {
+          toast.error(error.message);
+        } else {
+          toast.success('Signed in successfully!');
+        }
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Authentication failed.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   const handleSendOtp = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -102,11 +139,6 @@ export default function Auth() {
     }
   };
 
-  const handleBackToEmail = () => {
-    setOtpSent(false);
-    setCode('');
-  };
-
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[hsl(var(--background))] to-[hsl(var(--secondary)/0.3)] p-4">
       <Card className="w-full max-w-md border-border/40 shadow-xl backdrop-blur-sm bg-card/95 transition-all duration-300">
@@ -115,13 +147,16 @@ export default function Auth() {
             Life Control
           </CardTitle>
           <CardDescription className="text-sm font-medium mt-1">
-            {otpSent ? 'Verify your email code' : 'Sign in passwordless with email'}
+            {authMode === 'password'
+              ? (isSignUp ? 'Create a new account with email & password' : 'Sign in to your account with password')
+              : (otpSent ? 'Verify your email code' : 'Sign in passwordless with email code')}
           </CardDescription>
         </CardHeader>
+
         <CardContent className="space-y-4">
-          {!otpSent ? (
-            <form onSubmit={handleSendOtp} className="space-y-4">
-              <div className="space-y-2">
+          {authMode === 'password' ? (
+            <form onSubmit={handlePasswordAuth} className="space-y-4">
+              <div className="space-y-3">
                 <div className="relative">
                   <Mail className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
                   <Input
@@ -134,73 +169,153 @@ export default function Auth() {
                     disabled={submitting}
                   />
                 </div>
-              </div>
-              <Button type="submit" className="w-full h-10 font-bold transition-all duration-200" disabled={submitting}>
-                {submitting ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                    Sending code...
-                  </>
-                ) : (
-                  'Send One-Time Code'
-                )}
-              </Button>
-            </form>
-          ) : (
-            <form onSubmit={handleVerifyOtp} className="space-y-4">
-              <div className="space-y-2">
                 <div className="relative">
-                  <KeyRound className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <Lock className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
                   <Input
-                    type="text"
-                    placeholder="------"
-                    value={code}
-                    onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                    className="pl-9 h-10 text-center text-lg font-mono font-bold tracking-[0.3em] bg-muted/30 focus-visible:ring-1 focus-visible:ring-primary"
-                    maxLength={6}
+                    type={showPassword ? 'text' : 'password'}
+                    placeholder="Password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="pl-9 pr-9 h-10 text-sm font-medium bg-muted/30 focus-visible:ring-1 focus-visible:ring-primary"
                     required
                     disabled={submitting}
-                    autoFocus
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-2.5 text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
                 </div>
-                <p className="text-xs text-center text-muted-foreground font-medium">
-                  We sent a 6-digit verification code to <span className="font-semibold text-foreground">{email}</span>.
-                </p>
               </div>
+
               <Button type="submit" className="w-full h-10 font-bold transition-all duration-200" disabled={submitting}>
                 {submitting ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                    Verifying...
+                    {isSignUp ? 'Creating Account...' : 'Signing In...'}
                   </>
                 ) : (
-                  'Verify & Sign In'
+                  isSignUp ? 'Sign Up' : 'Sign In'
                 )}
               </Button>
 
-              <div className="flex items-center justify-between pt-2">
+              <div className="flex items-center justify-between text-xs font-semibold pt-2">
                 <button
                   type="button"
-                  onClick={handleBackToEmail}
-                  className="text-xs font-semibold text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
+                  onClick={() => setIsSignUp(!isSignUp)}
+                  className="text-primary hover:underline"
                   disabled={submitting}
                 >
-                  <ArrowLeft className="w-3.5 h-3.5" /> Back to email
+                  {isSignUp ? 'Already have an account? Sign In' : "Don't have an account? Sign Up"}
                 </button>
                 <button
                   type="button"
-                  onClick={handleResend}
-                  className={`text-xs font-semibold transition-colors ${
-                    resendCooldown > 0
-                      ? 'text-muted-foreground/60 cursor-not-allowed'
-                      : 'text-primary hover:underline'
-                  }`}
-                  disabled={submitting || resendCooldown > 0}
+                  onClick={() => setAuthMode('otp')}
+                  className="text-muted-foreground hover:text-foreground transition-colors"
+                  disabled={submitting}
                 >
-                  {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : 'Resend Code'}
+                  Use One-Time Code
                 </button>
               </div>
             </form>
+          ) : (
+            <>
+              {!otpSent ? (
+                <form onSubmit={handleSendOtp} className="space-y-4">
+                  <div className="space-y-2">
+                    <div className="relative">
+                      <Mail className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        type="email"
+                        placeholder="name@example.com"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        className="pl-9 h-10 text-sm font-medium bg-muted/30 focus-visible:ring-1 focus-visible:ring-primary"
+                        required
+                        disabled={submitting}
+                      />
+                    </div>
+                  </div>
+                  <Button type="submit" className="w-full h-10 font-bold transition-all duration-200" disabled={submitting}>
+                    {submitting ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                        Sending code...
+                      </>
+                    ) : (
+                      'Send One-Time Code'
+                    )}
+                  </Button>
+                  <div className="text-center pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setAuthMode('password')}
+                      className="text-xs font-semibold text-primary hover:underline"
+                      disabled={submitting}
+                    >
+                      Sign In with Password instead
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <form onSubmit={handleVerifyOtp} className="space-y-4">
+                  <div className="space-y-2">
+                    <div className="relative">
+                      <KeyRound className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        type="text"
+                        placeholder="------"
+                        value={code}
+                        onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                        className="pl-9 h-10 text-center text-lg font-mono font-bold tracking-[0.3em] bg-muted/30 focus-visible:ring-1 focus-visible:ring-primary"
+                        maxLength={6}
+                        required
+                        disabled={submitting}
+                        autoFocus
+                      />
+                    </div>
+                    <p className="text-xs text-center text-muted-foreground font-medium">
+                      We sent a 6-digit verification code to <span className="font-semibold text-foreground">{email}</span>.
+                    </p>
+                  </div>
+                  <Button type="submit" className="w-full h-10 font-bold transition-all duration-200" disabled={submitting}>
+                    {submitting ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                        Verifying...
+                      </>
+                    ) : (
+                      'Verify & Sign In'
+                    )}
+                  </Button>
+
+                  <div className="flex items-center justify-between pt-2">
+                    <button
+                      type="button"
+                      onClick={() => { setOtpSent(false); setCode(''); }}
+                      className="text-xs font-semibold text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
+                      disabled={submitting}
+                    >
+                      <ArrowLeft className="w-3.5 h-3.5" /> Back to email
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleResend}
+                      className={`text-xs font-semibold transition-colors ${
+                        resendCooldown > 0
+                          ? 'text-muted-foreground/60 cursor-not-allowed'
+                          : 'text-primary hover:underline'
+                      }`}
+                      disabled={submitting || resendCooldown > 0}
+                    >
+                      {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : 'Resend Code'}
+                    </button>
+                  </div>
+                </form>
+              )}
+            </>
           )}
         </CardContent>
       </Card>
