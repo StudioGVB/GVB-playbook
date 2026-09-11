@@ -1,0 +1,2 @@
+ALTER TABLE public.finance_fixed_expenses ADD COLUMN IF NOT EXISTS auto_pay boolean NOT NULL DEFAULT false;
+UPDATE public.finance_fixed_expenses SET auto_pay = true, due_day = 1 WHERE id = '52d9042c-8f41-46af-9e4b-2832e3f91273';

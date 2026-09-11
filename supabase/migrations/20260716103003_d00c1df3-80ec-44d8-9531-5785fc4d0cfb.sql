@@ -1,0 +1,1 @@
+ALTER TABLE public.meal_combos ADD COLUMN IF NOT EXISTS side2_id uuid REFERENCES public.meal_ingredients(id) ON DELETE SET NULL;

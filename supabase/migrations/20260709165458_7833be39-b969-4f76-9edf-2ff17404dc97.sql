@@ -1,0 +1,1 @@
+ALTER TABLE public.finance_assumptions ADD COLUMN IF NOT EXISTS monthly_budget_override numeric;

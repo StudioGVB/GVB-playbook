@@ -1,0 +1,1 @@
+ALTER TABLE public.cover_letter_profiles ADD COLUMN personal_details text NOT NULL DEFAULT '';

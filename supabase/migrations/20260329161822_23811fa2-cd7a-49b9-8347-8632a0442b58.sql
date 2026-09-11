@@ -1,0 +1,1 @@
+ALTER TABLE public.finance_assumptions ADD COLUMN estimated_essential_variable numeric NOT NULL DEFAULT 0;

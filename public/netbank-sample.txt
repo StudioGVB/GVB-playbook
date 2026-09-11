@@ -1,0 +1,18 @@
+| Date | Transaction details | Amount | Total |
+| --- | --- | --- | --- |
+| 01 Feb 2026 | Transfer from xx4282 NetBank | + $1,500.00 | + $20,913.04 |
+| 01 Feb 2026 | Credit Interest | + $25.52 | + $19,413.04 |
+| 01 Jan 2026 | Transfer from xx4282 NetBank | + $1,500.00 | + $19,387.52 |
+| 01 Jan 2026 | Credit Interest | + $51.70 | + $17,887.52 |
+| 01 Dec 2025 | Transfer from xx4282 NetBank | + $1,500.00 | + $17,835.82 |
+| 01 Dec 2025 | Credit Interest | + $55.71 | + $16,335.82 |
+| 05 Nov 2025 | Transfer from xx9661 CommBank | + $3,874.99 | + $16,280.11 |
+| 01 Nov 2025 | Transfer from xx4282 NetBank | + $1,500.00 | + $12,405.12 |
+| 01 Nov 2025 | Credit Interest | + $39.68 | + $10,905.12 |
+| 01 Oct 2025 | Transfer from xx4282 NetBank | + $1,500.00 | + $10,865.44 |
+| 01 Oct 2025 | Credit Interest | + $32.98 | + $9,365.44 |
+| 01 Sep 2025 | Transfer from xx4282 NetBank | + $1,500.00 | + $9,332.46 |
+| 01 Sep 2025 | Credit Interest | + $30.06 | + $7,832.46 |
+| 01 Aug 2025 | Transfer from xx4282 NetBank | + $1,500.00 | + $7,802.40 |
+| 01 Aug 2025 | Credit Interest | + $2.40 | + $6,302.40 |
+| 29 Jul 2025 | Transfer from xx9661 NetBank | + $6,300.00 | + $6,300.00 |

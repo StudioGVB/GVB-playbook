@@ -1,0 +1,1 @@
+ALTER TABLE public.finance_fixed_expenses ADD COLUMN IF NOT EXISTS paid_externally boolean NOT NULL DEFAULT false;

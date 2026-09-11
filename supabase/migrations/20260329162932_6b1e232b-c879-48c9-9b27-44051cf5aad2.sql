@@ -1,0 +1,1 @@
+ALTER TABLE public.finance_goals ADD COLUMN color text DEFAULT '#4558ff';

@@ -1,0 +1,1 @@
+ALTER TABLE public.finance_assumptions ADD COLUMN income_start_date date DEFAULT NULL;

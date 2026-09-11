@@ -1,0 +1,1 @@
+ALTER TABLE public.finance_fixed_expenses ADD COLUMN due_day integer;

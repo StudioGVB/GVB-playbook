@@ -1,0 +1,254 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Soft pink-tinted background */
+    --background: 300 20% 97%;
+    --foreground: 240 15% 15%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 240 15% 15%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 15% 15%;
+
+    /* Electric pink primary */
+    --primary: 320 100% 59%;
+    --primary-foreground: 0 0% 100%;
+
+    /* Purple accent */
+    --accent-purple: 262 100% 65%;
+    /* Blue accent */
+    --accent-blue: 227 100% 59%;
+
+    --secondary: 300 15% 95%;
+    --secondary-foreground: 240 15% 25%;
+
+    --muted: 300 10% 93%;
+    --muted-foreground: 240 8% 46%;
+
+    --accent: 300 30% 96%;
+    --accent-foreground: 300 50% 30%;
+
+    --destructive: 3 72% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 145 63% 42%;
+    --success-foreground: 145 60% 95%;
+
+    --warning: 38 100% 56%;
+    --warning-foreground: 38 90% 15%;
+
+    /* Priority colors */
+    --priority-high: 0 85% 55%;
+    --priority-medium: 40 100% 50%;
+    --priority-low: 145 70% 40%;
+
+    /* Project colors */
+    --project-moving-abroad: 231 100% 64%;
+    --project-pip: 289 100% 69%;
+    --project-back-pocket-games: 145 63% 42%;
+    --project-studio-gvb: 320 100% 59%;
+    --project-travel-app: 40 100% 59%;
+    --project-personal: 220 50% 55%;
+
+    --border: 300 10% 90%;
+    --input: 300 10% 90%;
+    --ring: 320 100% 59%;
+
+    --radius: 0.875rem;
+
+    --sidebar-background: 300 15% 98%;
+    --sidebar-foreground: 240 12% 35%;
+    --sidebar-primary: 320 100% 59%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 300 15% 95%;
+    --sidebar-accent-foreground: 240 15% 15%;
+    --sidebar-border: 300 10% 92%;
+    --sidebar-ring: 320 100% 59%;
+
+    /* Finance-specific tokens */
+    --finance-hero-glow: 320 100% 59%;
+    --finance-card-shadow: 0 2px 12px -2px rgba(255, 46, 184, 0.06);
+    --finance-card-hover-shadow: 0 4px 20px -4px rgba(255, 46, 184, 0.12);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1;
+    overscroll-behavior-y: contain;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-semibold tracking-tight;
+  }
+
+  /* Responsive page headings */
+  @media (max-width: 639px) {
+    h1 {
+      font-size: 1.25rem !important;
+    }
+  }
+
+  button, a, [role="button"] {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  /* Small utility buttons inside cards — exempt from 44px */
+  .metric-card button,
+  [data-compact-action] {
+    min-height: unset !important;
+    min-width: unset !important;
+  }
+
+  button[role="checkbox"],
+  button[role="switch"],
+  input[type="color"] {
+    min-height: unset !important;
+    min-width: unset !important;
+  }
+
+  input, textarea, select {
+    font-size: 16px;
+  }
+}
+
+@layer components {
+  /* Finance metric card — soft lift on hover */
+  .metric-card {
+    @apply bg-card border border-border rounded-2xl p-5 transition-all duration-200;
+    box-shadow: var(--finance-card-shadow);
+  }
+  .metric-card:hover {
+    box-shadow: var(--finance-card-hover-shadow);
+    transform: translateY(-1px);
+  }
+
+  .section-header {
+    @apply text-xs uppercase tracking-wider text-muted-foreground font-semibold mb-3;
+  }
+
+  .priority-high {
+    @apply text-[hsl(var(--priority-high))];
+  }
+  .priority-medium {
+    @apply text-[hsl(var(--priority-medium))];
+  }
+  .priority-low {
+    @apply text-[hsl(var(--priority-low))];
+  }
+
+  .priority-badge-high {
+    @apply bg-[hsl(var(--priority-high)/0.12)] text-[hsl(var(--priority-high))] border-[hsl(var(--priority-high)/0.3)];
+  }
+  .priority-badge-medium {
+    @apply bg-[hsl(var(--priority-medium)/0.12)] text-[hsl(var(--priority-medium))] border-[hsl(var(--priority-medium)/0.3)];
+  }
+  .priority-badge-low {
+    @apply bg-[hsl(var(--priority-low)/0.12)] text-[hsl(var(--priority-low))] border-[hsl(var(--priority-low)/0.3)];
+  }
+
+  .status-now {
+    @apply bg-[hsl(var(--project-back-pocket-games)/0.12)] text-[hsl(var(--project-back-pocket-games))] border-[hsl(var(--project-back-pocket-games)/0.3)];
+  }
+  .status-parked {
+    @apply bg-[hsl(var(--project-travel-app)/0.12)] text-[hsl(var(--project-travel-app))] border-[hsl(var(--project-travel-app)/0.3)];
+  }
+  .status-later {
+    @apply bg-[hsl(var(--muted-foreground)/0.15)] text-muted-foreground border-[hsl(var(--muted-foreground)/0.25)];
+  }
+
+  /* Project color classes */
+  .project-moving-abroad {
+    @apply bg-[hsl(var(--project-moving-abroad)/0.12)] text-[hsl(var(--project-moving-abroad))] border-[hsl(var(--project-moving-abroad)/0.35)];
+  }
+  .project-moving-abroad-solid {
+    @apply bg-[hsl(var(--project-moving-abroad))] text-white;
+  }
+  .project-moving-abroad-border {
+    @apply border-l-4 border-l-[hsl(var(--project-moving-abroad))];
+  }
+  .project-moving-abroad-text {
+    @apply text-[hsl(var(--project-moving-abroad))];
+  }
+
+  .project-pip {
+    @apply bg-[hsl(var(--project-pip)/0.12)] text-[hsl(var(--project-pip))] border-[hsl(var(--project-pip)/0.35)];
+  }
+  .project-pip-solid {
+    @apply bg-[hsl(var(--project-pip))] text-white;
+  }
+  .project-pip-border {
+    @apply border-l-4 border-l-[hsl(var(--project-pip))];
+  }
+  .project-pip-text {
+    @apply text-[hsl(var(--project-pip))];
+  }
+
+  .project-back-pocket-games {
+    @apply bg-[hsl(var(--project-back-pocket-games)/0.12)] text-[hsl(var(--project-back-pocket-games))] border-[hsl(var(--project-back-pocket-games)/0.35)];
+  }
+  .project-back-pocket-games-solid {
+    @apply bg-[hsl(var(--project-back-pocket-games))] text-white;
+  }
+  .project-back-pocket-games-border {
+    @apply border-l-4 border-l-[hsl(var(--project-back-pocket-games))];
+  }
+  .project-back-pocket-games-text {
+    @apply text-[hsl(var(--project-back-pocket-games))];
+  }
+
+  .project-studio-gvb {
+    @apply bg-[hsl(var(--project-studio-gvb)/0.2)] text-[hsl(320_70%_40%)] border-[hsl(var(--project-studio-gvb)/0.5)];
+  }
+  .project-studio-gvb-solid {
+    @apply bg-[hsl(var(--project-studio-gvb))] text-white;
+  }
+  .project-studio-gvb-border {
+    @apply border-l-4 border-l-[hsl(var(--project-studio-gvb))];
+  }
+  .project-studio-gvb-text {
+    @apply text-[hsl(320_70%_40%)];
+  }
+
+  .project-travel-app {
+    @apply bg-[hsl(var(--project-travel-app)/0.12)] text-[hsl(40_90%_35%)] border-[hsl(var(--project-travel-app)/0.4)];
+  }
+  .project-travel-app-solid {
+    @apply bg-[hsl(var(--project-travel-app))] text-white;
+  }
+  .project-travel-app-border {
+    @apply border-l-4 border-l-[hsl(var(--project-travel-app))];
+  }
+  .project-travel-app-text {
+    @apply text-[hsl(40_90%_35%)];
+  }
+
+  .project-personal {
+    @apply bg-[hsl(var(--project-personal)/0.12)] text-[hsl(var(--project-personal))] border-[hsl(var(--project-personal)/0.35)];
+  }
+  .project-personal-solid {
+    @apply bg-[hsl(var(--project-personal))] text-white;
+  }
+  .project-personal-border {
+    @apply border-l-4 border-l-[hsl(var(--project-personal))];
+  }
+  .project-personal-text {
+    @apply text-[hsl(var(--project-personal))];
+  }
+}

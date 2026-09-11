@@ -1,0 +1,1 @@
+ALTER TABLE public.finance_transactions ADD COLUMN goal_id uuid DEFAULT NULL;

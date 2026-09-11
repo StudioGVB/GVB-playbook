@@ -1,0 +1,2 @@
+ALTER TABLE public.finance_transactions ADD COLUMN IF NOT EXISTS is_refund boolean NOT NULL DEFAULT false;
+CREATE INDEX IF NOT EXISTS idx_finance_transactions_is_refund ON public.finance_transactions (user_id, is_refund) WHERE is_refund = true;

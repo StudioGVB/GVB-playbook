@@ -1,0 +1,1 @@
+ALTER TABLE public.finance_goals ADD COLUMN is_stash boolean NOT NULL DEFAULT false;

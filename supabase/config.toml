@@ -1,0 +1,70 @@
+project_id = "wlaydyjeilhinngtnnbd"
+
+[functions.suggest-category]
+verify_jwt = false
+
+[functions.task-breakdown]
+verify_jwt = false
+
+[functions.generate-suggestions]
+verify_jwt = false
+
+[functions.up-connect]
+verify_jwt = false
+
+[functions.up-status]
+verify_jwt = false
+
+[functions.up-sync]
+verify_jwt = false
+
+[functions.finance-categorize]
+verify_jwt = false
+
+[functions.match-transfers]
+verify_jwt = false
+
+[functions.parse-statement]
+verify_jwt = false
+
+[functions.generate-cover-letter]
+verify_jwt = false
+
+[functions.scrape-job-listing]
+verify_jwt = false
+
+[functions.parse-profile-text]
+verify_jwt = false
+
+[functions.parse-job-listing]
+verify_jwt = false
+
+[functions.analyze-job-match]
+verify_jwt = false
+
+[functions.answer-application-question]
+verify_jwt = false
+
+[functions.wise-connect]
+verify_jwt = false
+
+[functions.wise-sync]
+verify_jwt = false
+
+[functions.wise-status]
+verify_jwt = false
+
+[functions.wise-sync-cron]
+verify_jwt = false
+
+[functions.monzo-connect]
+verify_jwt = false
+
+[functions.monzo-sync]
+verify_jwt = false
+
+[functions.monzo-status]
+verify_jwt = false
+
+[functions.monzo-sync-cron]
+verify_jwt = false
