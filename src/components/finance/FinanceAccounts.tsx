@@ -476,6 +476,22 @@ export default function FinanceAccounts({ finance }: Props) {
                       Connect your Monzo account directly using your Monzo Access Token.
                     </p>
                     <div className="space-y-2 pt-1">
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="w-full h-9 text-xs font-bold gap-1.5 bg-[#FF4D6D] hover:bg-[#FF4D6D]/90 text-white shadow-sm"
+                        onClick={async () => {
+                          const { data } = await supabase.auth.getSession();
+                          const userId = data.session?.user.id || '';
+                          const clientId = 'oauth2client_0000BAIUMhrA8jDgU6Ydmr';
+                          const redirectUri = encodeURIComponent('https://wlaydyjeilhinngtnnbd.supabase.co/functions/v1/monzo-callback');
+                          const authUrl = `https://auth.monzo.com/?client_id=${clientId}&redirect_uri=${redirectUri}&response_type=code&state=${userId}`;
+                          window.location.href = authUrl;
+                        }}
+                      >
+                        <Sparkles className="w-3.5 h-3.5" /> Authorize Monzo OAuth (Permanent Sync)
+                      </Button>
+                      <p className="text-[10px] text-slate-400 text-center">Or paste temporary 24h token below:</p>
                       <Input
                         type="password"
                         placeholder="Paste Monzo Access Token (ey...)"
@@ -486,11 +502,12 @@ export default function FinanceAccounts({ finance }: Props) {
                       <Button
                         type="button"
                         size="sm"
+                        variant="outline"
                         className="w-full h-8 text-xs"
                         onClick={handleLiveMonzoConnect}
                         disabled={connectingMonzo || !monzoTokenInput.trim()}
                       >
-                        {connectingMonzo ? <><Loader2 className="h-3 w-3 animate-spin mr-1" /> Connecting...</> : 'Connect Live Account'}
+                        {connectingMonzo ? 'Connecting...' : 'Connect 24h Token'}
                       </Button>
                     </div>
                     <div className="relative my-2">
