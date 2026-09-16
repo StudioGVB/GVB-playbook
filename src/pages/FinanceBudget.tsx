@@ -539,10 +539,9 @@ export default function FinanceBudget() {
   const nextMonday = addWeeks(weekStart, 1);
   const daysUntilReset = isCurrentWeek ? Math.max(0, differenceInDays(nextMonday, today)) : 0;
 
-  // === Week Pulse segments ===
-  const totalWeeklyBudget = snapshot.weeklyFixedCosts + essentialWeeklyBudget + snapshot.weeklyFunBudget;
+  // === Week Pulse segments (Variable spending only: Essentials + Fun) ===
+  const totalWeeklyBudget = essentialWeeklyBudget + snapshot.weeklyFunBudget;
   const pulseSegments = [
-    { label: 'Bills', value: snapshot.weeklyFixedCosts, color: 'hsl(var(--destructive))' },
     { label: 'Essentials spent', value: Math.min(essentialSpentThisWeek, essentialWeeklyBudget), color: '#8B5CF6' },
     { label: 'Fun spent', value: Math.min(effectiveFunSpent, snapshot.weeklyFunBudget), color: 'hsl(142, 71%, 45%)' },
   ];
@@ -810,14 +809,15 @@ export default function FinanceBudget() {
             className="bg-white border-2 border-pink-200 shadow-[4px_4px_0px_0px_rgba(255,46,184,0.06)]"
           />
           <MetricCard
-            label="Fixed Bills"
-            value={fmt(snapshot.weeklyFixedCosts)}
+            label="Fixed Bills (Monthly)"
+            value={fmt(snapshot.weeklyFixedCosts * 4.33)}
             icon={Lock}
-            delta="/week"
+            delta="/month"
             deltaType="neutral"
-            subtitle={<span className="text-muted-foreground/50">{fmtGbp(snapshot.weeklyFixedCosts)}</span>}
-            valueClassName="text-rose-500"
-            className="bg-white border-2 border-rose-200 shadow-[4px_4px_0px_0px_rgba(239,68,68,0.06)]"
+            subtitle={<span className="text-[#FF2EB8] font-semibold hover:underline">View in Monthly Report →</span>}
+            valueClassName="text-slate-700"
+            className="bg-white border-2 border-slate-200 shadow-[4px_4px_0px_0px_rgba(15,23,42,0.04)] cursor-pointer hover:border-[#FF2EB8]/40 transition-all"
+            onAction={() => navigate('/finance/monthly')}
           />
           {snapshot.isTravelWeek ? (
             <MetricCard
