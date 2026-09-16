@@ -2,8 +2,11 @@
 import { createClient } from '@supabase/supabase-js';
 import type { Database } from './types';
 
+const envKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY || "";
 export const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "https://wlaydyjeilhinngtnnbd.supabase.co";
-export const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || "sb_publishable_hwLBVLLUZAsgh7xI6GNSGw_Nc0XFxbg";
+export const SUPABASE_PUBLISHABLE_KEY = (envKey && envKey.startsWith("sb_publishable_"))
+  ? envKey
+  : "sb_publishable_hwLBVLLUZAsgh7xI6GNSGw_Nc0XFxbg";
 
 export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
   auth: {

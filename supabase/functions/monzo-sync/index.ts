@@ -38,9 +38,10 @@ serve(async (req) => {
     const userId = userData.user.id
     const body = await req.json()
     let rawToken = body.token
+    let refreshToken = ''
+    let tokenExpiresAt = 0
 
     if (!rawToken) {
-      // Query finance_settings table
       try {
         const { data: settingsData } = await supabase
           .from('finance_settings')
@@ -50,9 +51,57 @@ serve(async (req) => {
 
         if (settingsData?.bank_tokens?.monzo) {
           rawToken = settingsData.bank_tokens.monzo
+          refreshToken = settingsData.bank_tokens.monzo_refresh || ''
+          tokenExpiresAt = settingsData.bank_tokens.monzo_expires_at || 0
         }
       } catch (err) {
         console.error('Failed to read Monzo token from database settings:', err)
+      }
+    }
+
+    // Auto-refresh token if expired or about to expire
+    if (refreshToken && (Date.now() >= tokenExpiresAt - 300000 || !rawToken)) {
+      try {
+        const MONZO_CLIENT_ID = Deno.env.get('MONZO_CLIENT_ID') || 'oauth2client_0000BAIUMhrA8jDgU6Ydmr'
+        const MONZO_CLIENT_SECRET = Deno.env.get('MONZO_CLIENT_SECRET') || 'mnzconf.JA9atqjwUDCgObnSS2gVRHUFrPSNRk6CdFAybM01d0fnxleruKXLQsD7jpMb22CzbrfYBpT+StD+7CjWJqugMA=='
+
+        const refreshRes = await fetch('https://api.monzo.com/oauth2/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            grant_type: 'refresh_token',
+            client_id: MONZO_CLIENT_ID,
+            client_secret: MONZO_CLIENT_SECRET,
+            refresh_token: refreshToken,
+          }).toString(),
+        })
+
+        if (refreshRes.ok) {
+          const freshData = await refreshRes.json()
+          rawToken = freshData.access_token
+          const newRefresh = freshData.refresh_token || refreshToken
+          const newExpires = Date.now() + ((freshData.expires_in || 21600) * 1000)
+
+          // Save fresh tokens
+          const { data: settingsData } = await supabase
+            .from('finance_settings')
+            .select('bank_tokens')
+            .eq('user_id', userId)
+            .maybeSingle()
+
+          const bankTokens = settingsData?.bank_tokens || {}
+          bankTokens.monzo = rawToken
+          bankTokens.monzo_refresh = newRefresh
+          bankTokens.monzo_expires_at = newExpires
+
+          await supabase.from('finance_settings').upsert({
+            user_id: userId,
+            bank_tokens: bankTokens,
+            updated_at: new Date().toISOString(),
+          }, { onConflict: 'user_id' })
+        }
+      } catch (refErr) {
+        console.error('Failed to refresh Monzo token:', refErr)
       }
     }
 
@@ -61,7 +110,7 @@ serve(async (req) => {
     }
 
     if (!rawToken || typeof rawToken !== 'string') {
-      return new Response(JSON.stringify({ error: 'Missing or invalid token. Configure MONZO_ACCESS_TOKEN secret or pass it in request body.' }), {
+      return new Response(JSON.stringify({ error: 'Missing or invalid token. Please authorize Monzo OAuth connection.' }), {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })

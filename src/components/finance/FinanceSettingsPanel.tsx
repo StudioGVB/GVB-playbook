@@ -135,10 +135,10 @@ export default function FinanceSettingsPanel({ finance }: Props) {
 
   useEffect(() => {
     if (settings) {
-      const rates = settings.fx_rates as Record<string, number>;
-      setAudGbp(String(rates.AUD_GBP || 0.52));
-      setGbpAud(String(rates.GBP_AUD || 1.92));
-      setBaseCurrency(settings.base_currency);
+      const rates = (settings.fx_rates || {}) as Record<string, number>;
+      setAudGbp(String(rates.AUD_GBP ?? 0.52));
+      setGbpAud(String(rates.GBP_AUD ?? 1.92));
+      setBaseCurrency(settings.base_currency || 'GBP');
     }
   }, [settings]);
 
@@ -149,8 +149,14 @@ export default function FinanceSettingsPanel({ finance }: Props) {
   }, [assumptions]);
 
   const handleSaveFX = () => {
+    const audVal = parseFloat(audGbp);
+    const gbpVal = parseFloat(gbpAud);
+    if (isNaN(audVal) || isNaN(gbpVal)) {
+      toast.error('Please enter valid numerical exchange rates');
+      return;
+    }
     updateSettings({
-      fx_rates: { AUD_GBP: parseFloat(audGbp), GBP_AUD: parseFloat(gbpAud) },
+      fx_rates: { AUD_GBP: audVal, GBP_AUD: gbpVal },
       base_currency: baseCurrency,
     });
   };

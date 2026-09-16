@@ -66,7 +66,7 @@ const App = () => (
               <Route path="/finance/travel" element={<Navigate to="/travel/trips" replace />} />
               <Route path="/travel" element={<TravelOverview />} />
               <Route path="/travel/trips" element={<FinanceTravelPage />} />
-              <Route path="/finance/cost-of-living" element={<FinanceCostOfLivingPage />} />
+              <Route path="/finance/cost-of-living" element={<FinanceAccountsPage defaultTab="cost-of-living" />} />
               <Route path="/finance/dashboards" element={<FinanceSalarySnapshot />} />
               <Route path="/finance/pools" element={<FinancePoolsPage />} />
               <Route path="/finance/can-i-afford" element={<Navigate to="/finance/budget" replace />} />

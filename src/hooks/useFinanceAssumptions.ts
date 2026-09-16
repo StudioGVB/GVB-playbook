@@ -38,7 +38,10 @@ export function useFinanceAssumptionsState() {
   const [loading, setLoading] = useState(true);
 
   const fetch = useCallback(async () => {
-    if (!user) return;
+    if (!user) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const { data, error } = await supabase
@@ -52,21 +55,20 @@ export function useFinanceAssumptionsState() {
       if (data) {
         setAssumptions(data as any);
       } else {
-        // Create defaults
-        const { data: created, error: insertErr } = await supabase
+        // Create defaults using upsert
+        const { data: created } = await supabase
           .from('finance_assumptions' as any)
-          .insert({
+          .upsert({
             user_id: user.id,
             future_monthly_survival_cost: 0,
             buffer_months: 3,
             weekly_fun_budget: 100,
             discretionary_savings_cap: 0,
             target_savings: 0,
-          } as any)
+          } as any, { onConflict: 'user_id' })
           .select()
-          .single();
-        if (insertErr) throw insertErr;
-        setAssumptions(created as any);
+          .maybeSingle();
+        if (created) setAssumptions(created as any);
       }
     } catch (err) {
       console.error('Assumptions fetch error', err);
@@ -78,14 +80,23 @@ export function useFinanceAssumptionsState() {
   useEffect(() => { fetch(); }, [fetch]);
 
   const update = async (updates: Partial<Omit<FinanceAssumptions, 'id' | 'user_id' | 'created_at' | 'updated_at'>>, silent = false) => {
-    if (!assumptions) return;
-    const { error } = await supabase
+    if (!user) return;
+    const existing = assumptions || {};
+    const updated = {
+      ...existing,
+      ...updates,
+      user_id: user.id,
+      updated_at: new Date().toISOString(),
+    };
+    setAssumptions(updated as any);
+    const { data, error } = await supabase
       .from('finance_assumptions' as any)
-      .update({ ...updates, updated_at: new Date().toISOString() } as any)
-      .eq('id', assumptions.id);
-    if (error) { toast.error('Failed to update assumptions'); return; }
+      .upsert(updated as any, { onConflict: 'user_id' })
+      .select()
+      .maybeSingle();
+    if (error) { toast.error('Failed to update assumptions: ' + error.message); return; }
+    if (data) setAssumptions(data as any);
     if (!silent) toast.success('Assumptions updated');
-    fetch();
   };
 
   return { assumptions, loading, update, refetch: fetch };

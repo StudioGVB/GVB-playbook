@@ -108,9 +108,14 @@ export default function Settings() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">Settings</h1>
-        <p className="text-muted-foreground">Manage your account</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Settings</h1>
+          <p className="text-muted-foreground">Manage your account & credentials</p>
+        </div>
+        <Button variant="outline" size="sm" onClick={() => window.location.href = '/finance/settings'} className="gap-1.5 border-[#FF7AD1]/40 text-[#FF2EB8] hover:bg-[#FFF5FA]">
+          Finance & Bank Settings →
+        </Button>
       </div>
 
       <Tabs defaultValue="account" className="w-full">

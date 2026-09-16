@@ -50,7 +50,7 @@ export default function FinanceAccounts({ finance }: Props) {
   const [wiseSyncing, setWiseSyncing] = useState(false);
   const [monzoSyncing, setMonzoSyncing] = useState(false);
   const [connectingMonzo, setConnectingMonzo] = useState(false);
-  const [monzoTokenInput, setMonzoTokenInput] = useState('');
+  const [monzoTokenInput, setMonzoTokenInput] = useState('eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJlYiI6IkdsdGVPZ0ZQSEZ4eDQvZWZSNTkxIiwianRpIjoiYWNjdG9rXzAwMDBCQUlUeGl0UDlOaXFEZDJlcUEiLCJ0eXAiOiJhdCIsInYiOiI2In0.OG_13cHRtpWp3ai78nS6_uuuDtddkKcyx0cB9fxEdr1HRdKyz-GuJ8rBtd_6cwtzVxhTql_-e4_UJGbmSxWZdQ');
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
   const [currency, setCurrency] = useState('AUD');

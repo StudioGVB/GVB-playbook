@@ -55,7 +55,10 @@ export function useFixedExpensesState() {
   const [fxRates, setFxRates] = useState<Record<string, number>>(DEFAULT_FX);
 
   const fetch = useCallback(async () => {
-    if (!user) return;
+    if (!user) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     const [{ data: exp, error }, { data: settings }] = await Promise.all([
       supabase.from('finance_fixed_expenses' as any).select('*').eq('user_id', user.id).order('created_at', { ascending: true }),

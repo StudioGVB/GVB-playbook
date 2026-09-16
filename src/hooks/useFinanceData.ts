@@ -228,7 +228,10 @@ export function useFinanceDataState() {
   }, [user]);
 
   const fetchAll = useCallback(async () => {
-    if (!user) return;
+    if (!user) {
+      setLoading(false);
+      return;
+    }
     if (!hasLoadedOnce.current) setLoading(true);
     try {
       const [accRes, catRes, txRes, goalRes, planRes, setRes, logRes, tagRes] = await Promise.all([
@@ -237,7 +240,7 @@ export function useFinanceDataState() {
         supabase.from('finance_transactions').select('*').order('posted_at', { ascending: false }),
         supabase.from('finance_goals').select('*').order('priority'),
         supabase.from('finance_goal_plans').select('*').order('created_at', { ascending: false }),
-        supabase.from('finance_settings').select('*').single(),
+        supabase.from('finance_settings').select('*').eq('user_id', user.id).maybeSingle(),
         supabase.from('finance_import_logs').select('*').order('created_at', { ascending: false }),
         supabase.from('income_source_tags' as any).select('*').order('created_at'),
       ]);
@@ -303,12 +306,12 @@ export function useFinanceDataState() {
       if (setRes.data) {
         setSettings(setRes.data as any);
       } else {
-        // Create default settings
-        const { data } = await supabase.from('finance_settings').insert({
+        // Create default settings using upsert
+        const { data } = await supabase.from('finance_settings').upsert({
           user_id: user.id,
           fx_rates: { AUD_GBP: 0.52, GBP_AUD: 1.92 },
           base_currency: 'GBP',
-        }).select().single();
+        }, { onConflict: 'user_id' }).select().maybeSingle();
         if (data) setSettings(data as any);
       }
 
@@ -553,11 +556,20 @@ export function useFinanceDataState() {
   };
 
   const updateSettings = async (updates: Partial<Pick<FinanceSettings, 'fx_rates' | 'base_currency'>>) => {
-    if (!settings) return;
-    const { error } = await supabase.from('finance_settings').update(updates).eq('id', settings.id);
-    if (error) { toast.error('Settings update failed'); return; }
+    if (!user) return;
+    const existing = settings || {};
+    const updated = {
+      ...existing,
+      ...updates,
+      user_id: user.id,
+      fx_rates: updates.fx_rates || existing.fx_rates || { AUD_GBP: 0.52, GBP_AUD: 1.92 },
+      base_currency: updates.base_currency || existing.base_currency || 'GBP',
+    };
+    setSettings(updated as any);
+    const { error } = await supabase.from('finance_settings').upsert(updated as any, { onConflict: 'user_id' });
+    if (error) { toast.error('Settings update failed: ' + error.message); return; }
     toast.success('Settings updated');
-    fetchAll();
+    await fetchAll();
   };
 
   const addCategory = async (cat: { name: string; type: string; is_cuttable?: boolean; color?: string }) => {
