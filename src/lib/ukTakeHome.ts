@@ -75,9 +75,9 @@ function calcNI(gross: number): number {
 }
 
 function calcStudentLoan(gross: number, plan: StudentLoanPlan): number {
-  if (!plan) return 0;
-  const threshold = SL_THRESHOLDS[plan];
-  if (gross <= threshold) return 0;
+  if (!plan || !(plan in SL_THRESHOLDS)) return 0;
+  const threshold = SL_THRESHOLDS[plan as keyof typeof SL_THRESHOLDS];
+  if (!threshold || gross <= threshold) return 0;
   const rate = plan === 'postgrad' ? SL_RATE_POSTGRAD : SL_RATE_UNDERGRAD;
   return (gross - threshold) * rate;
 }
@@ -88,16 +88,16 @@ export function calcTakeHome({
   studentLoanPlan = null,
 }: TakeHomeInputs): TakeHomeBreakdown {
   const gross = Math.max(0, grossAnnual || 0);
-  const pension = gross * (Math.max(0, pensionPercent) / 100);
+  const pension = gross * (Math.max(0, pensionPercent || 0) / 100);
   const taxable = Math.max(0, gross - pension);
 
   const incomeTax = calcIncomeTax(taxable);
   const nationalInsurance = calcNI(taxable);
   const studentLoan = calcStudentLoan(taxable, studentLoanPlan);
 
-  const netAnnual = taxable - incomeTax - nationalInsurance - studentLoan;
-  const netMonthly = netAnnual / 12;
-  const netWeekly = netAnnual / 52;
+  const netAnnual = Math.max(0, taxable - incomeTax - nationalInsurance - studentLoan);
+  const netMonthly = isNaN(netAnnual) ? 0 : netAnnual / 12;
+  const netWeekly = isNaN(netAnnual) ? 0 : netAnnual / 52;
   const effectiveTaxRate = gross > 0 ? (gross - netAnnual) / gross : 0;
 
   return {
@@ -107,10 +107,10 @@ export function calcTakeHome({
     incomeTax,
     nationalInsurance,
     studentLoan,
-    netAnnual,
-    netMonthly,
-    netWeekly,
-    effectiveTaxRate,
+    netAnnual: isNaN(netAnnual) ? 0 : netAnnual,
+    netMonthly: isNaN(netMonthly) ? 0 : netMonthly,
+    netWeekly: isNaN(netWeekly) ? 0 : netWeekly,
+    effectiveTaxRate: isNaN(effectiveTaxRate) ? 0 : effectiveTaxRate,
   };
 }
 

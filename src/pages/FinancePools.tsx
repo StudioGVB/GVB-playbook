@@ -389,9 +389,6 @@ export default function FinancePoolsPage() {
         </div>
       </div>
 
-      {/* Weekly Pool Savings Engine Card */}
-      <WeeklyPoolSavingsCard finance={finance} spendablePool={spendablePool} funMoney={funMoney} />
-
       {/* Pools Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {/* Emergency Fund */}
@@ -742,7 +739,10 @@ export default function FinancePoolsPage() {
           <p className="text-sm font-bold tracking-tight">Add Pool</p>
         </div>
       </div>
-        </TabsContent>
+
+        {/* Weekly Pool Savings Engine Card (Positioned Underneath Pools) */}
+        <WeeklyPoolSavingsCard finance={finance} spendablePool={spendablePool} funMoney={funMoney} />
+      </TabsContent>
 
         <TabsContent value="balance-sheet" className="space-y-6">
           <FinanceBalanceSheet />

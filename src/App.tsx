@@ -38,18 +38,21 @@ import Meals from "./pages/Meals";
 import { AppDataProvider } from "./contexts/AppDataContext";
 import { FinanceProvider } from "./contexts/FinanceContext";
 
+import ErrorBoundary from "./components/ErrorBoundary";
+
 const queryClient = new QueryClient();
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
-    <AuthProvider>
-      <AppDataProvider>
-        <FinanceProvider>
-          <TooltipProvider>
-        <Toaster />
-        <Sonner />
-        <BrowserRouter>
-          <Routes>
+    <ErrorBoundary>
+      <AuthProvider>
+        <AppDataProvider>
+          <FinanceProvider>
+            <TooltipProvider>
+              <Toaster />
+              <Sonner />
+              <BrowserRouter>
+                <Routes>
             <Route path="/auth" element={<Auth />} />
             <Route path="/reset-password" element={<ResetPassword />} />
             <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
@@ -87,10 +90,11 @@ const App = () => (
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>
-          </TooltipProvider>
-        </FinanceProvider>
-      </AppDataProvider>
-    </AuthProvider>
+            </TooltipProvider>
+          </FinanceProvider>
+        </AppDataProvider>
+      </AuthProvider>
+    </ErrorBoundary>
   </QueryClientProvider>
 );
 

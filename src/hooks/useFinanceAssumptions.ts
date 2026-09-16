@@ -53,7 +53,12 @@ export function useFinanceAssumptionsState() {
       if (error) throw error;
 
       if (data) {
-        setAssumptions(data as any);
+        // Ensure student_loan_plan is null if not explicitly set to a plan
+        const updatedAssumptions = {
+          ...(data as any),
+          student_loan_plan: (data as any).student_loan_plan === 'none' ? null : (data as any).student_loan_plan,
+        };
+        setAssumptions(updatedAssumptions);
       } else {
         // Create defaults using upsert
         const { data: created } = await supabase
@@ -65,6 +70,8 @@ export function useFinanceAssumptionsState() {
             weekly_fun_budget: 100,
             discretionary_savings_cap: 0,
             target_savings: 0,
+            gross_annual_salary: 37000,
+            student_loan_plan: null,
           } as any, { onConflict: 'user_id' })
           .select()
           .maybeSingle();

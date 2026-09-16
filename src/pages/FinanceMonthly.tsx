@@ -20,6 +20,7 @@ import { formatCurrency, baseAmt, parseUkDate } from '@/lib/financeUtils';
 import { MetricCard } from '@/components/finance/MetricCard';
 import { MultiSegmentDonut } from '@/components/finance/MultiSegmentDonut';
 import MonthlyCashFlowBreakdown from '@/components/finance/MonthlyCashFlowBreakdown';
+import { calcTakeHome } from '@/lib/ukTakeHome';
 import {
   startOfMonth, endOfMonth, subMonths, addMonths, format, addWeeks,
   getDaysInMonth, getDate,
@@ -512,10 +513,10 @@ export default function FinanceMonthly() {
       {(() => {
         let poolSavingsMonthly = 0;
         const now = new Date();
-        for (const g of finance.goals) {
-          if ((g as any).is_stash) continue;
-          const targetBase = finance.convertToBase(g.target_amount || 0, g.currency);
-          const assignedBase = finance.convertToBase(g.assigned_amount || 0, g.currency);
+        for (const g of (finance.goals || [])) {
+          if ((g as any)?.is_stash) continue;
+          const targetBase = finance.convertToBase ? finance.convertToBase(g.target_amount || 0, g.currency) : (g.target_amount || 0);
+          const assignedBase = finance.convertToBase ? finance.convertToBase(g.assigned_amount || 0, g.currency) : (g.assigned_amount || 0);
           const remainingBase = Math.max(0, targetBase - assignedBase);
           if (remainingBase <= 0.01) continue;
           if (g.deadline) {
@@ -527,10 +528,20 @@ export default function FinanceMonthly() {
             poolSavingsMonthly += (g.percent_allocation / 100) * 400;
           }
         }
+        const expectedIncomeVal = assumptions?.expected_monthly_income
+          ? assumptions.expected_monthly_income
+          : (assumptions?.gross_annual_salary
+            ? (calcTakeHome({
+                grossAnnual: assumptions.gross_annual_salary || 0,
+                pensionPercent: assumptions.pension_percent || 0,
+                studentLoanPlan: assumptions.student_loan_plan as any,
+              })?.netMonthly || 0)
+            : 0);
+
         return (
           <MonthlyCashFlowBreakdown
             income={incomeTotal}
-            expectedIncome={assumptions?.expected_monthly_income || 0}
+            expectedIncome={expectedIncomeVal}
             fixedBills={fixedMonthly}
             essentialBudget={monthlyEssentialBudget}
             essentialSpent={essentialSpent}
@@ -538,6 +549,7 @@ export default function FinanceMonthly() {
             funSpent={funSpent}
             baseCurrency={baseCurrency}
             monthLabel={monthLabel}
+            defaultViewMode="weekly"
           />
         );
       })()}

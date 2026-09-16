@@ -10,6 +10,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Table, LayoutGrid } from 'lucide-react';
 import FinanceSpreadsheetTab from '@/components/finance/FinanceSpreadsheetTab';
 import MonthlyCashFlowBreakdown from '@/components/finance/MonthlyCashFlowBreakdown';
+import { calcTakeHome } from '@/lib/ukTakeHome';
 
 // Candy-jar palette (matches Accounts & Settings)
 const PINK = '#FF2EB8';
@@ -52,7 +53,7 @@ export default function FinanceBalanceSheet() {
   const fxRates = (settings as any)?.fx_rates || { AUD_GBP: 0.52, GBP_AUD: 1.92 };
 
   const [monthOffset, setMonthOffset] = useState(0);
-  const [activeTab, setActiveTab] = useState<string>('spreadsheet');
+  const [activeTab, setActiveTab] = useState<string>('overview');
 
   const monthStart = useMemo(() => startOfMonth(addMonths(new Date(), monthOffset)), [monthOffset]);
   const monthEnd = useMemo(() => endOfMonth(monthStart), [monthStart]);
@@ -215,6 +216,19 @@ export default function FinanceBalanceSheet() {
     return (essentialWeekly + funWeekly) * 4.33;
   }, [finance.assumptions]);
 
+  const expectedIncomeValue = useMemo(() => {
+    if (!finance.assumptions) return 0;
+    if (finance.assumptions.expected_monthly_income) return finance.assumptions.expected_monthly_income;
+    if (finance.assumptions.gross_annual_salary) {
+      return calcTakeHome({
+        grossAnnual: finance.assumptions.gross_annual_salary,
+        pensionPercent: finance.assumptions.pension_percent || 0,
+        studentLoanPlan: finance.assumptions.student_loan_plan as any,
+      }).netMonthly;
+    }
+    return 0;
+  }, [finance.assumptions]);
+
   return (
     <div className="min-h-screen -mx-4 sm:-mx-6 -my-6 px-4 sm:px-6 py-6 bg-[#FFF5FA] font-body">
       <div className="max-w-6xl mx-auto space-y-6">
@@ -243,34 +257,22 @@ export default function FinanceBalanceSheet() {
           </div>
         </div>
 
-        {/* Super Clear Cash Flow Breakdown Card */}
-        <MonthlyCashFlowBreakdown
-          income={stats.income}
-          expectedIncome={finance.assumptions?.expected_monthly_income || 0}
-          fixedBills={stats.fixed}
-          essentialBudget={(finance.assumptions?.estimated_essential_variable || 115) * 4.33}
-          essentialSpent={stats.variable}
-          poolSavings={poolSavingsMonthly}
-          baseCurrency={baseCurrency}
-          monthLabel={monthLabel}
-        />
-
         {/* Navigation Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="bg-white/80 backdrop-blur-md p-1.5 rounded-2xl border border-[#FF7AD1]/30 shadow-sm inline-flex mb-2">
+            <TabsTrigger
+              value="overview"
+              className="rounded-xl px-4 py-2 font-display font-bold text-sm data-[state=active]:bg-[#FF2EB8] data-[state=active]:text-white transition-all flex items-center gap-2"
+            >
+              <LayoutGrid className="w-4 h-4" />
+              Balance Sheet Overview
+            </TabsTrigger>
             <TabsTrigger
               value="spreadsheet"
               className="rounded-xl px-4 py-2 font-display font-bold text-sm data-[state=active]:bg-[#FF2EB8] data-[state=active]:text-white transition-all flex items-center gap-2"
             >
               <Table className="w-4 h-4" />
               Spreadsheet View
-            </TabsTrigger>
-            <TabsTrigger
-              value="overview"
-              className="rounded-xl px-4 py-2 font-display font-bold text-sm data-[state=active]:bg-[#FF2EB8] data-[state=active]:text-white transition-all flex items-center gap-2"
-            >
-              <LayoutGrid className="w-4 h-4" />
-              Monthly Summary & KPIs
             </TabsTrigger>
           </TabsList>
 
@@ -279,6 +281,19 @@ export default function FinanceBalanceSheet() {
           </TabsContent>
 
           <TabsContent value="overview" className="mt-4 space-y-6 focus-visible:outline-none">
+            {/* Super Clear Cash Flow Breakdown Card (Weekly / Monthly Toggle) */}
+            <MonthlyCashFlowBreakdown
+              income={stats.income}
+              expectedIncome={expectedIncomeValue}
+              fixedBills={stats.fixed}
+              essentialBudget={(finance.assumptions?.estimated_essential_variable || 115) * 4.33}
+              essentialSpent={stats.variable}
+              poolSavings={poolSavingsMonthly}
+              baseCurrency={baseCurrency}
+              monthLabel={monthLabel}
+              defaultViewMode="weekly"
+            />
+
             {/* Net Hero */}
             <div
               className="rounded-[2rem] p-7 border-2 relative overflow-hidden"
