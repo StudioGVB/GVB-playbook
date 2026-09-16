@@ -7,12 +7,13 @@ import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { CheckCircle2, XCircle, Loader2, Shield, Pencil, Trash2, EyeOff, Palette, Plus, Receipt } from 'lucide-react';
+import { CheckCircle2, XCircle, Loader2, Shield, Pencil, Trash2, EyeOff, Palette, Plus, Receipt, Lock, Eye } from 'lucide-react';
 import DeleteConfirmDialog from '@/components/DeleteConfirmDialog';
 import type { useFinanceData } from '@/hooks/useFinanceData';
 import { useFixedExpenses } from '@/hooks/useFixedExpenses';
 import { formatCurrency } from '@/lib/financeUtils';
 import { useFinanceAssumptions } from '@/hooks/useFinanceAssumptions';
+import { supabase } from '@/integrations/supabase/client';
 
 type Props = { finance: ReturnType<typeof useFinanceData> };
 
@@ -272,8 +273,106 @@ export default function FinanceSettingsPanel({ finance }: Props) {
     setMonzoChecking(false);
   };
 
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [updatingPassword, setUpdatingPassword] = useState(false);
+
+  const handlePasswordChange = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (newPassword.length < 6) {
+      toast.error('Password must be at least 6 characters.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      toast.error('Passwords do not match.');
+      return;
+    }
+    setUpdatingPassword(true);
+    try {
+      const { error } = await supabase.auth.updateUser({ password: newPassword });
+      if (error) {
+        toast.error(error.message);
+      } else {
+        toast.success('Password updated successfully!');
+        setNewPassword('');
+        setConfirmPassword('');
+      }
+    } finally {
+      setUpdatingPassword(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
+      {/* Account Password Card */}
+      <Card className="border-2 border-[#FF7AD1]/30 bg-gradient-to-r from-white to-[#FFF5FA]">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2 text-slate-900 font-display font-bold">
+            <Lock className="w-4 h-4 text-[#FF2EB8]" />
+            <span>Update Password</span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-xs text-slate-500">
+            Set or update your account password so you can sign in directly with your email & password.
+          </p>
+          <form onSubmit={handlePasswordChange} className="space-y-3 max-w-md">
+            <div className="space-y-1">
+              <Label className="text-xs text-slate-600 font-medium">New Password</Label>
+              <div className="relative">
+                <Input
+                  type={showNewPassword ? 'text' : 'password'}
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="Enter new password (min 6 characters)"
+                  className="pr-10 h-9 text-xs rounded-xl border-slate-200"
+                  required
+                />
+                <button
+                  type="button"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1"
+                  onClick={() => setShowNewPassword(!showNewPassword)}
+                >
+                  {showNewPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-xs text-slate-600 font-medium">Confirm Password</Label>
+              <div className="relative">
+                <Input
+                  type={showConfirmPassword ? 'text' : 'password'}
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="Confirm new password"
+                  className="pr-10 h-9 text-xs rounded-xl border-slate-200"
+                  required
+                />
+                <button
+                  type="button"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1"
+                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                >
+                  {showConfirmPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                </button>
+              </div>
+            </div>
+
+            <Button
+              type="submit"
+              size="sm"
+              disabled={updatingPassword}
+              className="bg-[#FF2EB8] hover:bg-[#e5299f] text-white font-display font-bold rounded-xl h-9 text-xs px-4"
+            >
+              {updatingPassword ? 'Updating...' : 'Update Password'}
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+
       {/* Up Bank */}
       <Card>
         <CardHeader className="pb-3">
