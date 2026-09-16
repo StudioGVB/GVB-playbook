@@ -532,6 +532,8 @@ export default function FinanceMonthly() {
             income={incomeTotal}
             fixedBills={fixedMonthly}
             variableAllowance={monthlyEssentialBudget + monthlyFunBudget}
+            essentialBudget={monthlyEssentialBudget}
+            funBudget={monthlyFunBudget}
             variableSpent={essentialSpent + funSpent}
             poolSavings={poolSavingsMonthly}
             baseCurrency={baseCurrency}

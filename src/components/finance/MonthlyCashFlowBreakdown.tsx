@@ -8,6 +8,8 @@ interface Props {
   income: number;
   fixedBills: number;
   variableAllowance: number;
+  essentialBudget?: number;
+  funBudget?: number;
   variableSpent?: number;
   poolSavings: number;
   baseCurrency?: string;
@@ -18,6 +20,8 @@ export default function MonthlyCashFlowBreakdown({
   income,
   fixedBills,
   variableAllowance,
+  essentialBudget,
+  funBudget,
   variableSpent = 0,
   poolSavings,
   baseCurrency = 'AUD',
@@ -124,7 +128,11 @@ export default function MonthlyCashFlowBreakdown({
                   3. Variable Allowance
                 </span>
                 <span className="text-sm font-semibold text-slate-700">
-                  Essentials + Fun Money
+                  {essentialBudget && funBudget ? (
+                    <>Essentials ({fmt(essentialBudget)}) + Fun Money ({fmt(funBudget)})</>
+                  ) : (
+                    <>Essentials + Fun Money</>
+                  )}
                   {variableSpent > 0 && (
                     <span className="text-xs text-purple-600 block font-normal">
                       ({fmt(variableSpent)} spent so far this month)

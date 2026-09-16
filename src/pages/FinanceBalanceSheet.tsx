@@ -248,6 +248,8 @@ export default function FinanceBalanceSheet() {
           income={stats.income}
           fixedBills={stats.fixed}
           variableAllowance={variableAllowanceMonthly}
+          essentialBudget={(finance.assumptions?.estimated_essential_variable || 115) * 4.33}
+          funBudget={(finance.assumptions?.weekly_fun_budget || 100) * 4.33}
           variableSpent={stats.variable}
           poolSavings={poolSavingsMonthly}
           baseCurrency={baseCurrency}
