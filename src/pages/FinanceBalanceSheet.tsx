@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Table, LayoutGrid } from 'lucide-react';
 import FinanceSpreadsheetTab from '@/components/finance/FinanceSpreadsheetTab';
+import MonthlyCashFlowBreakdown from '@/components/finance/MonthlyCashFlowBreakdown';
 
 // Candy-jar palette (matches Accounts & Settings)
 const PINK = '#FF2EB8';
@@ -187,6 +188,33 @@ export default function FinanceBalanceSheet() {
   const heroBorder = isPositive ? GREEN : RED;
   const heroText = isPositive ? GREEN_DEEP : RED_DEEP;
 
+  const poolSavingsMonthly = useMemo(() => {
+    let monthlyTargetSum = 0;
+    const now = new Date();
+    for (const g of finance.goals) {
+      if ((g as any).is_stash) continue;
+      const targetBase = finance.convertToBase(g.target_amount || 0, g.currency);
+      const assignedBase = finance.convertToBase(g.assigned_amount || 0, g.currency);
+      const remainingBase = Math.max(0, targetBase - assignedBase);
+      if (remainingBase <= 0.01) continue;
+      if (g.deadline) {
+        const daysLeft = Math.max(1, Math.ceil((new Date(g.deadline).getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
+        const weeksLeft = Math.max(1, daysLeft / 7);
+        const weeklyRequired = remainingBase / weeksLeft;
+        monthlyTargetSum += weeklyRequired * 4.33;
+      } else if (g.percent_allocation && g.percent_allocation > 0) {
+        monthlyTargetSum += (g.percent_allocation / 100) * 400;
+      }
+    }
+    return monthlyTargetSum;
+  }, [finance.goals, finance.convertToBase]);
+
+  const variableAllowanceMonthly = useMemo(() => {
+    const essentialWeekly = finance.assumptions?.estimated_essential_variable || 115;
+    const funWeekly = finance.assumptions?.weekly_fun_budget || 100;
+    return (essentialWeekly + funWeekly) * 4.33;
+  }, [finance.assumptions]);
+
   return (
     <div className="min-h-screen -mx-4 sm:-mx-6 -my-6 px-4 sm:px-6 py-6 bg-[#FFF5FA] font-body">
       <div className="max-w-6xl mx-auto space-y-6">
@@ -214,6 +242,17 @@ export default function FinanceBalanceSheet() {
             </Button>
           </div>
         </div>
+
+        {/* Super Clear Cash Flow Breakdown Card */}
+        <MonthlyCashFlowBreakdown
+          income={stats.income}
+          fixedBills={stats.fixed}
+          variableAllowance={variableAllowanceMonthly}
+          variableSpent={stats.variable}
+          poolSavings={poolSavingsMonthly}
+          baseCurrency={baseCurrency}
+          monthLabel={monthLabel}
+        />
 
         {/* Navigation Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">

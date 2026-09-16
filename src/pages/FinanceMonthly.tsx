@@ -19,6 +19,7 @@ import { computePolicySnapshot } from '@/lib/policyEngine';
 import { formatCurrency, baseAmt, parseUkDate } from '@/lib/financeUtils';
 import { MetricCard } from '@/components/finance/MetricCard';
 import { MultiSegmentDonut } from '@/components/finance/MultiSegmentDonut';
+import MonthlyCashFlowBreakdown from '@/components/finance/MonthlyCashFlowBreakdown';
 import {
   startOfMonth, endOfMonth, subMonths, addMonths, format, addWeeks,
   getDaysInMonth, getDate,
@@ -506,6 +507,38 @@ export default function FinanceMonthly() {
           </Button>
         </div>
       </div>
+
+      {/* Super Clear Cash Flow Breakdown Card */}
+      {(() => {
+        let poolSavingsMonthly = 0;
+        const now = new Date();
+        for (const g of finance.goals) {
+          if ((g as any).is_stash) continue;
+          const targetBase = finance.convertToBase(g.target_amount || 0, g.currency);
+          const assignedBase = finance.convertToBase(g.assigned_amount || 0, g.currency);
+          const remainingBase = Math.max(0, targetBase - assignedBase);
+          if (remainingBase <= 0.01) continue;
+          if (g.deadline) {
+            const daysLeft = Math.max(1, Math.ceil((new Date(g.deadline).getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
+            const weeksLeft = Math.max(1, daysLeft / 7);
+            const weeklyRequired = remainingBase / weeksLeft;
+            poolSavingsMonthly += weeklyRequired * 4.33;
+          } else if (g.percent_allocation && g.percent_allocation > 0) {
+            poolSavingsMonthly += (g.percent_allocation / 100) * 400;
+          }
+        }
+        return (
+          <MonthlyCashFlowBreakdown
+            income={incomeTotal}
+            fixedBills={fixedMonthly}
+            variableAllowance={monthlyEssentialBudget + monthlyFunBudget}
+            variableSpent={essentialSpent + funSpent}
+            poolSavings={poolSavingsMonthly}
+            baseCurrency={baseCurrency}
+            monthLabel={monthLabel}
+          />
+        );
+      })()}
 
       {/* KPI Cards — candy bento style */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
