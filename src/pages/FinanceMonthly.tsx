@@ -530,12 +530,12 @@ export default function FinanceMonthly() {
         return (
           <MonthlyCashFlowBreakdown
             income={incomeTotal}
+            expectedIncome={assumptions?.expected_monthly_income || 0}
             fixedBills={fixedMonthly}
-            variableAllowance={monthlyEssentialBudget + monthlyFunBudget}
             essentialBudget={monthlyEssentialBudget}
-            funBudget={monthlyFunBudget}
-            variableSpent={essentialSpent + funSpent}
+            essentialSpent={essentialSpent}
             poolSavings={poolSavingsMonthly}
+            funSpent={funSpent}
             baseCurrency={baseCurrency}
             monthLabel={monthLabel}
           />

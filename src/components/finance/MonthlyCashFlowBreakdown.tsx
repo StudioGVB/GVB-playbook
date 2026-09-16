@@ -1,45 +1,50 @@
 import { useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { ArrowDownRight, ArrowUpRight, CheckCircle2, DollarSign, Lock, PiggyBank, Scale, ShoppingCart, Sparkles, AlertCircle } from 'lucide-react';
+import { ArrowUpRight, Lock, PiggyBank, Scale, ShoppingCart, PartyPopper, AlertCircle, Sparkles } from 'lucide-react';
 import { formatCurrency } from '@/lib/financeUtils';
 
 interface Props {
   income: number;
+  expectedIncome?: number;
   fixedBills: number;
-  variableAllowance: number;
-  essentialBudget?: number;
-  funBudget?: number;
-  variableSpent?: number;
+  essentialBudget: number;
+  essentialSpent?: number;
   poolSavings: number;
+  funSpent?: number;
   baseCurrency?: string;
   monthLabel?: string;
 }
 
 export default function MonthlyCashFlowBreakdown({
   income,
+  expectedIncome = 0,
   fixedBills,
-  variableAllowance,
   essentialBudget,
-  funBudget,
-  variableSpent = 0,
+  essentialSpent = 0,
   poolSavings,
+  funSpent = 0,
   baseCurrency = 'AUD',
   monthLabel,
 }: Props) {
   const fmt = (n: number) => formatCurrency(n, baseCurrency);
 
-  // Remaining net leftover = Income - Fixed Bills - Variable Allowance - Pool Savings
-  const totalOutflows = fixedBills + variableAllowance + poolSavings;
-  const netLeftover = income - totalOutflows;
-  const isSurplus = netLeftover >= 0;
+  // Effective income to use: actual cleared income if available, else expected monthly income
+  const effectiveIncome = income > 0 ? income : expectedIncome;
+  const isUsingExpected = income === 0 && expectedIncome > 0;
+
+  // Fun Money = What is genuinely leftover after Bills, Essentials & Savings Pools!
+  const funMoneyLeftoverMonthly = Math.max(0, effectiveIncome - fixedBills - essentialBudget - poolSavings);
+  const weeklyFunPace = funMoneyLeftoverMonthly / 4.33;
+  const shortfall = Math.max(0, (fixedBills + essentialBudget + poolSavings) - effectiveIncome);
+  const isSurplus = effectiveIncome >= (fixedBills + essentialBudget + poolSavings);
 
   // Percentage breakdown relative to income
-  const incomeDenom = Math.max(income, totalOutflows, 1);
+  const incomeDenom = Math.max(effectiveIncome, fixedBills + essentialBudget + poolSavings, 1);
   const fixedPct = Math.min(100, (fixedBills / incomeDenom) * 100);
-  const varPct = Math.min(100, (variableAllowance / incomeDenom) * 100);
+  const essentialPct = Math.min(100, (essentialBudget / incomeDenom) * 100);
   const poolPct = Math.min(100, (poolSavings / incomeDenom) * 100);
-  const leftoverPct = Math.min(100, (Math.abs(netLeftover) / incomeDenom) * 100);
+  const funPct = Math.min(100, (funMoneyLeftoverMonthly / incomeDenom) * 100);
 
   return (
     <Card className="bg-white rounded-3xl border-2 border-[#FF7AD1]/40 shadow-[8px_8px_0px_0px_rgba(255,46,184,0.12)] overflow-hidden font-body">
@@ -48,30 +53,30 @@ export default function MonthlyCashFlowBreakdown({
           <div>
             <div className="flex items-center gap-2 mb-1">
               <span className="bg-[#FF2EB8] text-white p-1 rounded-lg">
-                <Scale className="w-3.5 h-3.5" />
+                <Sparkles className="w-3.5 h-3.5" />
               </span>
               <span className="text-[#FF2EB8] font-display font-bold uppercase tracking-wider text-xs">
-                Monthly Bottom Line {monthLabel ? `• ${monthLabel}` : ''}
+                Intuitive Financial Engine {monthLabel ? `• ${monthLabel}` : ''}
               </span>
             </div>
             <CardTitle className="text-2xl font-display font-black text-slate-900">
-              Cash Flow Breakdown
+              Intuitive Cash Flow Breakdown
             </CardTitle>
             <p className="text-xs text-slate-500 mt-0.5">
-              Super clear equation of where your income goes before you spend a single dollar.
+              Fun Money isn't guessed—it's what's genuinely leftover after bills, essentials & pools are funded.
             </p>
           </div>
 
           <div className="flex items-center gap-2">
             {isSurplus ? (
               <Badge className="bg-emerald-100 text-emerald-800 border-emerald-300 font-display font-black text-sm px-3.5 py-1.5 rounded-2xl gap-1.5 shadow-sm">
-                <ArrowUpRight className="w-4 h-4 text-emerald-600" />
-                +{fmt(netLeftover)} Surplus Leftover
+                <PartyPopper className="w-4 h-4 text-emerald-600" />
+                {fmt(weeklyFunPace)}/wk Fun Money
               </Badge>
             ) : (
               <Badge className="bg-rose-100 text-rose-800 border-rose-300 font-display font-black text-sm px-3.5 py-1.5 rounded-2xl gap-1.5 shadow-sm">
                 <AlertCircle className="w-4 h-4 text-rose-600" />
-                −{fmt(Math.abs(netLeftover))} Shortfall
+                −{fmt(shortfall)} Shortfall
               </Badge>
             )}
           </div>
@@ -81,7 +86,7 @@ export default function MonthlyCashFlowBreakdown({
       <CardContent className="p-6 space-y-6">
         {/* Step-by-Step Waterfall List */}
         <div className="space-y-3">
-          {/* 1. Earned Income */}
+          {/* 1. Monthly Income */}
           <div className="flex items-center justify-between p-4 rounded-2xl bg-sky-50/80 border-2 border-sky-200">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-sky-500 text-white flex items-center justify-center font-black text-lg shadow-sm">
@@ -89,13 +94,19 @@ export default function MonthlyCashFlowBreakdown({
               </div>
               <div>
                 <span className="text-xs font-display font-bold uppercase text-sky-800 tracking-wider block">
-                  1. Earned This Month
+                  1. Monthly Income
                 </span>
-                <span className="text-sm font-semibold text-slate-700">Total Cleared Income</span>
+                <span className="text-sm font-semibold text-slate-700">
+                  {isUsingExpected ? (
+                    <>Expected Monthly Income <span className="text-xs text-sky-600 font-normal">(baseline profile)</span></>
+                  ) : (
+                    <>Total Cleared Income</>
+                  )}
+                </span>
               </div>
             </div>
             <span className="text-2xl font-display font-black text-sky-900 tabular-nums">
-              +{fmt(income)}
+              +{fmt(effectiveIncome)}
             </span>
           </div>
 
@@ -117,7 +128,7 @@ export default function MonthlyCashFlowBreakdown({
             </span>
           </div>
 
-          {/* 3. Variable Allowance */}
+          {/* 3. Essential Living */}
           <div className="flex items-center justify-between p-4 rounded-2xl bg-purple-50/80 border-2 border-purple-200">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-purple-500 text-white flex items-center justify-center font-bold shadow-sm">
@@ -125,28 +136,24 @@ export default function MonthlyCashFlowBreakdown({
               </div>
               <div>
                 <span className="text-xs font-display font-bold uppercase text-purple-800 tracking-wider block">
-                  3. Variable Allowance
+                  3. Essential Living
                 </span>
                 <span className="text-sm font-semibold text-slate-700">
-                  {essentialBudget && funBudget ? (
-                    <>Essentials ({fmt(essentialBudget)}) + Fun Money ({fmt(funBudget)})</>
-                  ) : (
-                    <>Essentials + Fun Money</>
-                  )}
-                  {variableSpent > 0 && (
+                  Supermarkets, Transport & Health
+                  {essentialSpent > 0 && (
                     <span className="text-xs text-purple-600 block font-normal">
-                      ({fmt(variableSpent)} spent so far this month)
+                      ({fmt(essentialSpent)} spent so far this month)
                     </span>
                   )}
                 </span>
               </div>
             </div>
             <span className="text-2xl font-display font-black text-purple-900 tabular-nums">
-              −{fmt(variableAllowance)}
+              −{fmt(essentialBudget)}
             </span>
           </div>
 
-          {/* 4. Pool Savings */}
+          {/* 4. Savings Pools */}
           <div className="flex items-center justify-between p-4 rounded-2xl bg-pink-50/80 border-2 border-[#FF7AD1]/40">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-[#FF2EB8] text-white flex items-center justify-center font-bold shadow-sm">
@@ -156,7 +163,7 @@ export default function MonthlyCashFlowBreakdown({
                 <span className="text-xs font-display font-bold uppercase text-[#FF2EB8] tracking-wider block">
                   4. Savings Pools
                 </span>
-                <span className="text-sm font-semibold text-slate-700">Committed Money Pool Allocations</span>
+                <span className="text-sm font-semibold text-slate-700">Travel, Vehicle, Reserve & Goals</span>
               </div>
             </div>
             <span className="text-2xl font-display font-black text-[#FF2EB8] tabular-nums">
@@ -167,7 +174,7 @@ export default function MonthlyCashFlowBreakdown({
           {/* Equal Divider */}
           <div className="border-t-2 border-dashed border-slate-300 my-4" />
 
-          {/* 5. What's Leftover Result */}
+          {/* 5. Fun Money = What's Leftover */}
           <div
             className={`flex items-center justify-between p-5 rounded-2xl border-2 ${
               isSurplus
@@ -185,20 +192,29 @@ export default function MonthlyCashFlowBreakdown({
               </div>
               <div>
                 <span className="text-xs font-display font-extrabold uppercase tracking-widest block">
-                  5. WHAT'S LEFTOVER
+                  5. FUN MONEY (WHAT'S LEFTOVER)
                 </span>
                 <span className="text-sm font-bold">
-                  {isSurplus ? 'Unallocated Net Surplus Buffer' : 'Uncovered Shortfall'}
+                  {isSurplus ? (
+                    <>Safe Discretionary Spending • {fmt(weeklyFunPace)}/wk</>
+                  ) : (
+                    <>Income Deficit • Adjust Pools or Expenses</>
+                  )}
                 </span>
+                {funSpent > 0 && (
+                  <span className="text-xs font-medium block mt-0.5 opacity-90">
+                    ({fmt(funSpent)} fun spent so far this month)
+                  </span>
+                )}
               </div>
             </div>
 
             <div className="text-right">
               <span className="text-3xl sm:text-4xl font-display font-black tabular-nums block">
-                {isSurplus ? `+${fmt(netLeftover)}` : `−${fmt(Math.abs(netLeftover))}`}
+                {isSurplus ? `+${fmt(funMoneyLeftoverMonthly)}` : `−${fmt(shortfall)}`}
               </span>
               <span className="text-xs font-semibold opacity-80">
-                {isSurplus ? 'Safe uncommitted cash balance' : 'Exceeds monthly income!'}
+                {isSurplus ? `${fmt(weeklyFunPace)} / week` : 'Requires budget adjustment'}
               </span>
             </div>
           </div>
@@ -208,7 +224,7 @@ export default function MonthlyCashFlowBreakdown({
         <div>
           <div className="flex items-center justify-between text-xs font-bold text-slate-500 mb-2">
             <span>Income Allocation Map</span>
-            <span>{income > 0 ? '100% of Monthly Income' : ''}</span>
+            <span>{effectiveIncome > 0 ? '100% of Income' : ''}</span>
           </div>
 
           <div className="h-4 rounded-full bg-slate-100 overflow-hidden flex shadow-inner border border-slate-200">
@@ -219,11 +235,11 @@ export default function MonthlyCashFlowBreakdown({
                 title={`Fixed Bills: ${fmt(fixedBills)}`}
               />
             )}
-            {varPct > 0 && (
+            {essentialPct > 0 && (
               <div
                 className="h-full bg-purple-500 transition-all"
-                style={{ width: `${varPct}%` }}
-                title={`Variable Allowance: ${fmt(variableAllowance)}`}
+                style={{ width: `${essentialPct}%` }}
+                title={`Essentials: ${fmt(essentialBudget)}`}
               />
             )}
             {poolPct > 0 && (
@@ -233,11 +249,11 @@ export default function MonthlyCashFlowBreakdown({
                 title={`Savings Pools: ${fmt(poolSavings)}`}
               />
             )}
-            {isSurplus && leftoverPct > 0 && (
+            {isSurplus && funPct > 0 && (
               <div
                 className="h-full bg-[#22C55E] transition-all"
-                style={{ width: `${leftoverPct}%` }}
-                title={`Leftover Surplus: ${fmt(netLeftover)}`}
+                style={{ width: `${funPct}%` }}
+                title={`Fun Money Leftover: ${fmt(funMoneyLeftoverMonthly)}`}
               />
             )}
           </div>
@@ -249,7 +265,7 @@ export default function MonthlyCashFlowBreakdown({
             </span>
             <span className="flex items-center gap-1.5">
               <span className="w-2.5 h-2.5 rounded-full bg-purple-500" />
-              Variable: <strong className="text-slate-900">{fmt(variableAllowance)}</strong>
+              Essentials: <strong className="text-slate-900">{fmt(essentialBudget)}</strong>
             </span>
             <span className="flex items-center gap-1.5">
               <span className="w-2.5 h-2.5 rounded-full bg-[#FF2EB8]" />
@@ -257,7 +273,7 @@ export default function MonthlyCashFlowBreakdown({
             </span>
             <span className="flex items-center gap-1.5">
               <span className="w-2.5 h-2.5 rounded-full bg-[#22C55E]" />
-              Leftover: <strong className="text-slate-900">{fmt(netLeftover)}</strong>
+              Fun Money Leftover: <strong className="text-slate-900">{fmt(funMoneyLeftoverMonthly)}</strong>
             </span>
           </div>
         </div>
