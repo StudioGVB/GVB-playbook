@@ -13,6 +13,7 @@ import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import PriorMonthAllocator from '@/components/finance/PriorMonthAllocator';
 import FinanceBalanceSheet from '@/pages/FinanceBalanceSheet';
+import WeeklyPoolSavingsCard from '@/components/finance/WeeklyPoolSavingsCard';
 import { format } from 'date-fns';
 
 
@@ -387,6 +388,9 @@ export default function FinancePoolsPage() {
           ))}
         </div>
       </div>
+
+      {/* Weekly Pool Savings Engine Card */}
+      <WeeklyPoolSavingsCard finance={finance} spendablePool={spendablePool} funMoney={funMoney} />
 
       {/* Pools Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
