@@ -3,9 +3,11 @@ import { Navigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { toast } from 'sonner';
-import { Mail, KeyRound, Lock, ArrowLeft, Loader2, Eye, EyeOff } from 'lucide-react';
+import { Mail, KeyRound, Lock, ArrowLeft, Loader2, Eye, EyeOff, ShieldCheck } from 'lucide-react';
+import { touchRememberSession, clearRememberSession } from '@/contexts/AuthContext';
 
 export default function Auth() {
   const { user, loading, sendOtpCode, verifyOtpCode, signInWithPassword, signUpWithPassword } = useAuth();
@@ -13,6 +15,7 @@ export default function Auth() {
   const [authMode, setAuthMode] = useState<'password' | 'otp'>('password');
   const [isSignUp, setIsSignUp] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [remember30Days, setRemember30Days] = useState(true);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -57,6 +60,7 @@ export default function Auth() {
         if (error) {
           toast.error(error.message);
         } else {
+          if (remember30Days) touchRememberSession();
           toast.success('Account created! Signed in successfully.');
         }
       } else {
@@ -64,6 +68,7 @@ export default function Auth() {
         if (error) {
           toast.error(error.message);
         } else {
+          if (remember30Days) touchRememberSession();
           toast.success('Signed in successfully!');
         }
       }
@@ -187,6 +192,20 @@ export default function Auth() {
                   >
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
+                </div>
+
+                <div className="flex items-center space-x-2 pt-1 pb-0.5">
+                  <Checkbox
+                    id="remember30Days"
+                    checked={remember30Days}
+                    onCheckedChange={(checked) => setRemember30Days(!!checked)}
+                  />
+                  <label
+                    htmlFor="remember30Days"
+                    className="text-xs font-medium text-slate-600 leading-none cursor-pointer select-none"
+                  >
+                    Keep me signed in on this browser (30 days)
+                  </label>
                 </div>
               </div>
 

@@ -15,15 +15,48 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+const REMEMBER_KEY = 'gvb_playbook_session_30d';
+const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+
+export function touchRememberSession() {
+  const expiry = Date.now() + THIRTY_DAYS_MS;
+  localStorage.setItem(REMEMBER_KEY, String(expiry));
+}
+
+export function checkRememberSessionExpired(): boolean {
+  const expiryStr = localStorage.getItem(REMEMBER_KEY);
+  if (!expiryStr) return false;
+  const expiry = Number(expiryStr);
+  return !isNaN(expiry) && Date.now() > expiry;
+}
+
+export function clearRememberSession() {
+  localStorage.removeItem(REMEMBER_KEY);
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // If 30-day session window has expired after 30 days of inactivity, sign out
+    if (checkRememberSessionExpired()) {
+      clearRememberSession();
+      supabase.auth.signOut().then(() => {
+        setSession(null);
+        setUser(null);
+        setLoading(false);
+      });
+      return;
+    }
+
     // Set up auth state listener BEFORE checking session
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (_event, session) => {
+        if (session) {
+          touchRememberSession(); // Rolling 30 days on active usage
+        }
         setSession(session);
         setUser(session?.user ?? null);
         setLoading(false);
@@ -32,6 +65,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     // Check for existing session
     supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) {
+        touchRememberSession();
+      }
       setSession(session);
       setUser(session?.user ?? null);
       setLoading(false);
@@ -77,6 +113,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signOut = async () => {
+    clearRememberSession();
     await supabase.auth.signOut();
   };
 
