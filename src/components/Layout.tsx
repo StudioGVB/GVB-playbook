@@ -229,15 +229,44 @@ export default function Layout() {
       </aside>
 
       {/* Main content */}
-      <main className={cn("flex-1 overflow-auto", isMobile && "pt-14")}>
+      <main className={cn("flex-1 overflow-auto", isMobile && "pt-14 pb-20")}>
         <div className={cn(
           "container py-8",
           (isFinanceRoute || isTravelRoute) ? "max-w-7xl" : "max-w-4xl",
-          isMobile ? "px-3 py-5" : "px-4"
+          isMobile ? "px-3.5 py-4" : "px-4"
         )}>
           <Outlet />
         </div>
       </main>
+
+      {/* Mobile Bottom Navigation Bar */}
+      {isMobile && (
+        <nav className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200/80 px-1.5 py-1 flex items-center justify-around shadow-lg pb-[max(0.35rem,env(safe-area-inset-bottom))]">
+          {[
+            { to: '/', icon: Home, label: 'Home' },
+            { to: '/tasks', icon: CheckSquare, label: 'Tasks' },
+            { to: '/finance/monthly', icon: TrendingUp, label: 'Finance' },
+            { to: '/travel', icon: Plane, label: 'Travel' },
+            { to: '/projects', icon: FolderKanban, label: 'Projects' },
+          ].map(({ to, icon: Icon, label }) => {
+            const rootSection = to === '/' ? '/' : `/${to.split('/')[1]}`;
+            const isActive = to === '/' ? location.pathname === '/' : location.pathname.startsWith(rootSection);
+            return (
+              <NavLink
+                key={to}
+                to={to}
+                className={cn(
+                  "flex flex-col items-center justify-center py-1 px-2 rounded-xl transition-all min-w-[56px] min-h-[44px]",
+                  isActive ? "text-[#FF2EB8] font-bold" : "text-slate-500 hover:text-slate-800"
+                )}
+              >
+                <Icon className={cn("w-5 h-5 transition-transform", isActive && "scale-110")} />
+                <span className="text-[10px] mt-0.5 tracking-tight font-display">{label}</span>
+              </NavLink>
+            );
+          })}
+        </nav>
+      )}
     </div>
   );
 }

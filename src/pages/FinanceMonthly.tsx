@@ -123,7 +123,7 @@ export default function FinanceMonthly() {
   }, []);
 
   // Spending breakdown
-  const { essentialSpent, funSpent, fixedSpent, categoryBreakdown, dailyData } = useMemo(() => {
+  const { essentialSpent, funSpent, fixedSpent, incomeTotal, categoryBreakdown, dailyData } = useMemo(() => {
     let essentialSpent = 0;
     let funSpent = 0;
     let fixedSpent = 0;

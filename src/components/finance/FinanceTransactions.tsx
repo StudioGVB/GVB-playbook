@@ -376,43 +376,45 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
   return (
     <div className="space-y-4">
       {/* Filters + Actions */}
-      <div className="flex gap-2 flex-wrap items-center">
-        <div className="relative flex-1 min-w-[120px] sm:min-w-[150px]">
+      <div className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-2.5 w-full">
+        <div className="relative flex-1 min-w-[140px]">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Search transactions..."
             value={search}
             onChange={e => setSearch(e.target.value)}
-            className="pl-8"
+            className="pl-8 text-xs sm:text-sm"
           />
         </div>
-        <Select value={filterAccount} onValueChange={setFilterAccount}>
-          <SelectTrigger className="w-44">
-            <SelectValue placeholder="Account" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Accounts ({transactions.length})</SelectItem>
-            {accounts.map(a => {
-              const count = transactions.filter(t => t.account_id === a.id).length;
-              return (
-                <SelectItem key={a.id} value={a.id}>
-                  {a.account_name} ({count})
-                </SelectItem>
-              );
-            })}
-          </SelectContent>
-        </Select>
-        <Select value={filterCategory} onValueChange={setFilterCategory}>
-          <SelectTrigger className="w-36">
-            <SelectValue placeholder="Category" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Categories</SelectItem>
-            {categories.map(c => (
-              <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0 touch-scroll">
+          <Select value={filterAccount} onValueChange={setFilterAccount}>
+            <SelectTrigger className="w-36 sm:w-44 shrink-0 text-xs">
+              <SelectValue placeholder="Account" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Accounts ({transactions.length})</SelectItem>
+              {accounts.map(a => {
+                const count = transactions.filter(t => t.account_id === a.id).length;
+                return (
+                  <SelectItem key={a.id} value={a.id}>
+                    {a.account_name} ({count})
+                  </SelectItem>
+                );
+              })}
+            </SelectContent>
+          </Select>
+          <Select value={filterCategory} onValueChange={setFilterCategory}>
+            <SelectTrigger className="w-32 sm:w-36 shrink-0 text-xs">
+              <SelectValue placeholder="Category" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Categories</SelectItem>
+              {categories.map(c => (
+                <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
         {uncategorizedCount > 0 && (
           <Button
             size="sm"
@@ -575,7 +577,7 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
           </DialogContent>
         </Dialog>
       </div>
-      <div className="flex gap-1.5 flex-wrap">
+      <div className="flex gap-1.5 overflow-x-auto pb-1.5 pt-0.5 touch-scroll -mx-1 px-1">
         {([
           { key: 'all' as const, label: 'All' },
           { key: 'exclude_transfers' as const, label: 'Exclude Transfers' },

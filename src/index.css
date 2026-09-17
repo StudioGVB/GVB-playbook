@@ -91,6 +91,12 @@
     font-feature-settings: "rlig" 1, "calt" 1;
     overscroll-behavior-y: contain;
     -webkit-tap-highlight-color: transparent;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  /* Safe touch scrolling */
+  .touch-scroll {
+    -webkit-overflow-scrolling: touch;
   }
 
   h1, h2, h3, h4, h5, h6 {
