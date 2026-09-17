@@ -300,7 +300,7 @@ export function computePolicySnapshot(
       monthlyIncome: 0,
     };
   } else {
-    split = computeMoneySplit(assumptions, transactions, categories, goals, convertToBase);
+    split = computeMoneySplit(assumptions, transactions, categories, goals, convertToBase, fixedExpensesMonthlyAll ?? fixedMonthly);
     baseWeeklyFun = split.weeklyFunAmount;
     weeklyGross = split.monthlyIncome / 4.33;
   }
@@ -581,8 +581,9 @@ export function computeMoneySplit(
   categories: FinanceCategory[],
   goals: FinanceGoal[],
   convertToBase: (amount: number, currency: string) => number,
+  fixedExpensesMonthly?: number,
 ): MoneySplit {
-  // 1. Calculate effective monthly income
+  // 1. Calculate effective net monthly income
   const salaryTakeHome = calcTakeHome({
     grossAnnual: assumptions.gross_annual_salary || 0,
     pensionPercent: assumptions.pension_percent || 0,
@@ -590,67 +591,79 @@ export function computeMoneySplit(
   }).netMonthly;
   const monthlyIncome = assumptions.expected_monthly_income || salaryTakeHome || 0;
 
-  // 2. Calculate monthly fixed bills
-  const threeMonthsAgo = new Date();
-  threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+  // 2. Committed fixed bills (use passed fixed expenses if provided, else historic average)
+  let monthlyMandatory = fixedExpensesMonthly ?? 0;
+  if (!fixedExpensesMonthly) {
+    const threeMonthsAgo = new Date();
+    threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+    const mandatoryCategories = categories.filter(c => c.type === 'fixed');
+    const mandatoryCatIds = new Set(mandatoryCategories.map(c => c.id));
+    let mandatorySpend = 0;
+    const relevantTxs = transactions.filter(tx => new Date(tx.posted_at) >= threeMonthsAgo);
+    for (const tx of relevantTxs) {
+      if (tx.is_transfer || tx.is_reimbursable) continue;
+      if (tx.amount < 0 && (tx.is_fixed || (tx.category_id && mandatoryCatIds.has(tx.category_id)))) {
+        mandatorySpend += Math.abs(baseAmt(tx));
+      }
+    }
+    const daysCovered = Math.max(1, (Date.now() - threeMonthsAgo.getTime()) / (1000 * 60 * 60 * 24));
+    monthlyMandatory = mandatorySpend / (daysCovered / 30.44);
+  }
 
-  const mandatoryCategories = categories.filter(c => c.type === 'fixed');
-  const mandatoryCatIds = new Set(mandatoryCategories.map(c => c.id));
+  const effectiveIncome = monthlyIncome;
+  const mandatoryPercent = effectiveIncome > 0 ? (monthlyMandatory / effectiveIncome) * 100 : 0;
 
-  let mandatorySpend = 0;
-  let incomeTotal = 0;
+  // 3. Essential variable spending
+  const essentialResult = computeEssentialVariableMonthly(transactions, categories);
+  const essentialVariable = Math.max(
+    assumptions.estimated_essential_variable ?? 0,
+    essentialResult.monthly,
+  );
 
-  const relevantTxs = transactions.filter(tx => new Date(tx.posted_at) >= threeMonthsAgo);
-  for (const tx of relevantTxs) {
-    if (tx.is_transfer || tx.is_reimbursable) continue;
-    if (tx.amount > 0) {
-      incomeTotal += Math.abs(baseAmt(tx));
-    } else if (tx.category_id && mandatoryCatIds.has(tx.category_id)) {
-      mandatorySpend += Math.abs(baseAmt(tx));
-    } else if (tx.is_fixed) {
-      mandatorySpend += Math.abs(baseAmt(tx));
+  // 4. Goal pool savings requirements
+  const now = new Date();
+  let poolSavingsMonthly = 0;
+  for (const g of (goals || [])) {
+    if ((g as any)?.is_stash) continue;
+    const targetBase = convertToBase ? convertToBase(g.target_amount || 0, g.currency) : (g.target_amount || 0);
+    const assignedBase = convertToBase ? convertToBase(g.assigned_amount || 0, g.currency) : (g.assigned_amount || 0);
+    const remainingBase = Math.max(0, targetBase - assignedBase);
+    if (remainingBase <= 0.01) continue;
+    if (g.deadline) {
+      const daysLeft = Math.max(1, Math.ceil((new Date(g.deadline).getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
+      const weeksLeft = Math.max(1, daysLeft / 7);
+      const weeklyRequired = remainingBase / weeksLeft;
+      poolSavingsMonthly += weeklyRequired * 4.33;
+    } else if (g.percent_allocation && g.percent_allocation > 0) {
+      poolSavingsMonthly += (g.percent_allocation / 100) * effectiveIncome;
     }
   }
 
-  const daysCovered = Math.max(1, (Date.now() - threeMonthsAgo.getTime()) / (1000 * 60 * 60 * 24));
-  const monthsCovered = Math.max(1, daysCovered / 30.44);
-  const monthlyMandatory = mandatorySpend / monthsCovered;
+  const goalSavingsAmount = poolSavingsMonthly;
+  const goalSavingsPercent = effectiveIncome > 0 ? (goalSavingsAmount / effectiveIncome) * 100 : 0;
 
-  const effectiveIncome = monthlyIncome > 0 ? monthlyIncome : (incomeTotal / monthsCovered);
-  const mandatoryPercent = effectiveIncome > 0 ? (monthlyMandatory / effectiveIncome) * 100 : 0;
-
-  // 3. Calculate essential variable spending (groceries, transport)
-  const essentialResult = computeEssentialVariableMonthly(transactions, categories);
-  const computedEssentialVariable = essentialResult.monthly;
-  const essentialVariable = Math.max(
-    assumptions.estimated_essential_variable ?? 0,
-    computedEssentialVariable,
-  );
-
-  // 4. Calculate savings goals monthly allocation
-  const baseSavingsPercent = assumptions.baseline_savings_percent ?? 10;
-  const baseSavingsAmount = (baseSavingsPercent / 100) * effectiveIncome;
-
-  const goalSavingsPercent = goals.reduce((s, g) => s + ((g as any).percent_allocation || 0), 0);
-  const goalSavingsAmount = (goalSavingsPercent / 100) * effectiveIncome;
+  // 5. Fun Money = Genuine Leftover (Income - Fixed Bills - Essential Living - Pool Savings)
+  const calculatedFunMonthly = Math.max(0, effectiveIncome - monthlyMandatory - essentialVariable - goalSavingsAmount);
   
-  const fixedSavingsTarget = assumptions.target_savings || 0;
-  const totalSavingsTarget = Math.max(baseSavingsAmount + goalSavingsAmount, fixedSavingsTarget);
+  // If user has explicitly overridden weekly_fun_budget with a custom non-default amount (> 0 and != 100), respect it.
+  // Otherwise use the calculated cash flow leftover divided by 4.33 weeks per month.
+  const weeklyFunAmount = (assumptions.weekly_fun_budget && assumptions.weekly_fun_budget > 0 && assumptions.weekly_fun_budget !== 100)
+    ? assumptions.weekly_fun_budget
+    : calculatedFunMonthly / 4.33;
 
-  // 5. Fun Money = Leftover (Income - Bills - Savings - Essentials)
-  const funAmount = Math.max(0, effectiveIncome - monthlyMandatory - totalSavingsTarget - essentialVariable);
+  const funAmount = weeklyFunAmount * 4.33;
   const funPercent = effectiveIncome > 0 ? (funAmount / effectiveIncome) * 100 : 0;
 
   return {
     mandatoryPercent,
     mandatoryAmount: monthlyMandatory,
-    baseSavingsPercent,
-    baseSavingsAmount,
+    baseSavingsPercent: 0,
+    baseSavingsAmount: 0,
     goalSavingsPercent,
     goalSavingsAmount,
     funPercent,
     funAmount,
-    weeklyFunAmount: funAmount / 4.33,
+    weeklyFunAmount,
     monthlyIncome: effectiveIncome,
   };
 }
