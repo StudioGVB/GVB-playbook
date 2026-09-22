@@ -27,8 +27,8 @@ export function recalibrateBankTimestamp(
     let str = String(postedAt).trim();
 
     // If naive date format without explicit UTC offset e.g. "2026-09-22 16:30:00" or "2026-09-22T16:30:00"
-    if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}/.test(str)) {
-      const match = str.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})/);
+    if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}$/.test(str)) {
+      const match = str.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})$/);
       if (match) {
         const [, y, m, d, hh, mm, ss] = match.map(Number);
         dateObj = createDateInTimezone(y, m, d, hh, mm, ss, bankTimezone);
