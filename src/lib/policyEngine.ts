@@ -3,7 +3,7 @@ import { FinanceAssumptions } from '@/hooks/useFinanceAssumptions';
 import type { FinanceTrip } from '@/hooks/useFinanceTrips';
 import { startOfWeek, subWeeks, format } from 'date-fns';
 import type { WeekType } from '@/hooks/useWeekTypes';
-import { isExcludedSpendDate, weekOverlapsExclusion, baseAmt } from './financeUtils';
+import { isExcludedSpendDate, weekOverlapsExclusion, baseAmt, parseUkDate } from './financeUtils';
 import { calcTakeHome } from './ukTakeHome';
 
 
@@ -63,21 +63,40 @@ export function computeTotalTripPoolReserved(
   return total;
 }
 
-/** Sum of spend explicitly tagged to a specific trip (via trip_id).
- *  Untagged transactions that happen to fall within the trip's date window are NOT counted —
- *  users tag trip spend explicitly (bank tx assignment, Log trip expense, Bulk reconcile). */
 export function computeTripSpent(
   transactions: FinanceTransaction[],
   tripId: string,
-  _tripStart?: string | Date | null,
-  _tripEnd?: string | Date | null,
+  tripStart?: string | Date | null,
+  tripEnd?: string | Date | null,
 ): number {
   let total = 0;
+  const s = tripStart ? parseUkDate(tripStart) : null;
+  const e = tripEnd ? parseUkDate(tripEnd) : null;
+  if (s) s.setHours(0, 0, 0, 0);
+  if (e) e.setHours(23, 59, 59, 999);
+
   for (const tx of transactions) {
-    if (tx.is_transfer || tx.is_reimbursable) continue;
+    if (tx.is_transfer || tx.is_reimbursable || tx.is_fixed) continue;
     if (tx.amount >= 0) continue;
-    if ((tx as any).trip_id !== tripId) continue;
-    total += Math.abs(baseAmt(tx));
+    
+    // Explicitly excluded from travel spend by user
+    if ((tx as any).is_travel_spend === false) continue;
+
+    const txTripId = (tx as any).trip_id;
+    const isExplicitForThisTrip = txTripId === tripId || (tx as any).is_travel_spend === true;
+    const isExplicitForAnotherTrip = txTripId && txTripId !== tripId;
+
+    if (isExplicitForAnotherTrip) continue;
+
+    let isDateMatch = false;
+    if (!txTripId && s && e) {
+      const d = parseUkDate(tx.posted_at);
+      isDateMatch = d >= s && d <= e;
+    }
+
+    if (isExplicitForThisTrip || isDateMatch) {
+      total += Math.abs(baseAmt(tx));
+    }
   }
   return total;
 }
@@ -170,6 +189,7 @@ export function computeEssentialVariableMonthly(
   transactions: FinanceTransaction[],
   categories: FinanceCategory[],
   weekTypeMap?: Map<string, WeekType>,
+  trips: FinanceTrip[] = [],
 ): { monthly: number; normalWeeksUsed: number; excludedWeeksCount: number } {
   const now = new Date();
   const essentialCatIds = new Set(
@@ -180,7 +200,7 @@ export function computeEssentialVariableMonthly(
 
   if (essentialCatIds.size === 0) return { monthly: 0, normalWeeksUsed: 0, excludedWeeksCount: 0 };
 
-  // Collect last 8 weeks of data, pick last 4 normal ones
+  // Collect last 12 weeks of data, pick last 4 normal ones
   const weeklyTotals: { weekKey: string; total: number; isNormal: boolean }[] = [];
   let excludedCount = 0;
 
@@ -190,22 +210,29 @@ export function computeEssentialVariableMonthly(
     const weekKey = format(ws, 'yyyy-MM-dd');
     const wType = weekTypeMap?.get(weekKey) || 'normal';
     const overlapsExclusion = weekOverlapsExclusion(ws, we);
-    const isNormal = wType === 'normal' && !overlapsExclusion;
+    const overlapsTrip = trips.some(t => {
+      if (!t.start_date || !t.end_date) return false;
+      const ts = parseUkDate(t.start_date);
+      const te = parseUkDate(t.end_date);
+      return ws < te && we > ts;
+    });
+
+    const isNormal = wType === 'normal' && !overlapsExclusion && !overlapsTrip;
     if (!isNormal) excludedCount++;
 
     let weekTotal = 0;
     for (const tx of transactions) {
-      if (tx.amount >= 0 || tx.is_transfer || tx.is_reimbursable) continue;
-      if ((tx as any).is_travel_spend) continue;
+      if (tx.amount >= 0 || tx.is_transfer || tx.is_reimbursable || tx.is_fixed) continue;
+      if ((tx as any).is_travel_spend || (tx as any).trip_id) continue;
       if (!tx.category_id || !essentialCatIds.has(tx.category_id)) continue;
-      const d = new Date(tx.posted_at);
+      const d = parseUkDate(tx.posted_at);
       if (isExcludedSpendDate(d)) continue;
+      if (isInAnyTrip(d, trips)) continue; // Auto-exclude transactions on trip dates
       if (d >= ws && d < we) {
         weekTotal += Math.abs(baseAmt(tx));
       }
     }
     weeklyTotals.push({ weekKey, total: weekTotal, isNormal });
-
   }
 
   const normalWeeks = weeklyTotals.filter(w => w.isNormal);
@@ -310,7 +337,7 @@ export function computePolicySnapshot(
   let weeklyFunBudget = baseWeeklyFun + boostAmount;
 
   const weekStart = startOfWeek(now, { weekStartsOn: 1 });
-  const spentThisWeek = computeWeeklyFunSpend(transactions, categories, weekStart);
+  const spentThisWeek = computeWeeklyFunSpend(transactions, categories, weekStart, undefined, trips);
 
   // ===== Travel mode (multi-trip union) =====
   const activeTrip = getActiveTripOn(now, trips);
@@ -347,13 +374,13 @@ export function computePolicySnapshot(
   let rollover = 0;
   if (!isDrawdownMode) {
     const lastWeekStart = subWeeks(weekStart, 1);
-    const lastWeekSpent = computeWeeklyFunSpend(transactions, categories, lastWeekStart, weekStart);
+    const lastWeekSpent = computeWeeklyFunSpend(transactions, categories, lastWeekStart, weekStart, trips);
     rollover = Math.max(0, baseWeeklyFun + boostAmount - lastWeekSpent);
     weeklyFunBudget += rollover;
   }
 
   // Bidirectional overspend: each category's excess eats into the other
-  const essentialSpentThisWeek = computeWeeklyEssentialSpend(transactions, categories, weekStart);
+  const essentialSpentThisWeek = computeWeeklyEssentialSpend(transactions, categories, weekStart, undefined, trips);
   const essentialOverspend = Math.max(0, essentialSpentThisWeek - weeklyEssentialBudget);
   const funOverspend = Math.max(0, spentThisWeek - weeklyFunBudget);
 
@@ -675,16 +702,18 @@ function computeWeeklyFunSpend(
   categories: FinanceCategory[],
   weekStart: Date,
   weekEnd?: Date,
+  trips: FinanceTrip[] = [],
 ): number {
   let total = 0;
   for (const tx of txs) {
     if (tx.is_transfer || tx.is_reimbursable || tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') continue;
     if (tx.goal_id) continue;
-    if ((tx as any).is_travel_spend) continue;
+    if ((tx as any).is_travel_spend || (tx as any).trip_id) continue;
     const cat = categories.find(c => c.id === tx.category_id);
     if (cat?.exclude_from_reports) continue;
     if (cat?.type === 'transfer') continue;
-    const d = new Date(tx.posted_at);
+    const d = parseUkDate(tx.posted_at);
+    if (isInAnyTrip(d, trips)) continue; // Auto-exclude spend on trip dates
     if (d < weekStart) continue;
     if (weekEnd && d >= weekEnd) continue;
 
@@ -707,6 +736,7 @@ function computeWeeklyEssentialSpend(
   categories: FinanceCategory[],
   weekStart: Date,
   weekEnd?: Date,
+  trips: FinanceTrip[] = [],
 ): number {
   const essentialCatIds = new Set(
     categories
@@ -718,11 +748,12 @@ function computeWeeklyEssentialSpend(
   return txs
     .filter(tx => {
       if (tx.amount >= 0) return false;
-      if (tx.is_transfer || tx.is_reimbursable) return false;
-      if ((tx as any).goal_id) return false; // goal-funded spend draws from the goal pool, not weekly essentials
-      if ((tx as any).is_travel_spend) return false;
+      if (tx.is_transfer || tx.is_reimbursable || tx.is_fixed) return false;
+      if ((tx as any).goal_id) return false; // goal-funded spend draws from the goal pool
+      if ((tx as any).is_travel_spend || (tx as any).trip_id) return false;
       if (!tx.category_id || !essentialCatIds.has(tx.category_id)) return false;
-      const d = new Date(tx.posted_at);
+      const d = parseUkDate(tx.posted_at);
+      if (isInAnyTrip(d, trips)) return false; // Auto-exclude spend on trip dates
       if (d < weekStart) return false;
       if (weekEnd && d >= weekEnd) return false;
       return true;
@@ -736,6 +767,7 @@ function computeRollingWeeklySpend(
   categories: FinanceCategory[],
   currentWeekStart: Date,
   weeksBack: number = 4,
+  trips: FinanceTrip[] = [],
 ): number {
   const weeklyTotals: number[] = [];
 
@@ -743,20 +775,28 @@ function computeRollingWeeklySpend(
     const ws = startOfWeek(subWeeks(currentWeekStart, w), { weekStartsOn: 1 });
     const we = startOfWeek(subWeeks(currentWeekStart, w - 1), { weekStartsOn: 1 });
 
-    // Skip weeks that overlap a hard-coded exclusion window (e.g. heavy travel)
+    // Skip weeks that overlap a hard-coded exclusion window or a trip window
     if (weekOverlapsExclusion(ws, we)) continue;
+    const overlapsTrip = trips.some(t => {
+      if (!t.start_date || !t.end_date) return false;
+      const ts = parseUkDate(t.start_date);
+      const te = parseUkDate(t.end_date);
+      return ws < te && we > ts;
+    });
+    if (overlapsTrip) continue;
 
     let weekTotal = 0;
     for (const tx of txs) {
       if (tx.amount >= 0) continue;
       if (tx.is_transfer || tx.is_reimbursable || tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') continue;
       if ((tx as any).goal_id) continue;
-      if ((tx as any).is_travel_spend) continue;
+      if ((tx as any).is_travel_spend || (tx as any).trip_id) continue;
       const cat = categories.find(c => c.id === tx.category_id);
       if (cat?.exclude_from_reports) continue;
       if (cat?.type === 'transfer') continue;
-      const d = new Date(tx.posted_at);
+      const d = parseUkDate(tx.posted_at);
       if (isExcludedSpendDate(d)) continue;
+      if (isInAnyTrip(d, trips)) continue;
       if (d >= ws && d < we) {
         weekTotal += Math.abs(baseAmt(tx));
       }
