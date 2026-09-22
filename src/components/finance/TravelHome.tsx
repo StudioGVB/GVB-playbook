@@ -3,7 +3,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
-import { Plane, Calendar as CalendarIcon, Wallet, Sun, ArrowRight, BarChart3, LayoutDashboard, Sparkles, Plus, Snowflake, Palmtree } from 'lucide-react';
+import { Plane, Calendar as CalendarIcon, Wallet, Sun, ArrowRight, BarChart3, Plus, Palmtree, Snowflake, Sparkles } from 'lucide-react';
 import { format, differenceInCalendarDays, startOfDay, addDays, isSameDay } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
 import type { FinanceTrip } from '@/hooks/useFinanceTrips';
@@ -21,7 +21,7 @@ interface TravelHomeProps {
   onExitToBudget: () => void;
 }
 
-// Decorative Watermark SVG components
+// Decorative Palm Tree Watermark SVG
 function PalmTreeWatermark({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 100 100" fill="currentColor" className={className}>
@@ -35,9 +35,10 @@ function PalmTreeWatermark({ className }: { className?: string }) {
   );
 }
 
+// Decorative Snowflake Watermark SVG
 function SnowflakeWatermark({ className }: { className?: string }) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" className={className}>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className={className}>
       <line x1="12" y1="2" x2="12" y2="22" />
       <line x1="2" y1="12" x2="22" y2="12" />
       <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
@@ -128,47 +129,61 @@ export function TravelHome({ trip, goal, transactions, categories = [], onExitTo
   }, [trip, goal, transactions]);
 
   return (
-    <div className="relative overflow-hidden space-y-4 max-w-5xl mx-auto px-3 sm:px-0 pb-6 rounded-3xl">
+    <div className="relative overflow-hidden space-y-5 max-w-5xl mx-auto px-3 sm:px-4 py-4 rounded-3xl bg-gradient-to-br from-sky-500/[0.07] via-sky-500/[0.02] to-amber-500/[0.03] border border-sky-500/20 shadow-sm">
       {/* Light Opacity Background Decorations Layer */}
       <div className="absolute inset-0 pointer-events-none z-0 overflow-hidden select-none">
         {isWinterTheme ? (
           <>
-            {/* Winter Snow Decorations */}
-            <SnowflakeWatermark className="absolute -top-6 -left-6 w-48 h-48 text-sky-400 opacity-[0.06] transform -rotate-12" />
-            <SnowflakeWatermark className="absolute top-1/3 -right-10 w-64 h-64 text-sky-500 opacity-[0.05] transform rotate-45" />
-            <SnowflakeWatermark className="absolute bottom-10 left-10 w-56 h-56 text-sky-400 opacity-[0.04] transform rotate-12" />
+            {/* Winter Snow Watermarks */}
+            <SnowflakeWatermark className="absolute -top-8 -left-8 w-56 h-56 text-sky-500 opacity-20 transform -rotate-12" />
+            <SnowflakeWatermark className="absolute top-1/3 -right-12 w-72 h-72 text-sky-600 opacity-15 transform rotate-45" />
+            <SnowflakeWatermark className="absolute -bottom-10 left-10 w-64 h-64 text-sky-400 opacity-20 transform rotate-12" />
           </>
         ) : (
           <>
-            {/* Tropical Palm Tree & Wave Decorations */}
-            <PalmTreeWatermark className="absolute -top-10 -right-8 w-64 h-64 text-sky-500 opacity-[0.07] transform rotate-12" />
-            <PalmTreeWatermark className="absolute top-1/2 -left-16 w-80 h-80 text-sky-600 opacity-[0.05] transform -rotate-45" />
-            <PalmTreeWatermark className="absolute -bottom-12 right-12 w-72 h-72 text-sky-500 opacity-[0.06] transform rotate-6" />
+            {/* Tropical Palm Tree Watermarks */}
+            <PalmTreeWatermark className="absolute -top-12 -right-10 w-72 h-72 text-sky-500 opacity-20 transform rotate-12" />
+            <PalmTreeWatermark className="absolute top-1/3 -left-20 w-80 h-80 text-sky-600 opacity-15 transform -rotate-45" />
+            <PalmTreeWatermark className="absolute -bottom-14 right-10 w-80 h-80 text-amber-500 opacity-20 transform rotate-6" />
           </>
         )}
       </div>
 
-      {/* Content Container */}
-      <div className="relative z-10 space-y-4">
-        {/* Top Mode Switcher Pill Bar */}
-        <div className="flex items-center justify-between gap-3 p-1.5 rounded-xl bg-muted/70 backdrop-blur-md border border-border/80 shadow-xs">
-          <div className="flex items-center gap-1">
-            <Button size="sm" variant="default" className="gap-1.5 text-xs font-bold bg-sky-500 hover:bg-sky-600 text-white">
-              {isWinterTheme ? <Snowflake className="w-3.5 h-3.5" /> : <Palmtree className="w-3.5 h-3.5" />} 🌴 Holiday Mode
-            </Button>
-            <Button size="sm" variant="ghost" onClick={onExitToBudget} className="gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground">
-              <LayoutDashboard className="w-3.5 h-3.5" /> 📊 Standard Dashboard
-            </Button>
+      {/* Main Content */}
+      <div className="relative z-10 space-y-5">
+        {/* Top Notification Banner Strip */}
+        <div className="flex items-center justify-between gap-3 p-3.5 sm:px-5 rounded-2xl bg-gradient-to-r from-sky-500/15 via-sky-500/10 to-background/60 backdrop-blur-md border border-sky-500/30 text-foreground shadow-xs">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-8 h-8 rounded-xl bg-sky-500/20 flex items-center justify-center flex-shrink-0 text-sky-600 dark:text-sky-300 font-bold text-base">
+              {isWinterTheme ? <Snowflake className="w-4 h-4 text-sky-500" /> : <Palmtree className="w-4 h-4 text-sky-500" />}
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs sm:text-sm font-bold tracking-tight flex items-center gap-2 flex-wrap">
+                <span>Holiday Mode Active</span>
+                <Badge variant="outline" className="text-[10px] border-sky-500/30 text-sky-600 dark:text-sky-400 bg-sky-500/10 gap-1">
+                  <Sparkles className="w-3 h-3 text-sky-500" /> Budget Isolated
+                </Badge>
+              </p>
+              <p className="text-[11px] text-muted-foreground truncate hidden sm:block">
+                Spending on <span className="font-semibold text-foreground">{trip.name}</span> is excluded from your regular 4-week living expenses.
+              </p>
+            </div>
           </div>
-          <Badge variant="outline" className="hidden sm:flex text-[10px] border-sky-500/30 text-sky-600 dark:text-sky-400 gap-1 bg-background/50 backdrop-blur-xs">
-            <Sparkles className="w-3 h-3 text-sky-500" /> Holiday budget isolated
-          </Badge>
+
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={onExitToBudget}
+            className="flex-shrink-0 gap-1.5 text-xs font-bold border-sky-500/40 hover:bg-sky-500/15 text-sky-700 dark:text-sky-300 bg-background/80"
+          >
+            Show Standard Dashboard <ArrowRight className="w-3.5 h-3.5" />
+          </Button>
         </div>
 
         {/* Trip Header */}
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-2xl bg-sky-500/15 flex items-center justify-center border border-sky-500/20 shadow-sm backdrop-blur-xs">
+            <div className="w-12 h-12 rounded-2xl bg-sky-500/15 flex items-center justify-center border border-sky-500/30 shadow-xs backdrop-blur-xs">
               <Plane className="w-6 h-6 text-sky-500" />
             </div>
             <div>
@@ -200,7 +215,7 @@ export function TravelHome({ trip, goal, transactions, categories = [], onExitTo
         </div>
 
         {/* HERO: Today's Spend */}
-        <Card className="border-2 border-sky-500/30 bg-gradient-to-br from-sky-500/[0.12] via-sky-500/[0.04] to-background/80 backdrop-blur-sm shadow-sm">
+        <Card className="border-2 border-sky-500/30 bg-card/90 backdrop-blur-md shadow-sm">
           <CardContent className="p-6 sm:p-8">
             <div className="flex items-center justify-between mb-2">
               <p className="text-xs font-bold uppercase tracking-widest text-sky-600 dark:text-sky-400 flex items-center gap-1.5">
@@ -224,7 +239,7 @@ export function TravelHome({ trip, goal, transactions, categories = [], onExitTo
         </Card>
 
         {/* Trip Pool Overview */}
-        <Card className="bg-card/95 backdrop-blur-xs">
+        <Card className="bg-card/90 backdrop-blur-md border-border/80">
           <CardContent className="p-5 sm:p-6">
             <div className="flex items-center justify-between mb-3">
               <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-1.5">
@@ -268,11 +283,11 @@ export function TravelHome({ trip, goal, transactions, categories = [], onExitTo
           endDate={trip.end_date}
           transactions={transactions}
           categories={categories}
-          className="bg-card/95 backdrop-blur-xs"
+          className="bg-card/90 backdrop-blur-md border-border/80"
         />
 
         {/* Daily Breakdown Timeline */}
-        <Card className="bg-card/95 backdrop-blur-xs">
+        <Card className="bg-card/90 backdrop-blur-md border-border/80">
           <CardContent className="p-5 sm:p-6">
             <div className="flex items-center justify-between mb-4">
               <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-1.5">
@@ -341,5 +356,6 @@ export function TravelHome({ trip, goal, transactions, categories = [], onExitTo
     </div>
   );
 }
+
 
 
