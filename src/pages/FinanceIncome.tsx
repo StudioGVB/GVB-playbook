@@ -131,12 +131,17 @@ export default function FinanceIncome() {
 
   const incomeTxs = useMemo(() => transactions.filter(tx => {
     if (tx.amount <= 0) return false;
-    if (tx.is_transfer) return false;
+    const cat = categories.find(c => c.id === tx.category_id);
+    const isIncomeCat = cat?.type === 'income';
+
+    if (!isIncomeCat) {
+      if (tx.is_transfer) return false;
+      if (tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') return false;
+    }
     if (tx.is_reimbursable) return false; // Exclude employer work payback deposits from earned personal income
-    if (tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') return false;
     const d = new Date(tx.posted_at);
     return d >= monthStart && d <= monthEnd;
-  }), [transactions, monthStart, monthEnd]);
+  }), [transactions, categories, monthStart, monthEnd]);
 
   const grandTotal = useMemo(() => incomeTxs.reduce((s, tx) => s + baseAmt(tx), 0), [incomeTxs]);
 

@@ -446,7 +446,15 @@ export function useFinanceDataState() {
   };
 
   const updateTransaction = async (id: string, updates: Partial<FinanceTransaction>) => {
-    const { error } = await supabase.from('finance_transactions').update(updates).eq('id', id);
+    const finalUpdates: any = { ...updates };
+    if (updates.category_id) {
+      const cat = categories.find(c => c.id === updates.category_id);
+      if (cat?.type === 'income') {
+        finalUpdates.is_transfer = false;
+        finalUpdates.transfer_status = null;
+      }
+    }
+    const { error } = await supabase.from('finance_transactions').update(finalUpdates).eq('id', id);
     if (error) { toast.error('Update failed'); return; }
     fetchAll();
   };

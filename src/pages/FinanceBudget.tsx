@@ -169,8 +169,8 @@ export default function FinanceBudget() {
   const fmt = (n: number) => formatCurrency(n, baseCurrency);
   const fmtGbp = (n: number) => formatCurrency(n * audToGbp, 'GBP');
 
-  // Savings Stash: find existing goal named "Savings Stash"
-  const stashGoal = useMemo(() => finance.goals.find(g => (g as any).is_stash === true), [finance.goals]);
+  // Savings Stash: find existing goal named "Savings Stash" or marked with is_stash
+  const stashGoal = useMemo(() => finance.goals.find(g => (g as any).is_stash === true || g.name.toLowerCase().includes('stash')), [finance.goals]);
   const stashBalance = stashGoal?.assigned_amount || 0;
 
   // Pull from stash INTO this week's fun budget (uses existing boost system)
@@ -191,17 +191,17 @@ export default function FinanceBudget() {
 
   const currentWeekType = getWeekType(selectedDate);
 
-  // Auto-settle previous week's underspend into the stash
+  // Auto-settle previous week's performance (underspend -> Savings Stash, overspend -> deducted from Savings Stash)
   const settleRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!isCurrentWeek) return;
-    if (!snapshot || finance.loading || assumptionsLoading) return;
+    if (!snapshot || finance.loading || assumptionsLoading || !assumptions) return;
     const prevWeekStart = startOfWeek(subDays(weekStart, 1), { weekStartsOn: 1 });
     const prevWeekKey = format(prevWeekStart, 'yyyy-MM-dd');
     
     if (settleRef.current === prevWeekKey) return;
-    const localKey = `stash_settled_${prevWeekKey}`;
+    const localKey = `stash_settled_v2_${prevWeekKey}`;
     if (localStorage.getItem(localKey)) {
       settleRef.current = prevWeekKey;
       return;
@@ -225,100 +225,81 @@ export default function FinanceBudget() {
       }
     }
 
-    // Use the configured allowance (not the post-debt baseWeeklyFun) so debt weeks
-    // don't create phantom underspend. Then compute NET across both pools so that
-    // overspending in one pool cancels out underspending in the other.
     const prevWeekAllowance = assumptions?.weekly_fun_budget || snapshot.baseWeeklyFun;
     const totalBudget = snapshot.weeklyEssentialBudget + prevWeekAllowance;
     const totalSpent = prevEssentialSpent + prevFunSpent;
-    const totalUnderspend = Math.max(0, totalBudget - totalSpent);
-
-    if (totalUnderspend <= 0) {
-      settleRef.current = prevWeekKey;
-      localStorage.setItem(localKey, 'true');
-      return;
-    }
+    const netDifference = totalBudget - totalSpent;
 
     const doSettle = async () => {
-      if (stashGoal) {
-        await finance.updateGoal(stashGoal.id, { assigned_amount: (stashGoal.assigned_amount || 0) + totalUnderspend } as any);
-        toast.success(`Settled ${fmt(totalUnderspend)} from last week's underspend into Savings Stash`);
+      if (netDifference > 0) {
+        // UNDERSPENT: Add directly to Savings Stash
+        const underspend = netDifference;
+        if (stashGoal) {
+          await finance.updateGoal(stashGoal.id, {
+            assigned_amount: (stashGoal.assigned_amount || 0) + underspend,
+            is_stash: true,
+          } as any);
+          toast.success(`Settled ${fmt(underspend)} from last week's underspend into Savings Stash 💰`);
+        } else {
+          await finance.addGoal({
+            name: 'Savings Stash',
+            target_amount: 9999,
+            currency: baseCurrency,
+            priority: 3,
+            safety_mode: 'balanced',
+            assigned_amount: underspend,
+            color: '#10b981',
+            is_stash: true,
+          } as any);
+          toast.success(`Created Savings Stash with ${fmt(underspend)} from last week's underspend 💰`);
+        }
+        if (assumptions.carry_forward_debt > 0) {
+          await updateAssumptions({ carry_forward_debt: 0, last_debt_week: null }, true);
+        }
+      } else if (netDifference < 0) {
+        // OVERSPENT: Deduct straight out of Savings Stash
+        const overspend = Math.abs(netDifference);
+        const currentStashBal = stashGoal?.assigned_amount || 0;
+        const deductFromStash = Math.min(currentStashBal, overspend);
+        const remainingUncovered = overspend - deductFromStash;
+
+        if (stashGoal && deductFromStash > 0) {
+          await finance.updateGoal(stashGoal.id, {
+            assigned_amount: Math.max(0, currentStashBal - deductFromStash),
+            is_stash: true,
+          } as any);
+        }
+
+        if (remainingUncovered > 0) {
+          const CARRY_FORWARD_CAP = 100;
+          const cappedDebt = Math.min(remainingUncovered, CARRY_FORWARD_CAP);
+          await updateAssumptions({
+            carry_forward_debt: cappedDebt,
+            last_debt_week: format(weekStart, 'yyyy-MM-dd'),
+          }, true);
+
+          if (deductFromStash > 0) {
+            toast.warning(`Deducted ${fmt(deductFromStash)} from Savings Stash for last week's overspend (${fmt(cappedDebt)} carried forward) 📉`);
+          } else {
+            toast.warning(`Last week's overspend of ${fmt(cappedDebt)} carried forward to this week (Stash empty)`);
+          }
+        } else {
+          if (assumptions.carry_forward_debt > 0) {
+            await updateAssumptions({ carry_forward_debt: 0, last_debt_week: null }, true);
+          }
+          toast.info(`Last week's overspend of ${fmt(overspend)} was deducted straight from Savings Stash 📉`);
+        }
       } else {
-        await finance.addGoal({
-          name: 'Savings Stash',
-          target_amount: 9999,
-          currency: baseCurrency,
-          priority: 3,
-          safety_mode: 'balanced',
-          assigned_amount: totalUnderspend,
-          color: '#10b981',
-        });
-        toast.success(`Created Savings Stash with ${fmt(totalUnderspend)} from last week's underspend`);
+        if (assumptions.carry_forward_debt > 0) {
+          await updateAssumptions({ carry_forward_debt: 0, last_debt_week: null }, true);
+        }
       }
+
       settleRef.current = prevWeekKey;
       localStorage.setItem(localKey, 'true');
     };
+
     doSettle();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [snapshot, finance.loading, assumptionsLoading, weekStart]);
-
-  // Auto-settle previous week's OVERSPEND as carry-forward debt
-  const debtSettleRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (!isCurrentWeek) return;
-    if (!snapshot || finance.loading || assumptionsLoading || !assumptions) return;
-    const currentWeekKey = format(weekStart, 'yyyy-MM-dd');
-    
-    if (debtSettleRef.current === currentWeekKey) return;
-    const localDebtKey = `debt_settled_${currentWeekKey}`;
-    if (localStorage.getItem(localDebtKey)) {
-      debtSettleRef.current = currentWeekKey;
-      return;
-    }
-
-    // Check previous week's overspend
-    const prevWeekStart2 = startOfWeek(subDays(weekStart, 1), { weekStartsOn: 1 });
-    const prevWeekEnd2 = endOfWeek(prevWeekStart2, { weekStartsOn: 1 });
-    let prevEssSpent2 = 0;
-    let prevFunSpent2 = 0;
-    for (const tx of finance.transactions) {
-      if (tx.amount >= 0 || tx.is_transfer || tx.is_fixed || tx.is_reimbursable) continue;
-      if ((tx as any).goal_id) continue;
-      const d = new Date(tx.posted_at);
-      if (d < prevWeekStart2 || d > prevWeekEnd2) continue;
-      const cat = catMap.get(tx.category_id || '');
-      if (cat?.exclude_from_reports || cat?.type === 'fixed' || cat?.type === 'income' || cat?.type === 'transfer') continue;
-      const amt = Math.abs(baseAmt(tx));
-      if (essentialCatIds.has(tx.category_id || '')) {
-        prevEssSpent2 += amt;
-      } else {
-        prevFunSpent2 += amt;
-      }
-    }
-
-    const prevTotalBudget = snapshot.weeklyEssentialBudget + snapshot.baseWeeklyFun;
-    const prevTotalSpent = prevEssSpent2 + prevFunSpent2;
-    const CARRY_FORWARD_CAP = 100; // max carry-forward debt (base currency)
-    const rawOverspend = Math.max(0, prevTotalSpent - prevTotalBudget);
-    const overspend = Math.min(rawOverspend, CARRY_FORWARD_CAP);
-
-    const doDebtSettle = async () => {
-      if (overspend > 0) {
-        await updateAssumptions({
-          carry_forward_debt: overspend,
-          last_debt_week: currentWeekKey,
-        }, true);
-        const capNote = rawOverspend > CARRY_FORWARD_CAP ? ` (capped from ${fmt(rawOverspend)})` : '';
-        toast.warning(`Last week's overspend of ${fmt(overspend)}${capNote} carried forward to this week`);
-      } else if (assumptions.carry_forward_debt > 0) {
-        // Clear old debt if no overspend
-        await updateAssumptions({ carry_forward_debt: 0, last_debt_week: null }, true);
-      }
-      debtSettleRef.current = currentWeekKey;
-      localStorage.setItem(localDebtKey, 'true');
-    };
-    doDebtSettle();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snapshot, finance.loading, assumptionsLoading, weekStart]);
 
@@ -541,6 +522,9 @@ export default function FinanceBudget() {
 
   // === Week Pulse segments (Variable spending only: Essentials + Fun) ===
   const totalWeeklyBudget = essentialWeeklyBudget + snapshot.weeklyFunBudget;
+  const totalWeeklySpent = essentialSpentThisWeek + effectiveFunSpent;
+  const weekNetDifference = totalWeeklyBudget - totalWeeklySpent;
+
   const pulseSegments = [
     { label: 'Essentials spent', value: Math.min(essentialSpentThisWeek, essentialWeeklyBudget), color: '#8B5CF6' },
     { label: 'Fun spent', value: Math.min(effectiveFunSpent, snapshot.weeklyFunBudget), color: 'hsl(142, 71%, 45%)' },
@@ -550,18 +534,33 @@ export default function FinanceBudget() {
   const pulseDenom = Math.max(totalWeeklyBudget, pulseUsed, 1);
 
   // Insight state
-  const insightTone: 'good' | 'warn' | 'bad' =
-    isOverBudget ? 'bad' : snapshot.carryForwardDebt > 0 ? 'warn' : 'good';
-  const insightTitle = isOverBudget
-    ? `You're ${fmt(overAmount)} over this week`
-    : snapshot.carryForwardDebt > 0
-      ? `Carried from last week: −${fmt(snapshot.carryForwardDebt)}`
-      : "You're on track";
-  const insightSubtitle = isOverBudget
-    ? `Resets in ${daysUntilReset} day${daysUntilReset !== 1 ? 's' : ''} · overspend will be deducted next week`
-    : snapshot.carryForwardDebt > 0
-      ? "Fun Money budget reduced this week to settle the gap"
-      : `Spending pace is ${fmt(combinedDailyPace)}/day — within budget`;
+  const insightTone: 'good' | 'warn' | 'bad' = !isCurrentWeek
+    ? (weekNetDifference >= 0 ? 'good' : 'bad')
+    : (isOverBudget ? 'bad' : snapshot.carryForwardDebt > 0 ? 'warn' : 'good');
+
+  const insightTitle = !isCurrentWeek
+    ? (weekNetDifference > 0
+        ? `Week Closed: Underspent by +${fmt(weekNetDifference)}`
+        : weekNetDifference < 0
+          ? `Week Closed: Overspent by −${fmt(Math.abs(weekNetDifference))}`
+          : 'Week Closed: Landed On Target')
+    : (isOverBudget
+        ? `You're ${fmt(overAmount)} over this week`
+        : snapshot.carryForwardDebt > 0
+          ? `Carried from last week: −${fmt(snapshot.carryForwardDebt)}`
+          : "You're on track");
+
+  const insightSubtitle = !isCurrentWeek
+    ? (weekNetDifference > 0
+        ? `Leftover ${fmt(weekNetDifference)} was automatically assigned into Savings Stash 💰`
+        : weekNetDifference < 0
+          ? `${fmt(Math.abs(weekNetDifference))} was automatically deducted from Savings Stash 📉`
+          : 'Spending landed exactly on budget (zero net change to Savings Stash) 🎯')
+    : (isOverBudget
+        ? `Resets in ${daysUntilReset} day${daysUntilReset !== 1 ? 's' : ''} · overspend will be deducted next week`
+        : snapshot.carryForwardDebt > 0
+          ? "Fun Money budget reduced this week to settle the gap"
+          : `Spending pace is ${fmt(combinedDailyPace)}/day — within budget`);
 
   return (
     <div className="space-y-8 font-body -mx-4 sm:-mx-6 -my-6 px-4 sm:px-6 py-6 min-h-screen bg-[#FFF5FA]">
@@ -645,18 +644,34 @@ export default function FinanceBudget() {
       <div className="text-center pt-6 pb-2">
         <span className={cn(
           "text-[11px] font-bold uppercase tracking-[0.2em]",
-          isOverBudget ? "text-destructive/70" : "text-muted-foreground/70"
+          !isCurrentWeek
+            ? (weekNetDifference >= 0 ? "text-emerald-600" : "text-destructive/80")
+            : (isOverBudget ? "text-destructive/70" : "text-muted-foreground/70")
         )}>
-          {isOverBudget ? 'Over Budget This Week' : 'Safe to Spend This Week'}
+          {!isCurrentWeek
+            ? (weekNetDifference > 0 ? 'Week Closed · Underspent' : weekNetDifference < 0 ? 'Week Closed · Overspent' : 'Week Closed · On Target')
+            : (isOverBudget ? 'Over Budget This Week' : 'Safe to Spend This Week')}
         </span>
         <h1 className={cn(
           "text-6xl sm:text-7xl font-display font-black mt-4 mb-3 tracking-tight tabular-nums",
-          isOverBudget ? "text-destructive" : "text-[#FF2EB8]"
+          !isCurrentWeek
+            ? (weekNetDifference >= 0 ? "text-emerald-600" : "text-destructive")
+            : (isOverBudget ? "text-destructive" : "text-[#FF2EB8]")
         )}>
-          {isOverBudget ? `−${fmt(overAmount)}` : fmt(combinedSafeToSpend)}
+          {!isCurrentWeek
+            ? (weekNetDifference >= 0 ? `+${fmt(weekNetDifference)}` : `−${fmt(Math.abs(weekNetDifference))}`)
+            : (isOverBudget ? `−${fmt(overAmount)}` : fmt(combinedSafeToSpend))}
         </h1>
         <p className="text-sm sm:text-base text-muted-foreground">
-          {isOverBudget ? (
+          {!isCurrentWeek ? (
+            weekNetDifference > 0 ? (
+              <>Auto-saved <span className="font-semibold text-emerald-600 tabular-nums">{fmt(weekNetDifference)}</span> straight into Savings Stash 💰</>
+            ) : weekNetDifference < 0 ? (
+              <>Auto-deducted <span className="font-semibold text-destructive tabular-nums">{fmt(Math.abs(weekNetDifference))}</span> straight from Savings Stash 📉</>
+            ) : (
+              <>Balanced budget · Zero net change to Savings Stash 🎯</>
+            )
+          ) : isOverBudget ? (
             <>Resets in <span className="font-semibold text-foreground">{daysUntilReset} day{daysUntilReset !== 1 ? 's' : ''}</span></>
           ) : (
             <>
@@ -672,13 +687,18 @@ export default function FinanceBudget() {
         <div className="mt-8 max-w-xs mx-auto">
           <div className="h-1.5 w-full bg-muted/60 rounded-full overflow-hidden">
             <div
-              className={cn("h-full rounded-full transition-all", isOverBudget ? "bg-destructive" : "bg-emerald-500")}
-              style={{ width: `${Math.min(100, (dayOfWeek / 7) * 100)}%` }}
+              className={cn(
+                "h-full rounded-full transition-all",
+                !isCurrentWeek
+                  ? (weekNetDifference >= 0 ? "bg-emerald-500" : "bg-destructive")
+                  : (isOverBudget ? "bg-destructive" : "bg-emerald-500")
+              )}
+              style={{ width: `${!isCurrentWeek ? 100 : Math.min(100, (dayOfWeek / 7) * 100)}%` }}
             />
           </div>
           <div className="flex justify-between mt-3 text-[10px] font-bold text-muted-foreground/60 uppercase tracking-widest">
             <span>{format(now, 'EEEE')}</span>
-            <span>{daysLeft} Day{daysLeft !== 1 ? 's' : ''} Left</span>
+            <span>{!isCurrentWeek ? 'Week Complete (7 of 7 days)' : `${daysLeft} Day${daysLeft !== 1 ? 's' : ''} Left`}</span>
           </div>
         </div>
       </div>
@@ -692,18 +712,36 @@ export default function FinanceBudget() {
         </div>
         <div className={cn(
           "bg-white rounded-2xl border-2 p-4 sm:p-5",
-          isOverBudget ? "border-destructive/50 shadow-[4px_4px_0px_0px_rgba(220,38,38,0.15)]" : "border-[#22C55E]/40 shadow-[4px_4px_0px_0px_rgba(34,197,94,0.15)]"
+          (!isCurrentWeek ? weekNetDifference < 0 : isOverBudget)
+            ? "border-destructive/50 shadow-[4px_4px_0px_0px_rgba(220,38,38,0.15)]"
+            : "border-[#22C55E]/40 shadow-[4px_4px_0px_0px_rgba(34,197,94,0.15)]"
         )}>
-          <p className={cn("text-[10px] font-display font-bold uppercase tracking-[0.15em] mb-2", isOverBudget ? "text-destructive" : "text-[#166534]")}>Spent So Far</p>
-          <p className={cn("font-display font-black tabular-nums text-2xl sm:text-3xl leading-none", isOverBudget ? 'text-destructive' : 'text-slate-900')}>
+          <p className={cn(
+            "text-[10px] font-display font-bold uppercase tracking-[0.15em] mb-2",
+            (!isCurrentWeek ? weekNetDifference < 0 : isOverBudget) ? "text-destructive" : "text-[#166534]"
+          )}>
+            {!isCurrentWeek ? 'Total Spent' : 'Spent So Far'}
+          </p>
+          <p className={cn(
+            "font-display font-black tabular-nums text-2xl sm:text-3xl leading-none",
+            (!isCurrentWeek ? weekNetDifference < 0 : isOverBudget) ? 'text-destructive' : 'text-slate-900'
+          )}>
             {fmt(essentialSpentThisWeek + effectiveFunSpent)}
           </p>
-          <p className="text-[11px] text-slate-500 mt-1.5 font-medium">Day {dayOfWeek} of 7</p>
+          <p className="text-[11px] text-slate-500 mt-1.5 font-medium">
+            {!isCurrentWeek ? '7 of 7 days complete' : `Day ${dayOfWeek} of 7`}
+          </p>
         </div>
         <div className="bg-white rounded-2xl border-2 border-[#FF2EB8]/40 p-4 sm:p-5 shadow-[4px_4px_0px_0px_rgba(255,46,184,0.15)]">
-          <p className="text-[#FF2EB8] text-[10px] font-display font-bold uppercase tracking-[0.15em] mb-2">Daily Pace</p>
-          <p className="text-slate-900 font-display font-black tabular-nums text-2xl sm:text-3xl leading-none">{fmt(dailyPaceLine)}</p>
-          <p className="text-[11px] text-slate-500 mt-1.5 font-medium">target / day</p>
+          <p className="text-[#FF2EB8] text-[10px] font-display font-bold uppercase tracking-[0.15em] mb-2">
+            {!isCurrentWeek ? 'Avg Daily Spend' : 'Daily Pace'}
+          </p>
+          <p className="text-slate-900 font-display font-black tabular-nums text-2xl sm:text-3xl leading-none">
+            {fmt(!isCurrentWeek ? (essentialSpentThisWeek + effectiveFunSpent) / 7 : dailyPaceLine)}
+          </p>
+          <p className="text-[11px] text-slate-500 mt-1.5 font-medium">
+            {!isCurrentWeek ? 'actual avg / day' : 'target / day'}
+          </p>
         </div>
       </div>
 
@@ -771,7 +809,7 @@ export default function FinanceBudget() {
             </div>
           </div>
           <Badge variant="outline" className="text-[10px] whitespace-nowrap hidden sm:inline-flex">
-            Resets in {daysUntilReset}d
+            {!isCurrentWeek ? 'Closed' : `Resets in ${daysUntilReset}d`}
           </Badge>
         </CardContent>
       </Card>
@@ -783,12 +821,12 @@ export default function FinanceBudget() {
         <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-muted-foreground/75 mb-3">Pool Breakdown</p>
         <div className={cn('grid grid-cols-1 sm:grid-cols-2 gap-4', snapshot.isTravelWeek ? 'md:grid-cols-2 xl:grid-cols-4' : 'md:grid-cols-3 xl:grid-cols-5')}>
           <MetricCard
-            label="Spent This Week"
+            label={!isCurrentWeek ? "Total Spent" : "Spent This Week"}
             value={fmt(essentialSpentThisWeek + effectiveFunSpent)}
             icon={Zap}
             delta={`of ${fmt(essentialWeeklyBudget + snapshot.weeklyFunBudget)}`}
             deltaType="neutral"
-            subtitle={<span>Day {dayOfWeek} of 7 · <span className="text-muted-foreground/50">{fmtGbp(essentialSpentThisWeek + effectiveFunSpent)}</span></span>}
+            subtitle={<span>{!isCurrentWeek ? "7 of 7 days complete" : `Day ${dayOfWeek} of 7`} · <span className="text-muted-foreground/50">{fmtGbp(essentialSpentThisWeek + effectiveFunSpent)}</span></span>}
             valueClassName="text-foreground"
             className="bg-white border-2 border-slate-200 shadow-[4px_4px_0px_0px_rgba(15,23,42,0.04)]"
           />
@@ -879,7 +917,7 @@ export default function FinanceBudget() {
           <div className="flex items-center gap-2">
             <CalendarIcon className="w-3.5 h-3.5 text-muted-foreground" />
             <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
-              Daily Spending — This Week
+              Daily Spending — {!isCurrentWeek ? 'Selected Week' : 'This Week'}
             </p>
           </div>
           <div className="flex items-end gap-1 h-24">

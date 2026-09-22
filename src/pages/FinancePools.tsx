@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -106,8 +106,37 @@ export default function FinancePoolsPage() {
 
   const baseCurrency = finance.settings?.base_currency || 'AUD';
   const fmt = (n: number) => formatCurrency(n, baseCurrency);
-
   const wtMap = useMemo(() => weekTypeMap(), [weekTypeMap]);
+
+  // Auto-consolidate duplicate stashes if any exist
+  const consolidateRef = useRef(false);
+  useEffect(() => {
+    if (finance.loading || consolidateRef.current) return;
+    const stashes = finance.goals.filter(
+      g => (g as any).is_stash === true || g.name.toLowerCase().includes('stash')
+    );
+    if (stashes.length > 1) {
+      consolidateRef.current = true;
+      const primary = stashes[0];
+      const duplicates = stashes.slice(1);
+      const extraAssigned = duplicates.reduce((sum, d) => sum + (d.assigned_amount || 0), 0);
+
+      const runConsolidation = async () => {
+        await finance.updateGoal(primary.id, {
+          assigned_amount: (primary.assigned_amount || 0) + extraAssigned,
+          is_stash: true,
+        } as any);
+
+        for (const dup of duplicates) {
+          await finance.deleteGoal(dup.id);
+        }
+        toast.success(`Consolidated ${stashes.length} Savings Stashes into 1 pool`);
+      };
+      runConsolidation();
+    } else if (stashes.length === 1 && !(stashes[0] as any).is_stash) {
+      finance.updateGoal(stashes[0].id, { is_stash: true } as any);
+    }
+  }, [finance.goals, finance.loading]);
 
   const snapshot = useMemo(() => {
     if (!assumptions || finance.loading) return null;
