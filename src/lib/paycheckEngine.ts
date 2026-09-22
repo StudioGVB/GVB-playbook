@@ -54,11 +54,15 @@ export function detectPaycheck(
       rawText.includes('payroll') ||
       rawText.includes('salary') ||
       rawText.includes('batchbase') ||
-      rawText.includes('batch base');
+      rawText.includes('batch base') ||
+      rawText.includes('monzo') ||
+      rawText.includes('salary transfer') ||
+      rawText.includes('income transfer');
 
     if (isMatchKeyword) return true;
     if (isIncomeCat && amt >= 500) return true;
-    if (!tx.is_transfer && amt >= 1000) return true;
+    // Any large incoming deposit >= £1,000 (including transfers from Monzo into Wise)
+    if (amt >= 1000) return true;
 
     return false;
   });
