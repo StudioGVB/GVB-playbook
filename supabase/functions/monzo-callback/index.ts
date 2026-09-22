@@ -2,7 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.90.1'
 
 const MONZO_CLIENT_ID = Deno.env.get('MONZO_CLIENT_ID') || 'oauth2client_0000BAIUMhrA8jDgU6Ydmr';
-const MONZO_CLIENT_SECRET = Deno.env.get('MONZO_CLIENT_SECRET') || 'mnzconf.JA9atqjwUDCgObnSS2gVRHUFrPSNRk6CdFAybM01d0fnxleruKXLQsD7jpMb22CzbrfYBpT+StD+7CjWJqugMA==';
+const MONZO_CLIENT_SECRET = Deno.env.get('MONZO_CLIENT_SECRET') || 'mnzconf.JA9atqjwUDCgObnSS2gVRHUFrPSNRk6CdFAybM01d0fnxleruKXLQs07jpMb22CzbrfYBpT+5tD+7CjWJqugMA==';
 const REDIRECT_URI = 'https://wlaydyjeilhinngtnnbd.supabase.co/functions/v1/monzo-callback';
 
 serve(async (req) => {
@@ -64,6 +64,45 @@ serve(async (req) => {
         bank_tokens: bankTokens,
         updated_at: new Date().toISOString(),
       }, { onConflict: 'user_id' });
+
+      // Discover and sync Monzo accounts immediately
+      try {
+        const accountsRes = await fetch('https://api.monzo.com/accounts', {
+          headers: { 'Authorization': `Bearer ${accessToken}`, 'Accept': 'application/json' },
+        });
+        if (accountsRes.ok) {
+          const accountsData = await accountsRes.json();
+          const accounts = accountsData.accounts || [];
+          const accountRows = [];
+          for (const acc of accounts) {
+            const balanceRes = await fetch(`https://api.monzo.com/balance?account_id=${acc.id}`, {
+              headers: { 'Authorization': `Bearer ${accessToken}`, 'Accept': 'application/json' },
+            });
+            let balanceVal = 0;
+            if (balanceRes.ok) {
+              const balData = await balanceRes.json();
+              balanceVal = (balData.balance || 0) / 100;
+            }
+            accountRows.push({
+              user_id: state,
+              provider: 'monzo',
+              account_name: acc.description || `Monzo ${acc.type || 'Account'}`,
+              currency: acc.currency || 'GBP',
+              balance: balanceVal,
+              external_account_id: String(acc.id),
+              last_synced_at: new Date().toISOString(),
+              source_type: 'bank',
+            });
+          }
+          if (accountRows.length > 0) {
+            await supabaseAdmin.from('finance_accounts').upsert(accountRows, {
+              onConflict: 'user_id,external_account_id',
+            });
+          }
+        }
+      } catch (syncErr) {
+        console.error('Initial Monzo account sync error in callback:', syncErr);
+      }
     }
 
     // Redirect user back to GVB Playbook Accounts page

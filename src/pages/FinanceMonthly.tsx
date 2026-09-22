@@ -499,9 +499,9 @@ export default function FinanceMonthly() {
   return (
     <div className="space-y-6 w-full font-body -mx-4 sm:-mx-6 -mt-6 px-4 sm:px-6 pt-6 pb-24 min-h-screen bg-[#FFF5FA]">
       {/* Header with month selector */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <h1 className="text-3xl sm:text-4xl font-display font-bold text-slate-900 tracking-tight">Monthly Overview</h1>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 self-start sm:self-auto">
           <Button variant="ghost" size="icon" onClick={() => setSelectedMonth(m => subMonths(m, 1))}>
             <ChevronLeft className="w-4 h-4" />
           </Button>
@@ -519,22 +519,24 @@ export default function FinanceMonthly() {
 
       {/* Navigation Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="bg-white/80 backdrop-blur-md p-1.5 rounded-2xl border border-[#FF7AD1]/30 shadow-sm inline-flex mb-2 gap-1">
-          <TabsTrigger
-            value="overview"
-            className="rounded-xl px-5 py-2.5 font-display font-bold text-sm text-[#FF2EB8] data-[state=active]:bg-[#FF2EB8] data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-[#FF2EB8]/25 transition-all flex items-center gap-2"
-          >
-            <LayoutGrid className="w-4 h-4" />
-            Monthly Overview & KPIs
-          </TabsTrigger>
-          <TabsTrigger
-            value="breakdown"
-            className="rounded-xl px-5 py-2.5 font-display font-bold text-sm text-[#FF2EB8] data-[state=active]:bg-[#FF2EB8] data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-[#FF2EB8]/25 transition-all flex items-center gap-2"
-          >
-            <Sparkles className="w-4 h-4" />
-            Intuitive Cash Flow Engine
-          </TabsTrigger>
-        </TabsList>
+        <div className="overflow-x-auto touch-scroll max-w-full pb-1">
+          <TabsList className="bg-white/80 backdrop-blur-md p-1.5 rounded-2xl border border-[#FF7AD1]/30 shadow-sm inline-flex mb-2 gap-1 min-w-max">
+            <TabsTrigger
+              value="overview"
+              className="rounded-xl px-4 sm:px-5 py-2.5 font-display font-bold text-xs sm:text-sm text-[#FF2EB8] data-[state=active]:bg-[#FF2EB8] data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-[#FF2EB8]/25 transition-all flex items-center gap-2"
+            >
+              <LayoutGrid className="w-4 h-4" />
+              Monthly Overview & KPIs
+            </TabsTrigger>
+            <TabsTrigger
+              value="breakdown"
+              className="rounded-xl px-4 sm:px-5 py-2.5 font-display font-bold text-xs sm:text-sm text-[#FF2EB8] data-[state=active]:bg-[#FF2EB8] data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-[#FF2EB8]/25 transition-all flex items-center gap-2"
+            >
+              <Sparkles className="w-4 h-4" />
+              Intuitive Cash Flow Engine
+            </TabsTrigger>
+          </TabsList>
+        </div>
 
         <TabsContent value="overview" className="mt-4 space-y-6 focus-visible:outline-none">
           {/* KPI Cards — candy bento style */}

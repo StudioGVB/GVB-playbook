@@ -129,16 +129,16 @@ export default function MonthlyCashFlowBreakdown({
         {/* Step-by-Step Waterfall List */}
         <div className="space-y-3">
           {/* 1. Income */}
-          <div className="flex items-center justify-between p-4 rounded-2xl bg-sky-50/80 border-2 border-sky-200">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-sky-500 text-white flex items-center justify-center font-black text-lg shadow-sm">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-2xl bg-sky-50/80 border-2 border-sky-200">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-10 h-10 rounded-xl bg-sky-500 text-white flex items-center justify-center font-black text-lg shadow-sm shrink-0">
                 +
               </div>
-              <div>
+              <div className="min-w-0">
                 <span className="text-xs font-display font-bold uppercase text-sky-800 tracking-wider block">
                   1. {isWeekly ? 'Weekly Income' : 'Monthly Income'}
                 </span>
-                <span className="text-sm font-semibold text-slate-700">
+                <span className="text-sm font-semibold text-slate-700 block truncate">
                   {isUsingExpected ? (
                     <>Expected Income <span className="text-xs text-sky-600 font-normal">(baseline profile)</span></>
                   ) : (
@@ -147,7 +147,7 @@ export default function MonthlyCashFlowBreakdown({
                 </span>
               </div>
             </div>
-            <div className="text-right">
+            <div className="text-left sm:text-right shrink-0 border-t sm:border-0 border-sky-200/50 pt-2 sm:pt-0">
               <span className="text-2xl font-display font-black text-sky-900 tabular-nums block">
                 +{fmt(displayIncome)}
               </span>
@@ -156,19 +156,19 @@ export default function MonthlyCashFlowBreakdown({
           </div>
 
           {/* 2. Fixed Bills */}
-          <div className="flex items-center justify-between p-4 rounded-2xl bg-amber-50/80 border-2 border-amber-200">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center font-bold shadow-sm">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-2xl bg-amber-50/80 border-2 border-amber-200">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center font-bold shadow-sm shrink-0">
                 <Lock className="w-5 h-5" />
               </div>
-              <div>
+              <div className="min-w-0">
                 <span className="text-xs font-display font-bold uppercase text-amber-800 tracking-wider block">
                   2. Fixed Bills
                 </span>
-                <span className="text-sm font-semibold text-slate-700">Rent, Utilities & Subscriptions</span>
+                <span className="text-sm font-semibold text-slate-700 block truncate">Rent, Utilities & Subscriptions</span>
               </div>
             </div>
-            <div className="text-right">
+            <div className="text-left sm:text-right shrink-0 border-t sm:border-0 border-amber-200/50 pt-2 sm:pt-0">
               <span className="text-2xl font-display font-black text-amber-900 tabular-nums block">
                 −{fmt(displayFixed)}
               </span>
@@ -177,26 +177,26 @@ export default function MonthlyCashFlowBreakdown({
           </div>
 
           {/* 3. Essential Living */}
-          <div className="flex items-center justify-between p-4 rounded-2xl bg-purple-50/80 border-2 border-purple-200">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-purple-500 text-white flex items-center justify-center font-bold shadow-sm">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-2xl bg-purple-50/80 border-2 border-purple-200">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-10 h-10 rounded-xl bg-purple-500 text-white flex items-center justify-center font-bold shadow-sm shrink-0">
                 <ShoppingCart className="w-5 h-5" />
               </div>
-              <div>
+              <div className="min-w-0">
                 <span className="text-xs font-display font-bold uppercase text-purple-800 tracking-wider block">
                   3. Essential Living
                 </span>
-                <span className="text-sm font-semibold text-slate-700">
+                <span className="text-sm font-semibold text-slate-700 block truncate">
                   Supermarkets, Transport & Health
                   {essentialSpent > 0 && (
-                    <span className="text-xs text-purple-600 block font-normal">
+                    <span className="text-xs text-purple-600 block font-normal truncate">
                       ({fmt(displayEssentialSpent)} spent so far this {isWeekly ? 'week' : 'month'})
                     </span>
                   )}
                 </span>
               </div>
             </div>
-            <div className="text-right">
+            <div className="text-left sm:text-right shrink-0 border-t sm:border-0 border-purple-200/50 pt-2 sm:pt-0">
               <span className="text-2xl font-display font-black text-purple-900 tabular-nums block">
                 −{fmt(displayEssential)}
               </span>
@@ -205,19 +205,19 @@ export default function MonthlyCashFlowBreakdown({
           </div>
 
           {/* 4. Savings Pools */}
-          <div className="flex items-center justify-between p-4 rounded-2xl bg-pink-50/80 border-2 border-[#FF7AD1]/40">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-[#FF2EB8] text-white flex items-center justify-center font-bold shadow-sm">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-2xl bg-pink-50/80 border-2 border-[#FF7AD1]/40">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-10 h-10 rounded-xl bg-[#FF2EB8] text-white flex items-center justify-center font-bold shadow-sm shrink-0">
                 <PiggyBank className="w-5 h-5" />
               </div>
-              <div>
+              <div className="min-w-0">
                 <span className="text-xs font-display font-bold uppercase text-[#FF2EB8] tracking-wider block">
                   4. Savings Pools
                 </span>
-                <span className="text-sm font-semibold text-slate-700">Travel, Vehicle, Reserve & Goals</span>
+                <span className="text-sm font-semibold text-slate-700 block truncate">Travel, Vehicle, Reserve & Goals</span>
               </div>
             </div>
-            <div className="text-right">
+            <div className="text-left sm:text-right shrink-0 border-t sm:border-0 border-pink-200/50 pt-2 sm:pt-0">
               <span className="text-2xl font-display font-black text-[#FF2EB8] tabular-nums block">
                 −{fmt(displayPools)}
               </span>
@@ -230,25 +230,25 @@ export default function MonthlyCashFlowBreakdown({
 
           {/* 5. Fun Money = What's Leftover */}
           <div
-            className={`flex items-center justify-between p-5 rounded-2xl border-2 ${
+            className={`flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 rounded-2xl border-2 ${
               isSurplus
                 ? 'bg-[#86EFAC]/30 border-[#22C55E] text-[#166534]'
                 : 'bg-rose-100/50 border-rose-400 text-rose-900'
             }`}
           >
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 min-w-0">
               <div
-                className={`w-12 h-12 rounded-2xl flex items-center justify-center text-white font-black text-xl shadow-md ${
+                className={`w-12 h-12 rounded-2xl flex items-center justify-center text-white font-black text-xl shadow-md shrink-0 ${
                   isSurplus ? 'bg-[#22C55E]' : 'bg-rose-600'
                 }`}
               >
                 =
               </div>
-              <div>
+              <div className="min-w-0">
                 <span className="text-xs font-display font-extrabold uppercase tracking-widest block">
                   5. FUN MONEY ({isWeekly ? "THIS WEEK'S LEFTOVER" : "THIS MONTH'S LEFTOVER"})
                 </span>
-                <span className="text-sm font-bold">
+                <span className="text-sm font-bold block truncate">
                   {isSurplus ? (
                     <>Safe Guilt-Free Discretionary Budget</>
                   ) : (
@@ -256,14 +256,14 @@ export default function MonthlyCashFlowBreakdown({
                   )}
                 </span>
                 {funSpent > 0 && (
-                  <span className="text-xs font-medium block mt-0.5 opacity-90">
+                  <span className="text-xs font-medium block mt-0.5 opacity-90 truncate">
                     ({fmt(displayFunSpent)} fun spent so far)
                   </span>
                 )}
               </div>
             </div>
 
-            <div className="text-right">
+            <div className="text-left sm:text-right shrink-0 border-t sm:border-0 border-slate-300/60 pt-3 sm:pt-0">
               <span className="text-3xl sm:text-4xl font-display font-black tabular-nums block">
                 {isSurplus ? `+${fmt(displayFunLeftover)}` : `−${fmt(displayShortfall)}`}
               </span>

@@ -63,7 +63,7 @@ serve(async (req) => {
     if (refreshToken && (Date.now() >= tokenExpiresAt - 300000 || !rawToken)) {
       try {
         const MONZO_CLIENT_ID = Deno.env.get('MONZO_CLIENT_ID') || 'oauth2client_0000BAIUMhrA8jDgU6Ydmr'
-        const MONZO_CLIENT_SECRET = Deno.env.get('MONZO_CLIENT_SECRET') || 'mnzconf.JA9atqjwUDCgObnSS2gVRHUFrPSNRk6CdFAybM01d0fnxleruKXLQsD7jpMb22CzbrfYBpT+StD+7CjWJqugMA=='
+        const MONZO_CLIENT_SECRET = Deno.env.get('MONZO_CLIENT_SECRET') || 'mnzconf.JA9atqjwUDCgObnSS2gVRHUFrPSNRk6CdFAybM01d0fnxleruKXLQs07jpMb22CzbrfYBpT+5tD+7CjWJqugMA=='
 
         const refreshRes = await fetch('https://api.monzo.com/oauth2/token', {
           method: 'POST',

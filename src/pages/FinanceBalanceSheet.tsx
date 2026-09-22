@@ -265,22 +265,24 @@ export default function FinanceBalanceSheet() {
 
         {/* Navigation Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="bg-white/80 backdrop-blur-md p-1.5 rounded-2xl border border-[#FF7AD1]/30 shadow-sm inline-flex mb-2">
-            <TabsTrigger
-              value="overview"
-              className="rounded-xl px-4 py-2 font-display font-bold text-sm data-[state=active]:bg-[#FF2EB8] data-[state=active]:text-white transition-all flex items-center gap-2"
-            >
-              <LayoutGrid className="w-4 h-4" />
-              Balance Sheet Overview
-            </TabsTrigger>
-            <TabsTrigger
-              value="spreadsheet"
-              className="rounded-xl px-4 py-2 font-display font-bold text-sm data-[state=active]:bg-[#FF2EB8] data-[state=active]:text-white transition-all flex items-center gap-2"
-            >
-              <Table className="w-4 h-4" />
-              Spreadsheet View
-            </TabsTrigger>
-          </TabsList>
+          <div className="overflow-x-auto touch-scroll max-w-full pb-1">
+            <TabsList className="bg-white/80 backdrop-blur-md p-1.5 rounded-2xl border border-[#FF7AD1]/30 shadow-sm inline-flex mb-2 gap-1 min-w-max">
+              <TabsTrigger
+                value="overview"
+                className="rounded-xl px-4 py-2 font-display font-bold text-xs sm:text-sm data-[state=active]:bg-[#FF2EB8] data-[state=active]:text-white transition-all flex items-center gap-2"
+              >
+                <LayoutGrid className="w-4 h-4" />
+                Balance Sheet Overview
+              </TabsTrigger>
+              <TabsTrigger
+                value="spreadsheet"
+                className="rounded-xl px-4 py-2 font-display font-bold text-xs sm:text-sm data-[state=active]:bg-[#FF2EB8] data-[state=active]:text-white transition-all flex items-center gap-2"
+              >
+                <Table className="w-4 h-4" />
+                Spreadsheet View
+              </TabsTrigger>
+            </TabsList>
+          </div>
 
           <TabsContent value="spreadsheet" className="mt-4 focus-visible:outline-none">
             <FinanceSpreadsheetTab />

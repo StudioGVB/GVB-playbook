@@ -4,36 +4,96 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.90.1'
 serve(async (req) => {
   try {
     const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
-    const token = Deno.env.get('MONZO_ACCESS_TOKEN')
-    
-    if (!token) {
-      return new Response(JSON.stringify({ error: 'MONZO_ACCESS_TOKEN not configured' }), { status: 400 })
-    }
+    const fallbackToken = Deno.env.get('MONZO_ACCESS_TOKEN')
+    const MONZO_CLIENT_ID = Deno.env.get('MONZO_CLIENT_ID') || 'oauth2client_0000BAIUMhrA8jDgU6Ydmr'
+    const MONZO_CLIENT_SECRET = Deno.env.get('MONZO_CLIENT_SECRET') || 'mnzconf.JA9atqjwUDCgObnSS2gVRHUFrPSNRk6CdFAybM01d0fnxleruKXLQs07jpMb22CzbrfYBpT+5tD+7CjWJqugMA=='
 
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL')!,
       serviceRoleKey,
     )
 
-    // Find all users who have Monzo accounts
-    const { data: monzoAccounts, error: accFetchErr } = await supabase
+    // Find all users who have Monzo accounts or settings
+    const { data: monzoAccounts } = await supabase
       .from('finance_accounts')
       .select('user_id')
       .eq('provider', 'monzo')
 
-    if (accFetchErr || !monzoAccounts) {
-      console.error('Failed to fetch Monzo users:', accFetchErr?.message)
-      return new Response(JSON.stringify({ error: 'Failed to fetch users' }), { status: 500 })
-    }
+    const { data: monzoSettings } = await supabase
+      .from('finance_settings')
+      .select('user_id')
 
-    // Dedupe user IDs
-    const userIds = [...new Set(monzoAccounts.map(a => a.user_id))]
-    console.log(`Monzo cron sync: found ${userIds.length} user(s) with Monzo accounts`)
+    const allUserIds = [
+      ...(monzoAccounts || []).map(a => a.user_id),
+      ...(monzoSettings || []).map(s => s.user_id)
+    ]
+    const userIds = [...new Set(allUserIds)]
+
+    console.log(`Monzo cron sync: found ${userIds.length} candidate user(s)`)
 
     const results: Array<{ userId: string; accounts: number; transactions: number; error?: string }> = []
 
     for (const userId of userIds) {
       try {
+        let token = fallbackToken || ''
+        let refreshToken = ''
+        let tokenExpiresAt = 0
+
+        // Fetch user tokens from settings
+        const { data: settingsData } = await supabase
+          .from('finance_settings')
+          .select('bank_tokens')
+          .eq('user_id', userId)
+          .maybeSingle()
+
+        if (settingsData?.bank_tokens?.monzo) {
+          token = settingsData.bank_tokens.monzo
+          refreshToken = settingsData.bank_tokens.monzo_refresh || ''
+          tokenExpiresAt = settingsData.bank_tokens.monzo_expires_at || 0
+        }
+
+        // Auto-refresh token if refresh token is available and token is expired/expiring
+        if (refreshToken && (Date.now() >= tokenExpiresAt - 300000 || !token)) {
+          try {
+            const refreshRes = await fetch('https://api.monzo.com/oauth2/token', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+              body: new URLSearchParams({
+                grant_type: 'refresh_token',
+                client_id: MONZO_CLIENT_ID,
+                client_secret: MONZO_CLIENT_SECRET,
+                refresh_token: refreshToken,
+              }).toString(),
+            })
+
+            if (refreshRes.ok) {
+              const freshData = await refreshRes.json()
+              token = freshData.access_token
+              const newRefresh = freshData.refresh_token || refreshToken
+              const newExpires = Date.now() + ((freshData.expires_in || 21600) * 1000)
+
+              const bankTokens = settingsData?.bank_tokens || {}
+              bankTokens.monzo = token
+              bankTokens.monzo_refresh = newRefresh
+              bankTokens.monzo_expires_at = newExpires
+
+              await supabase.from('finance_settings').upsert({
+                user_id: userId,
+                bank_tokens: bankTokens,
+                updated_at: new Date().toISOString(),
+              }, { onConflict: 'user_id' })
+            } else {
+              console.error(`Monzo refresh failed for user ${userId}: ${refreshRes.status}`)
+            }
+          } catch (refErr) {
+            console.error(`Error refreshing Monzo token for ${userId}:`, refErr)
+          }
+        }
+
+        if (!token) {
+          continue
+        }
+
         // 1. Fetch accounts
         const accountsRes = await fetch('https://api.monzo.com/accounts', {
           headers: {

@@ -97,6 +97,15 @@ export default function FinanceAccounts({ finance }: Props) {
     return map;
   }, [transactions]);
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('monzo_connected') === 'true') {
+      toast.success('Monzo OAuth Connected! Permanent live sync activated.');
+      refetch();
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  }, [refetch]);
+
   const handleSync = async () => {
     setSyncing(true);
     await syncUpTransactions();

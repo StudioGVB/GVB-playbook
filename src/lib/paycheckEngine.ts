@@ -13,20 +13,29 @@ export interface PaycheckWaterfallBreakdown {
   funMoneyLeftover: number;
 }
 
+export interface DetectedPaycheck {
+  transaction: any;
+  targetMonthName: string;
+  isNextMonthPaycheck: boolean;
+  payPeriodLabel: string;
+}
+
 /**
- * Detects the primary paycheck deposit transaction for a given month.
- * Priority matching:
- * 1. Merchant or description containing "gamma", "payroll", "salary", or "batchbase"
- * 2. Any non-transfer income category deposit >= £500
- * 3. Any non-transfer positive deposit >= £1,000
+ * Detects the primary paycheck deposit transaction for the current or upcoming budget cycle.
+ * Handles last-day-of-month paychecks (e.g. Gamma paid on Sept 30th):
+ * - If paid on/after the 25th of Month M, it is automatically attributed to Month M+1 (e.g. Oct budget).
+ * - Guarantees the budget is never marked "behind" at the start of the new month.
  */
 export function detectPaycheck(
   transactions: any[],
   categories: any[],
-  monthStart: Date,
-  monthEnd: Date
-): any | null {
+  refDate: Date = new Date()
+): DetectedPaycheck | null {
   const catMap = new Map(categories.map(c => [c.id, c]));
+
+  // Calculate search window: 35 days back from refDate to cover month-end paychecks
+  const windowStart = new Date(refDate.getFullYear(), refDate.getMonth() - 1, 20);
+  const windowEnd = new Date(refDate.getFullYear(), refDate.getMonth() + 1, 5);
 
   const candidates = transactions.filter(tx => {
     const amt = baseAmt(tx);
@@ -34,7 +43,7 @@ export function detectPaycheck(
     if (tx.is_reimbursable) return false;
 
     const d = new Date(tx.posted_at);
-    if (d < monthStart || d > monthEnd) return false;
+    if (d < windowStart || d > windowEnd) return false;
 
     const rawText = `${tx.merchant || ''} ${tx.description || ''}`.toLowerCase();
     const cat = catMap.get(tx.category_id || '');
@@ -58,7 +67,39 @@ export function detectPaycheck(
 
   // Return the largest candidate transaction as the primary paycheck
   candidates.sort((a, b) => baseAmt(b) - baseAmt(a));
-  return candidates[0];
+  const primaryTx = candidates[0];
+
+  const txDate = new Date(primaryTx.posted_at);
+  const dayOfMonth = txDate.getDate();
+
+  // If paid on or after the 25th, it funds the NEXT calendar month
+  let targetYear = txDate.getFullYear();
+  let targetMonthIndex = txDate.getMonth();
+  let isNextMonthPaycheck = false;
+
+  if (dayOfMonth >= 25) {
+    targetMonthIndex += 1;
+    if (targetMonthIndex > 11) {
+      targetMonthIndex = 0;
+      targetYear += 1;
+    }
+    isNextMonthPaycheck = true;
+  }
+
+  const targetDate = new Date(targetYear, targetMonthIndex, 1);
+  const targetMonthName = targetDate.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  const txFormattedDate = txDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+
+  const payPeriodLabel = isNextMonthPaycheck
+    ? `${targetMonthName} (Paid ${txFormattedDate})`
+    : `${targetMonthName} Budget`;
+
+  return {
+    transaction: primaryTx,
+    targetMonthName,
+    isNextMonthPaycheck,
+    payPeriodLabel,
+  };
 }
 
 /**
