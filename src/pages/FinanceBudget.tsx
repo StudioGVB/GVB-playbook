@@ -158,7 +158,7 @@ export default function FinanceBudget() {
     return computePolicySnapshot(
       assumptions, finance.accounts, finance.transactions,
       finance.categories, finance.goals, finance.convertToBase,
-      fixedExpensesMonthly, boostAmount, wtMap, trips, fixedExpensesMonthlyAll,
+      fixedExpensesMonthly, boostAmount, typeof wtMap === 'function' ? wtMap() : wtMap, trips, fixedExpensesMonthlyAll,
       referenceDateForEngine
     );
   }, [assumptions, finance.accounts, finance.transactions, finance.categories, finance.goals, finance.convertToBase, fixedExpensesMonthly, fixedExpensesMonthlyAll, boostAmount, wtMap, trips, referenceDateForEngine]);

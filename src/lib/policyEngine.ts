@@ -207,8 +207,18 @@ export function computeEssentialVariableMonthly(
   for (let w = 1; w <= 12; w++) {
     const ws = startOfWeek(subWeeks(now, w), { weekStartsOn: 1 });
     const we = startOfWeek(subWeeks(now, w - 1), { weekStartsOn: 1 });
-    const weekKey = format(ws, 'yyyy-MM-dd');
-    const wType = weekTypeMap?.get(weekKey) || 'normal';
+    const resolveWeekType = (key: string): WeekType => {
+      if (!weekTypeMap) return 'normal';
+      if (typeof (weekTypeMap as any).get === 'function') return (weekTypeMap as any).get(key) || 'normal';
+      if (typeof (weekTypeMap as any) === 'function') {
+        try {
+          const map = (weekTypeMap as any)();
+          return map?.get?.(key) || 'normal';
+        } catch { return 'normal'; }
+      }
+      return 'normal';
+    };
+    const wType = resolveWeekType(weekKey);
     const overlapsExclusion = weekOverlapsExclusion(ws, we);
     const overlapsTrip = trips.some(t => {
       if (!t.start_date || !t.end_date) return false;
