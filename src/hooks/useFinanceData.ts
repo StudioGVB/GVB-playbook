@@ -4,6 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import { computeTxFingerprint } from '@/lib/txFingerprint';
 import { FinanceContext } from '@/contexts/FinanceContext';
+import { recalibrateBankTimestamp, formatInTimezone } from '@/lib/timezoneEngine';
 
 export interface FinanceAccount {
   id: string;
@@ -293,9 +294,33 @@ export function useFinanceDataState() {
       };
 
       if (txRes.data) {
+        const livingTz = (setRes.data as any)?.user_timezone || 'Europe/London';
+        const upAccountIds = new Set(accountsData.filter(a => a.provider === 'up' || a.account_name.toLowerCase().includes('up')).map(a => a.id));
+
         const enriched = (txRes.data as any[])
           .filter(t => !excludedAccountIds.has(t.account_id))
-          .map(t => ({ ...t, base_amount: toBase(Number(t.amount) || 0, t.currency) }));
+          .map(t => {
+            let postedAt = t.posted_at;
+            const isUp = upAccountIds.has(t.account_id);
+
+            // If Up Bank transaction with AEST or naive timestamp, recalibrate to UK local time
+            if (isUp || /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}/.test(String(postedAt))) {
+              const recalibratedDate = recalibrateBankTimestamp(postedAt, 'Australia/Melbourne', livingTz);
+              const recalibratedIso = formatInTimezone(recalibratedDate, livingTz, 'ISO') + '+01:00';
+              if (recalibratedIso !== postedAt) {
+                postedAt = recalibratedIso;
+                // Silently heal in database so it stays updated
+                supabase.from('finance_transactions').update({ posted_at: recalibratedIso }).eq('id', t.id).then();
+              }
+            }
+
+            return {
+              ...t,
+              posted_at: postedAt,
+              base_amount: toBase(Number(t.amount) || 0, t.currency),
+            };
+          });
+
         setTransactions(enriched as any);
       }
       if (goalRes.data) setGoals(goalRes.data as any);
