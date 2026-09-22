@@ -135,7 +135,9 @@ export default function FinanceSettingsPanel({ finance }: Props) {
 
   const monzoAccount = accounts.find(a => a.provider === 'monzo');
   const isMonzoConnected = !!monzoAccount || monzoStatus?.connected === true;
-  const [livingTimezone, setLivingTimezone] = useState((settings as any)?.user_timezone || 'Europe/London');
+  const [livingTimezone, setLivingTimezone] = useState(
+    localStorage.getItem('gvb_user_timezone') || (settings as any)?.user_timezone || 'Europe/London'
+  );
 
   useEffect(() => {
     if (settings) {
@@ -143,8 +145,9 @@ export default function FinanceSettingsPanel({ finance }: Props) {
       setAudGbp(String(rates.AUD_GBP ?? 0.52));
       setGbpAud(String(rates.GBP_AUD ?? 1.92));
       setBaseCurrency(settings.base_currency || 'GBP');
-      if ((settings as any).user_timezone) {
-        setLivingTimezone((settings as any).user_timezone);
+      const tz = (settings as any).user_timezone || localStorage.getItem('gvb_user_timezone');
+      if (tz) {
+        setLivingTimezone(tz);
       }
     }
   }, [settings]);

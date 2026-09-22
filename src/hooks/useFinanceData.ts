@@ -92,6 +92,7 @@ export interface FinanceSettings {
   user_id: string;
   fx_rates: Record<string, number>;
   base_currency: string;
+  user_timezone?: string;
 }
 
 export interface IncomeSourceTag {
@@ -568,8 +569,11 @@ export function useFinanceDataState() {
     fetchAll();
   };
 
-  const updateSettings = async (updates: Partial<Pick<FinanceSettings, 'fx_rates' | 'base_currency'>>) => {
+  const updateSettings = async (updates: Partial<Pick<FinanceSettings, 'fx_rates' | 'base_currency' | 'user_timezone'>>) => {
     if (!user) return;
+    if (updates.user_timezone) {
+      localStorage.setItem('gvb_user_timezone', updates.user_timezone);
+    }
     const existing = settings || {};
     const updated = {
       ...existing,
@@ -577,10 +581,20 @@ export function useFinanceDataState() {
       user_id: user.id,
       fx_rates: updates.fx_rates || existing.fx_rates || { AUD_GBP: 0.52, GBP_AUD: 1.92 },
       base_currency: updates.base_currency || existing.base_currency || 'GBP',
+      user_timezone: updates.user_timezone || existing.user_timezone || localStorage.getItem('gvb_user_timezone') || 'Europe/London',
     };
     setSettings(updated as any);
     const { error } = await supabase.from('finance_settings').upsert(updated as any, { onConflict: 'user_id' });
-    if (error) { toast.error('Settings update failed: ' + error.message); return; }
+    if (error) {
+      if (error.message?.includes('user_timezone')) {
+        const fallback = { ...updated };
+        delete (fallback as any).user_timezone;
+        await supabase.from('finance_settings').upsert(fallback as any, { onConflict: 'user_id' });
+      } else {
+        toast.error('Settings update failed: ' + error.message);
+        return;
+      }
+    }
     toast.success('Settings updated');
     await fetchAll();
   };
