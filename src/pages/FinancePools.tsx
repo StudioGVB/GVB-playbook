@@ -206,13 +206,18 @@ export default function FinancePoolsPage() {
       color: g.color || '#4558ff',
     }));
   const assignedGoalsTotal = goalSegments.reduce((s, seg) => s + seg.amount, 0);
-  const accountedFor = emergencyFloor + assignedGoalsTotal + livingRemainder;
+  const cashForEmergency = Math.max(0, totalCash - assignedGoalsTotal);
+  const currentEmergencyFunded = Math.min(emergencyFloor, cashForEmergency);
+  const emergencyShortfallAmt = Math.max(0, emergencyFloor - currentEmergencyFunded);
+  const isEmergencyFull = emergencyShortfallAmt <= 0.01;
+
+  const accountedFor = currentEmergencyFunded + assignedGoalsTotal + livingRemainder;
   const shortfall = Math.max(0, totalCash - accountedFor);
 
   const segments = [
-    { label: 'Emergency', amount: Math.min(emergencyFloor, totalCash), color: '#ef6b6b' },
+    ...(currentEmergencyFunded > 0 ? [{ label: 'Emergency', amount: currentEmergencyFunded, color: '#ef6b6b' }] : []),
     ...goalSegments,
-    { label: 'Living Pool', amount: livingRemainder, color: '#FFB8E6' },
+    ...(isEmergencyFull && livingRemainder > 0 ? [{ label: 'Living Pool', amount: livingRemainder, color: '#FFB8E6' }] : []),
     ...(shortfall > 0.01 ? [{ label: 'Unallocated', amount: shortfall, color: '#e5e7eb' }] : []),
   ];
   const totalForBar = Math.max(totalCash, segments.reduce((s, seg) => s + seg.amount, 0)) || 1;
@@ -422,8 +427,8 @@ export default function FinancePoolsPage() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {/* Emergency Fund */}
         {(() => {
-          const currentFunded = Math.min(totalCash, emergencyFloor);
-          const shortfallAmt = Math.max(0, emergencyFloor - currentFunded);
+          const currentFunded = currentEmergencyFunded;
+          const shortfallAmt = emergencyShortfallAmt;
           const isShort = shortfallAmt > 0.01;
           const fundPct = emergencyFloor > 0 ? Math.min(100, (currentFunded / emergencyFloor) * 100) : 100;
 
