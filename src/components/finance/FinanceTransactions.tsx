@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
-import { Search, Check, Sparkles, Loader2, X, ArrowLeftRight, Target, Receipt, Undo2, DollarSign, Briefcase, RefreshCw, Wallet, Plus, Trash2, Calendar } from 'lucide-react';
+import { Search, Check, Sparkles, Loader2, X, ArrowLeftRight, Target, Receipt, Undo2, DollarSign, Briefcase, RefreshCw, Wallet, Plus, Trash2 } from 'lucide-react';
 import { formatCurrency, formatUkDate } from '@/lib/financeUtils';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
@@ -695,55 +695,11 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                       </button>
                     )}
                   </div>
-                  <div className="flex items-center gap-1.5 text-xs text-slate-400 mt-0.5">
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <button
-                          className="hover:text-indigo-600 font-medium transition-colors cursor-pointer underline decoration-dotted flex items-center gap-1 text-slate-500"
-                          title="Click to edit date"
-                        >
-                          <Calendar className="w-3 h-3 text-slate-400" />
-                          {formatUkDate(tx.posted_at, 'dd MMM yyyy')}
-                        </button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-64 p-3 font-body space-y-3" align="start">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold text-slate-800">Edit Date</span>
-                          <span className="text-[10px] text-slate-400 truncate max-w-[120px]">{tx.description}</span>
-                        </div>
-                        <div className="space-y-1">
-                          <Label className="text-[11px] text-slate-600">Select Date</Label>
-                          <Input
-                            type="date"
-                            className="h-8 text-xs bg-white"
-                            defaultValue={formatUkDate(tx.posted_at, 'yyyy-MM-dd')}
-                            onChange={async (e) => {
-                              if (e.target.value) {
-                                const newIso = `${e.target.value}T12:00:00+01:00`;
-                                await updateTransaction(tx.id, { posted_at: newIso });
-                                toast.success(`Transaction date updated to ${e.target.value}`);
-                              }
-                            }}
-                          />
-                        </div>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="w-full text-xs h-7 font-semibold text-indigo-700 bg-indigo-50 border-indigo-200 hover:bg-indigo-100 flex items-center justify-center gap-1"
-                          onClick={async () => {
-                            const todayStr = format(new Date(), 'yyyy-MM-dd') + 'T12:00:00+01:00';
-                            await updateTransaction(tx.id, { posted_at: todayStr });
-                            toast.success('Moved transaction to Today (22 Sep)');
-                          }}
-                        >
-                          📅 Move to Today ({format(new Date(), 'dd MMM')})
-                        </Button>
-                      </PopoverContent>
-                    </Popover>
-
-                    {tx.merchant && <span>· {tx.merchant}</span>}
-                    {tx.transfer_side && <span>· {tx.transfer_side === 'out' ? '→ Out' : '← In'}</span>}
-                  </div>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    {formatUkDate(tx.posted_at, 'dd MMM yyyy')}
+                    {tx.merchant && ` · ${tx.merchant}`}
+                    {tx.transfer_side && ` · ${tx.transfer_side === 'out' ? '→ Out' : '← In'}`}
+                  </p>
                 </div>
 
                 {/* Right: Category, Amount & Actions in 1 single flex row */}
