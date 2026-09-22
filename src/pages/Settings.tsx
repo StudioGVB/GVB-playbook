@@ -24,7 +24,7 @@ import { useFixedExpenses } from '@/hooks/useFixedExpenses';
 import { useWeeklyBoosts } from '@/hooks/useWeeklyBoosts';
 import { useWeekTypes } from '@/hooks/useWeekTypes';
 import { computePolicySnapshot } from '@/lib/policyEngine';
-import { triggerPreview8pmNotification } from '@/lib/daily8pmNotification';
+import { triggerPreview8pmNotification, triggerPreview955pmNotification } from '@/lib/daily8pmNotification';
 
 interface AdminUser {
   id: string;
@@ -371,6 +371,47 @@ export default function Settings() {
                   >
                     <Sparkles className="w-3.5 h-3.5 mr-1.5" />
                     Preview 8 PM Update
+                  </Button>
+                </div>
+              </div>
+
+              {/* Nightly 9:55 PM Budget Check Section */}
+              <div className="p-4.5 rounded-2xl bg-gradient-to-r from-purple-50 to-indigo-50 border-2 border-purple-200 space-y-3">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-purple-600" />
+                      <h4 className="font-display font-bold text-slate-900 text-sm">
+                        Nightly 9:55 PM Weekly Budget Check
+                      </h4>
+                      <Badge className="bg-purple-600 text-white text-[10px] font-bold">Active Daily</Badge>
+                    </div>
+                    <p className="text-xs text-slate-600 mt-1">
+                      Fires every night at 9:55 PM GMT/BST telling you your remaining weekly balance and personalized status (<em>take it easy / go crazy / right on track</em>).
+                    </p>
+                  </div>
+
+                  <Button
+                    onClick={async () => {
+                      if (notifPermission !== 'granted') {
+                        const res = await requestNotificationPermission();
+                        setNotifPermission(res);
+                        if (res !== 'granted') return;
+                      }
+                      const success = await triggerPreview955pmNotification(
+                        finance.transactions,
+                        finance.categories,
+                        snapshot,
+                        baseCurrency
+                      );
+                      if (success) {
+                        toast.success('Sent 9:55 PM notification preview!');
+                      }
+                    }}
+                    className="w-full sm:w-auto bg-purple-600 hover:bg-purple-700 text-white font-display font-bold rounded-xl px-4 py-2 text-xs shadow-md shrink-0 transition-all"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 mr-1.5" />
+                    Preview 9:55 PM Check
                   </Button>
                 </div>
               </div>

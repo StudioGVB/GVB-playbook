@@ -13,7 +13,7 @@ import { useFixedExpenses } from '@/hooks/useFixedExpenses';
 import { useWeeklyBoosts } from '@/hooks/useWeeklyBoosts';
 import { useWeekTypes } from '@/hooks/useWeekTypes';
 import { computePolicySnapshot } from '@/lib/policyEngine';
-import { checkAndTriggerDaily8pmNotification } from '@/lib/daily8pmNotification';
+import { checkAndTriggerDaily8pmNotification, checkAndTriggerDaily955pmNotification } from '@/lib/daily8pmNotification';
 
 const mainNavItems = [
   { to: '/', icon: Home, label: 'Home' },
@@ -67,9 +67,11 @@ export default function Layout() {
     if (!finance.transactions.length) return;
     const baseCurrency = finance.settings?.base_currency || 'GBP';
     checkAndTriggerDaily8pmNotification(finance.transactions, finance.categories, snapshot, baseCurrency);
+    checkAndTriggerDaily955pmNotification(finance.transactions, finance.categories, snapshot, baseCurrency);
 
     const interval = setInterval(() => {
       checkAndTriggerDaily8pmNotification(finance.transactions, finance.categories, snapshot, baseCurrency);
+      checkAndTriggerDaily955pmNotification(finance.transactions, finance.categories, snapshot, baseCurrency);
     }, 60000);
 
     return () => clearInterval(interval);
