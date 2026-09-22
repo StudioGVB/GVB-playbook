@@ -68,3 +68,6 @@ verify_jwt = false
 
 [functions.monzo-sync-cron]
 verify_jwt = false
+
+[functions.monzo-callback]
+verify_jwt = false

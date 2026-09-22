@@ -492,7 +492,7 @@ export default function FinanceAccounts({ finance }: Props) {
                         onClick={async () => {
                           const { data } = await supabase.auth.getSession();
                           const userId = data.session?.user.id || '';
-                          const clientId = 'oauth2client_0000BAIUMhrA8jDgU6Ydmr';
+                          const clientId = 'oauth2client_0000BAg6n5qTpwiJJM1EbT';
                           const redirectUri = encodeURIComponent('https://wlaydyjeilhinngtnnbd.supabase.co/functions/v1/monzo-callback');
                           const authUrl = `https://auth.monzo.com/?client_id=${clientId}&redirect_uri=${redirectUri}&response_type=code&state=${userId}`;
                           window.location.href = authUrl;

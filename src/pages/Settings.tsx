@@ -7,9 +7,17 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
-import { User, Lock, Mail, Users, Shield, Eye, EyeOff } from 'lucide-react';
+import { User, Lock, Mail, Users, Shield, Eye, EyeOff, Bell, Sparkles } from 'lucide-react';
 import { format } from 'date-fns';
+import { cn } from '@/lib/utils';
+import {
+  getNotificationPermission,
+  requestNotificationPermission,
+  sendTestNotification,
+  type NotificationPermissionState,
+} from '@/lib/notifications';
 
 interface AdminUser {
   id: string;
@@ -26,6 +34,7 @@ export default function Settings() {
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [updating, setUpdating] = useState(false);
+  const [notifPermission, setNotifPermission] = useState<NotificationPermissionState>(getNotificationPermission);
   
   // Admin state
   const [isAdmin, setIsAdmin] = useState(false);
@@ -236,10 +245,70 @@ export default function Settings() {
                     </Button>
                   </div>
                 </div>
-                <Button type="submit" disabled={updating}>
-                  {updating ? 'Updating...' : 'Update Password'}
-                </Button>
               </form>
+            </CardContent>
+          </Card>
+
+          {/* Push Notifications Card */}
+          <Card className="border-2 border-[#FF7AD1]/30 shadow-sm overflow-hidden">
+            <CardHeader className="bg-gradient-to-r from-[#FFF5FA] to-white border-b border-[#FF7AD1]/20">
+              <CardTitle className="flex items-center gap-2 text-slate-900 font-display font-bold">
+                <Bell className="w-5 h-5 text-[#FF2EB8]" />
+                Push Notifications
+              </CardTitle>
+              <CardDescription>
+                Receive real-time browser & system notifications for budget limits, task reminders, and goal milestones.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="p-6 space-y-5">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 rounded-2xl bg-slate-50 border border-slate-200 gap-4">
+                <div>
+                  <p className="font-display font-bold text-slate-900 text-sm flex items-center gap-2 flex-wrap">
+                    Notification Status:
+                    <Badge className={cn(
+                      "text-xs px-2.5 py-0.5 rounded-full font-bold",
+                      notifPermission === 'granted' ? "bg-emerald-100 text-emerald-800 border-emerald-200" :
+                      notifPermission === 'denied' ? "bg-rose-100 text-rose-800 border-rose-200" :
+                      "bg-amber-100 text-amber-800 border-amber-200"
+                    )}>
+                      {notifPermission === 'granted' ? 'Active & Allowed ✅' :
+                       notifPermission === 'denied' ? 'Blocked in Browser ❌' :
+                       'Not Enabled Yet 🔔'}
+                    </Badge>
+                  </p>
+                  <p className="text-xs text-slate-500 mt-1">
+                    {notifPermission === 'granted'
+                      ? 'Your browser is configured to receive instant push alerts on this device.'
+                      : notifPermission === 'denied'
+                      ? 'Notifications were blocked. Click lock icon in address bar to unblock.'
+                      : 'Click below to grant permission and enable push notifications on this device.'}
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2.5 w-full sm:w-auto shrink-0">
+                  {notifPermission !== 'granted' ? (
+                    <Button
+                      onClick={async () => {
+                        const res = await requestNotificationPermission();
+                        setNotifPermission(res);
+                      }}
+                      className="w-full sm:w-auto bg-[#FF2EB8] hover:bg-[#e5299f] text-white font-display font-bold rounded-xl px-4 py-2 text-sm shadow-md shadow-[#FF2EB8]/20 transition-all"
+                    >
+                      <Bell className="w-4 h-4 mr-2" />
+                      Allow Push Notifications
+                    </Button>
+                  ) : (
+                    <Button
+                      onClick={sendTestNotification}
+                      variant="outline"
+                      className="w-full sm:w-auto border-[#FF2EB8] text-[#FF2EB8] hover:bg-[#FFF5FA] font-display font-bold rounded-xl px-4 py-2 text-sm transition-all"
+                    >
+                      <Sparkles className="w-4 h-4 mr-2" />
+                      Send Test Notification
+                    </Button>
+                  )}
+                </div>
+              </div>
             </CardContent>
           </Card>
         </TabsContent>

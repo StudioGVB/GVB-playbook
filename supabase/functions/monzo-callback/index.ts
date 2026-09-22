@@ -1,8 +1,8 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.90.1'
 
-const MONZO_CLIENT_ID = Deno.env.get('MONZO_CLIENT_ID') || 'oauth2client_0000BAIUMhrA8jDgU6Ydmr';
-const MONZO_CLIENT_SECRET = Deno.env.get('MONZO_CLIENT_SECRET') || 'mnzconf.JA9atqjwUDCgObnSS2gVRHUFrPSNRk6CdFAybM01d0fnxleruKXLQs07jpMb22CzbrfYBpT+5tD+7CjWJqugMA==';
+const MONZO_CLIENT_ID = Deno.env.get('MONZO_CLIENT_ID') || 'oauth2client_0000BAg6n5qTpwiJJM1EbT';
+const MONZO_CLIENT_SECRET = Deno.env.get('MONZO_CLIENT_SECRET') || 'mnzpub.TmKVgB70uuz6BQszP2UlKHy04vtMYBYkYJKFI2GwR5jdfhdu0b+4HNxQUH16P7tXWsW5KgohMpOxzhFMaWBjmg==';
 const REDIRECT_URI = 'https://wlaydyjeilhinngtnnbd.supabase.co/functions/v1/monzo-callback';
 
 serve(async (req) => {
@@ -15,26 +15,32 @@ serve(async (req) => {
   }
 
   try {
-    const params = new URLSearchParams({
-      grant_type: 'authorization_code',
-      client_id: MONZO_CLIENT_ID,
-      client_secret: MONZO_CLIENT_SECRET,
-      redirect_uri: REDIRECT_URI,
-      code,
-    });
+    const clientId = MONZO_CLIENT_ID.trim();
+    const clientSecret = MONZO_CLIENT_SECRET.trim();
+
+    const bodyParams = new URLSearchParams();
+    bodyParams.append('grant_type', 'authorization_code');
+    bodyParams.append('client_id', clientId);
+    bodyParams.append('client_secret', clientSecret);
+    bodyParams.append('redirect_uri', REDIRECT_URI);
+    bodyParams.append('code', code.trim());
 
     const tokenRes = await fetch('https://api.monzo.com/oauth2/token', {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Type': 'application/x-www-form-urlencoded; charset=utf-8',
       },
-      body: params.toString(),
+      body: bodyParams.toString(),
     });
 
     if (!tokenRes.ok) {
       const errText = await tokenRes.text();
       console.error('Monzo token exchange failed:', errText);
-      return new Response(`Monzo OAuth exchange failed: ${errText}`, { status: 400 });
+      const reauthUrl = `https://auth.monzo.com/?client_id=${clientId}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=code&state=${state || ''}`;
+      return new Response(null, {
+        status: 302,
+        headers: { 'Location': reauthUrl },
+      });
     }
 
     const tokenData = await tokenRes.json();

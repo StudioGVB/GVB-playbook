@@ -1,0 +1,21 @@
+{
+  "name": "GVB Playbook",
+  "short_name": "GVB Playbook",
+  "description": "Personal finance, task & travel dashboard for Studio GVB",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FFF5FA",
+  "theme_color": "#FF2EB8",
+  "icons": [
+    {
+      "src": "/favicon.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    }
+  ]
+}

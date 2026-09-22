@@ -10,4 +10,12 @@ import "@fontsource/figtree/600.css";
 import "@fontsource/figtree/700.css";
 import "./index.css";
 
+import { registerServiceWorker } from "@/lib/notifications";
+
+if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    registerServiceWorker();
+  });
+}
+
 createRoot(document.getElementById("root")!).render(<App />);
