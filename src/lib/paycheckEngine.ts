@@ -72,12 +72,15 @@ export function detectPaycheck(
   const txDate = new Date(primaryTx.posted_at);
   const dayOfMonth = txDate.getDate();
 
-  // If paid on or after the 25th, it funds the NEXT calendar month
+  // If paid on/after 24th (or within last 7 days of month), it funds the NEXT calendar month
   let targetYear = txDate.getFullYear();
   let targetMonthIndex = txDate.getMonth();
   let isNextMonthPaycheck = false;
 
-  if (dayOfMonth >= 25) {
+  const daysInMonth = new Date(targetYear, targetMonthIndex + 1, 0).getDate();
+  const daysLeftInMonth = daysInMonth - dayOfMonth;
+
+  if (dayOfMonth >= 24 || daysLeftInMonth <= 7) {
     targetMonthIndex += 1;
     if (targetMonthIndex > 11) {
       targetMonthIndex = 0;
