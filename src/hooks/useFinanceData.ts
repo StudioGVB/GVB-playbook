@@ -294,38 +294,12 @@ export function useFinanceDataState() {
       };
 
       if (txRes.data) {
-        const livingTz = (setRes.data as any)?.user_timezone || 'Europe/London';
-
         const enriched = (txRes.data as any[])
           .filter(t => !excludedAccountIds.has(t.account_id))
-          .map(t => {
-            let postedAt = t.posted_at;
-            const rawTimestamp = (t as any).raw?.settledAt || (t as any).raw?.createdAt;
-
-            // 1. If raw Up Bank API timestamp exists, resolve true UK local date/time
-            if (rawTimestamp) {
-              const d = new Date(rawTimestamp);
-              if (!isNaN(d.getTime())) {
-                const trueUkIso = formatInTimezone(d, livingTz, 'ISO') + '+01:00';
-                if (postedAt !== trueUkIso) {
-                  postedAt = trueUkIso;
-                  supabase.from('finance_transactions').update({ posted_at: trueUkIso }).eq('id', t.id).then();
-                }
-              }
-            }
-            // 2. If naive date string (lacking timezone offset), recalibrate from bank time to UK time
-            else if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}$/.test(String(postedAt))) {
-              const recalibratedDate = recalibrateBankTimestamp(postedAt, 'Australia/Melbourne', livingTz);
-              const recalibratedIso = formatInTimezone(recalibratedDate, livingTz, 'ISO') + '+01:00';
-              postedAt = recalibratedIso;
-            }
-
-            return {
-              ...t,
-              posted_at: postedAt,
-              base_amount: toBase(Number(t.amount) || 0, t.currency),
-            };
-          });
+          .map(t => ({
+            ...t,
+            base_amount: toBase(Number(t.amount) || 0, t.currency),
+          }));
 
         setTransactions(enriched as any);
       }
