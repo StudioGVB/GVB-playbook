@@ -312,13 +312,20 @@ export function useFinanceDataState() {
       if (setRes.data) {
         setSettings(setRes.data as any);
       } else {
-        // Create default settings using upsert
-        const { data } = await supabase.from('finance_settings').upsert({
+        const fallbackSettings = {
           user_id: user.id,
           fx_rates: { AUD_GBP: 0.52, GBP_AUD: 1.92 },
           base_currency: 'GBP',
-        }, { onConflict: 'user_id' }).select().maybeSingle();
-        if (data) setSettings(data as any);
+          user_timezone: localStorage.getItem('gvb_user_timezone') || 'Europe/London'
+        };
+        setSettings(fallbackSettings as any);
+        supabase.from('finance_settings').upsert(fallbackSettings as any, { onConflict: 'user_id' }).then(({ error }) => {
+          if (error && error.message?.includes('user_timezone')) {
+            const copy = { ...fallbackSettings };
+            delete (copy as any).user_timezone;
+            supabase.from('finance_settings').upsert(copy as any, { onConflict: 'user_id' });
+          }
+        });
       }
 
       // Seed default categories if none exist

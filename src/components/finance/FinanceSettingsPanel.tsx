@@ -85,9 +85,9 @@ export default function FinanceSettingsPanel({ finance }: Props) {
     checkMonzoStatus, connectMonzo, syncMonzoTransactions
   } = finance;
   const { assumptions, update: updateAssumptions } = useFinanceAssumptions();
-  const [audGbp, setAudGbp] = useState('');
-  const [gbpAud, setGbpAud] = useState('');
-  const [baseCurrency, setBaseCurrency] = useState('AUD');
+  const [audGbp, setAudGbp] = useState(String((settings?.fx_rates as any)?.AUD_GBP ?? '0.52'));
+  const [gbpAud, setGbpAud] = useState(String((settings?.fx_rates as any)?.GBP_AUD ?? '1.92'));
+  const [baseCurrency, setBaseCurrency] = useState(settings?.base_currency || 'GBP');
   const [emergencyMonths, setEmergencyMonths] = useState('3');
   const [newCatName, setNewCatName] = useState('');
   const [newCatType, setNewCatType] = useState('variable');
