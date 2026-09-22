@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -9,7 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
-import { User, Lock, Mail, Users, Shield, Eye, EyeOff, Bell, Sparkles } from 'lucide-react';
+import { User, Lock, Mail, Users, Shield, Eye, EyeOff, Bell, Sparkles, Moon } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import {
@@ -18,6 +18,13 @@ import {
   sendTestNotification,
   type NotificationPermissionState,
 } from '@/lib/notifications';
+import { useFinanceData } from '@/hooks/useFinanceData';
+import { useFinanceAssumptions } from '@/hooks/useFinanceAssumptions';
+import { useFixedExpenses } from '@/hooks/useFixedExpenses';
+import { useWeeklyBoosts } from '@/hooks/useWeeklyBoosts';
+import { useWeekTypes } from '@/hooks/useWeekTypes';
+import { computePolicySnapshot } from '@/lib/policyEngine';
+import { triggerPreview8pmNotification } from '@/lib/daily8pmNotification';
 
 interface AdminUser {
   id: string;
@@ -29,6 +36,23 @@ interface AdminUser {
 
 export default function Settings() {
   const { user } = useAuth();
+  const finance = useFinanceData();
+  const { assumptions } = useFinanceAssumptions();
+  const { monthlyTotalInternal: fixedExpensesMonthly, monthlyTotal: fixedExpensesMonthlyAll } = useFixedExpenses();
+  const { totalBoostThisWeek } = useWeeklyBoosts();
+  const { weekTypeMap: wtMap } = useWeekTypes();
+
+  const snapshot = useMemo(() => {
+    if (!assumptions) return null;
+    return computePolicySnapshot(
+      assumptions, finance.accounts, finance.transactions,
+      finance.categories, finance.goals, finance.convertToBase,
+      fixedExpensesMonthly, totalBoostThisWeek, wtMap(), [], fixedExpensesMonthlyAll,
+    );
+  }, [assumptions, finance.accounts, finance.transactions, finance.categories, finance.goals, finance.convertToBase, fixedExpensesMonthly, fixedExpensesMonthlyAll, totalBoostThisWeek, wtMap]);
+
+  const baseCurrency = finance.settings?.base_currency || 'GBP';
+
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showNewPassword, setShowNewPassword] = useState(false);
@@ -307,6 +331,47 @@ export default function Settings() {
                       Send Test Notification
                     </Button>
                   )}
+                </div>
+              </div>
+
+              {/* Daily 8 PM Budget Summary Section */}
+              <div className="p-4.5 rounded-2xl bg-[#FFF5FA] border-2 border-[#FF7AD1]/30 space-y-3">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <Moon className="w-4 h-4 text-[#FF2EB8]" />
+                      <h4 className="font-display font-bold text-slate-900 text-sm">
+                        Daily 8:00 PM Budget Summary
+                      </h4>
+                      <Badge className="bg-[#FF2EB8] text-white text-[10px] font-bold">Active Daily</Badge>
+                    </div>
+                    <p className="text-xs text-slate-600 mt-1">
+                      Fires every evening at 8:00 PM GMT/BST telling you today's spend, this week's spend, and weekly budget status.
+                    </p>
+                  </div>
+
+                  <Button
+                    onClick={async () => {
+                      if (notifPermission !== 'granted') {
+                        const res = await requestNotificationPermission();
+                        setNotifPermission(res);
+                        if (res !== 'granted') return;
+                      }
+                      const success = await triggerPreview8pmNotification(
+                        finance.transactions,
+                        finance.categories,
+                        snapshot,
+                        baseCurrency
+                      );
+                      if (success) {
+                        toast.success('Sent 8 PM notification preview!');
+                      }
+                    }}
+                    className="w-full sm:w-auto bg-[#FF2EB8] hover:bg-[#e5299f] text-white font-display font-bold rounded-xl px-4 py-2 text-xs shadow-md shrink-0 transition-all"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 mr-1.5" />
+                    Preview 8 PM Update
+                  </Button>
                 </div>
               </div>
             </CardContent>

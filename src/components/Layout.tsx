@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { Home, CheckSquare, FolderKanban, CreditCard, Brain, LogOut, Settings, Menu, X, TrendingUp, ArrowLeftRight, Wallet, Upload, FileText, ChevronDown, History, CalendarDays, Plane, Receipt, DollarSign, Scale, UtensilsCrossed } from 'lucide-react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -7,6 +7,13 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useAppData, getProjectHexColor } from '@/hooks/useAppData';
 import { Button } from '@/components/ui/button';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { useFinanceData } from '@/hooks/useFinanceData';
+import { useFinanceAssumptions } from '@/hooks/useFinanceAssumptions';
+import { useFixedExpenses } from '@/hooks/useFixedExpenses';
+import { useWeeklyBoosts } from '@/hooks/useWeeklyBoosts';
+import { useWeekTypes } from '@/hooks/useWeekTypes';
+import { computePolicySnapshot } from '@/lib/policyEngine';
+import { checkAndTriggerDaily8pmNotification } from '@/lib/daily8pmNotification';
 
 const mainNavItems = [
   { to: '/', icon: Home, label: 'Home' },
@@ -40,6 +47,33 @@ export default function Layout() {
   const isMobile = useIsMobile();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
+
+  const finance = useFinanceData();
+  const { assumptions } = useFinanceAssumptions();
+  const { monthlyTotalInternal: fixedExpensesMonthly, monthlyTotal: fixedExpensesMonthlyAll } = useFixedExpenses();
+  const { totalBoostThisWeek } = useWeeklyBoosts();
+  const { weekTypeMap: wtMap } = useWeekTypes();
+
+  const snapshot = useMemo(() => {
+    if (!assumptions) return null;
+    return computePolicySnapshot(
+      assumptions, finance.accounts, finance.transactions,
+      finance.categories, finance.goals, finance.convertToBase,
+      fixedExpensesMonthly, totalBoostThisWeek, wtMap(), [], fixedExpensesMonthlyAll,
+    );
+  }, [assumptions, finance.accounts, finance.transactions, finance.categories, finance.goals, finance.convertToBase, fixedExpensesMonthly, fixedExpensesMonthlyAll, totalBoostThisWeek, wtMap]);
+
+  useEffect(() => {
+    if (!finance.transactions.length) return;
+    const baseCurrency = finance.settings?.base_currency || 'GBP';
+    checkAndTriggerDaily8pmNotification(finance.transactions, finance.categories, snapshot, baseCurrency);
+
+    const interval = setInterval(() => {
+      checkAndTriggerDaily8pmNotification(finance.transactions, finance.categories, snapshot, baseCurrency);
+    }, 60000);
+
+    return () => clearInterval(interval);
+  }, [finance.transactions, finance.categories, snapshot, finance.settings]);
   const isFinanceRoute = location.pathname.startsWith('/finance');
   const isTravelRoute = location.pathname.startsWith('/travel');
   const isProjectRoute = location.pathname.startsWith('/projects');
