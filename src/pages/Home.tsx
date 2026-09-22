@@ -7,7 +7,7 @@ import { getActiveTripOn } from '@/lib/policyEngine';
 
 export default function Home() {
   const { trips, loading: tripsLoading } = useFinanceTrips();
-  const { goals, transactions, loading: financeLoading } = useFinanceData();
+  const { goals, transactions, categories, loading: financeLoading } = useFinanceData();
   const [forceBudget, setForceBudget] = useState(false);
 
   const activeTrip = getActiveTripOn(new Date(), trips);
@@ -20,6 +20,7 @@ export default function Home() {
           trip={activeTrip}
           goal={goal}
           transactions={transactions}
+          categories={categories}
           onExitToBudget={() => setForceBudget(true)}
         />
       </div>
@@ -28,3 +29,4 @@ export default function Home() {
 
   return <FinanceDashboard />;
 }
+
