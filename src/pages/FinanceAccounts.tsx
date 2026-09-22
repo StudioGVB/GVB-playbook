@@ -72,6 +72,7 @@ export default function FinanceAccountsPage({ defaultTab }: { defaultTab?: strin
   const handleSaveAssumptions = async () => {
     await updateAssumptions({
       baseline_savings_percent: savingsPercent,
+      expected_monthly_income: parseFloat(expectedIncome) || null,
       income_start_date: jobStartDate || null,
     } as any);
   };

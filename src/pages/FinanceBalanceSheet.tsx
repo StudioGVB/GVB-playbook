@@ -74,15 +74,21 @@ export default function FinanceBalanceSheet() {
       const d = new Date(tx.posted_at);
       if (d < monthStart || d > monthEnd) continue;
       if (isExcludedSpendDate(d)) continue;
-      if (tx.is_transfer) continue;
-      if (tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') continue;
-      if ((tx as any).goal_id) continue;
       const cat = categories.find(c => c.id === tx.category_id);
+      const rawText = `${tx.merchant || ''} ${tx.description || ''}`.toLowerCase();
+      const isIncomeCategory = cat?.type === 'income';
+      const isIncomeKeyword = rawText.includes('batchbase') || rawText.includes('batch base') || rawText.includes('payroll') || rawText.includes('salary') || rawText.includes('venture') || rawText.includes('etsy');
+
+      if (tx.is_transfer && !isIncomeCategory && !isIncomeKeyword) continue;
+      if ((tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') && !isIncomeCategory && !isIncomeKeyword) continue;
+      if ((tx as any).goal_id) continue;
       if (cat?.exclude_from_reports) continue;
 
       const amt = baseAmt(tx);
       if (amt > 0) {
-        income += amt;
+        if (!tx.is_reimbursable && cat?.type !== 'transfer') {
+          income += amt;
+        }
       } else {
         const abs = Math.abs(amt);
         if ((tx as any).fixed_expense_id) {

@@ -133,9 +133,16 @@ export default function FinanceMonthly() {
     const catTotals = new Map<string, number>();
 
     for (const tx of monthTxns) {
-      if (tx.amount > 0 && !tx.is_transfer) {
-        incomeTotal += baseAmt(tx);
-        continue;
+      const cat = catMap.get(tx.category_id || '');
+      const rawText = `${tx.merchant || ''} ${tx.description || ''}`.toLowerCase();
+      const isIncomeCategory = cat?.type === 'income';
+      const isIncomeKeyword = rawText.includes('batchbase') || rawText.includes('batch base') || rawText.includes('payroll') || rawText.includes('salary') || rawText.includes('venture') || rawText.includes('etsy');
+
+      if (tx.amount > 0 && (!tx.is_transfer || isIncomeCategory || isIncomeKeyword)) {
+        if (!tx.is_reimbursable && cat?.type !== 'transfer') {
+          incomeTotal += baseAmt(tx);
+          continue;
+        }
       }
       if (tx.amount >= 0 || tx.is_transfer) continue;
       if ((tx as any).goal_id) continue;

@@ -34,6 +34,7 @@ type Bucket = {
 
 // Legacy matchers to keep prior data flowing into the seeded sources.
 const LEGACY_MATCHERS: Record<string, string[]> = {
+  'batchbase': ['batchbase', 'batch base', 'batch'],
   'venture advisory': ['venture advisory', 'venture'],
   'etsy': ['etsy'],
   'back pocket games': ['back pocket', 'bpg', 'back pocket games'],
