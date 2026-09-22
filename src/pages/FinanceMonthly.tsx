@@ -147,7 +147,6 @@ export default function FinanceMonthly() {
       if (tx.amount >= 0 || tx.is_transfer) continue;
       if ((tx as any).goal_id) continue;
 
-      const cat = catMap.get(tx.category_id || '');
       if (cat?.exclude_from_reports) continue;
 
       const amt = Math.abs(baseAmt(tx));
