@@ -173,6 +173,9 @@ export default function FinanceBudget() {
   const stashGoal = useMemo(() => finance.goals.find(g => (g as any).is_stash === true || g.name.toLowerCase().includes('stash')), [finance.goals]);
   const stashBalance = stashGoal?.assigned_amount || 0;
 
+  // Emergency Fund Goal: find existing goal marked with is_emergency or named "Emergency"
+  const emergencyGoal = useMemo(() => finance.goals.find(g => (g as any).is_emergency === true || g.name.toLowerCase().includes('emergency')), [finance.goals]);
+
   // Pull from stash INTO this week's fun budget (uses existing boost system)
   const handleStashWithdraw = async () => {
     if (!stashGoal || stashBalance <= 0) return;
@@ -191,7 +194,7 @@ export default function FinanceBudget() {
 
   const currentWeekType = getWeekType(selectedDate);
 
-  // Auto-settle previous week's performance (underspend -> Savings Stash, overspend -> deducted from Savings Stash)
+  // Auto-settle previous week's performance (underspend -> Emergency Fund if incomplete, else Savings Stash)
   const settleRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -201,7 +204,7 @@ export default function FinanceBudget() {
     const prevWeekKey = format(prevWeekStart, 'yyyy-MM-dd');
     
     if (settleRef.current === prevWeekKey) return;
-    const localKey = `stash_settled_v2_${prevWeekKey}`;
+    const localKey = `stash_settled_v3_${prevWeekKey}`;
     if (localStorage.getItem(localKey)) {
       settleRef.current = prevWeekKey;
       return;
@@ -232,26 +235,78 @@ export default function FinanceBudget() {
 
     const doSettle = async () => {
       if (netDifference > 0) {
-        // UNDERSPENT: Add directly to Savings Stash
+        // UNDERSPENT: Check if Emergency Fund is 100% full
         const underspend = netDifference;
-        if (stashGoal) {
-          await finance.updateGoal(stashGoal.id, {
-            assigned_amount: (stashGoal.assigned_amount || 0) + underspend,
-            is_stash: true,
-          } as any);
-          toast.success(`Settled ${fmt(underspend)} from last week's underspend into Savings Stash 💰`);
+        const totalCash = finance.totalCashBase();
+        const emergencyFloor = snapshot.emergencyFloor;
+        const emergencyShortfall = Math.max(0, emergencyFloor - totalCash);
+
+        if (emergencyShortfall > 0.01) {
+          // Emergency Fund is NOT full! Prioritize Emergency Fund first
+          const toEmergency = Math.min(underspend, emergencyShortfall);
+          const toStash = underspend - toEmergency;
+
+          if (emergencyGoal) {
+            await finance.updateGoal(emergencyGoal.id, {
+              assigned_amount: (emergencyGoal.assigned_amount || 0) + toEmergency,
+              is_emergency: true,
+            } as any);
+          } else {
+            await finance.addGoal({
+              name: 'Emergency Reserve',
+              target_amount: emergencyFloor,
+              currency: baseCurrency,
+              priority: 1,
+              safety_mode: 'balanced',
+              assigned_amount: toEmergency,
+              color: '#ef6b6b',
+              is_emergency: true,
+            } as any);
+          }
+
+          if (toStash > 0) {
+            if (stashGoal) {
+              await finance.updateGoal(stashGoal.id, {
+                assigned_amount: (stashGoal.assigned_amount || 0) + toStash,
+                is_stash: true,
+              } as any);
+            } else {
+              await finance.addGoal({
+                name: 'Savings Stash',
+                target_amount: 9999,
+                currency: baseCurrency,
+                priority: 3,
+                safety_mode: 'balanced',
+                assigned_amount: toStash,
+                color: '#10b981',
+                is_stash: true,
+              } as any);
+            }
+            toast.success(`Settled ${fmt(toEmergency)} into Emergency Reserve 🛡️ and ${fmt(toStash)} into Savings Stash 💰`);
+          } else {
+            toast.success(`Settled ${fmt(toEmergency)} from last week's underspend into Emergency Reserve 🛡️`);
+          }
         } else {
-          await finance.addGoal({
-            name: 'Savings Stash',
-            target_amount: 9999,
-            currency: baseCurrency,
-            priority: 3,
-            safety_mode: 'balanced',
-            assigned_amount: underspend,
-            color: '#10b981',
-            is_stash: true,
-          } as any);
-          toast.success(`Created Savings Stash with ${fmt(underspend)} from last week's underspend 💰`);
+          // Emergency Fund is 100% full! Add directly to Savings Stash
+          if (stashGoal) {
+            await finance.updateGoal(stashGoal.id, {
+              assigned_amount: (stashGoal.assigned_amount || 0) + underspend,
+              is_stash: true,
+            } as any);
+            toast.success(`Settled ${fmt(underspend)} from last week's underspend into Savings Stash 💰`);
+          } else {
+            await finance.addGoal({
+              name: 'Savings Stash',
+              target_amount: 9999,
+              currency: baseCurrency,
+              priority: 3,
+              safety_mode: 'balanced',
+              assigned_amount: underspend,
+              color: '#10b981',
+              is_stash: true,
+            } as any);
+            toast.success(`Created Savings Stash with ${fmt(underspend)} from last week's underspend 💰`);
+          }
         }
         if (assumptions.carry_forward_debt > 0) {
           await updateAssumptions({ carry_forward_debt: 0, last_debt_week: null }, true);

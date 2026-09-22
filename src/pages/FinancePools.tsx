@@ -491,87 +491,104 @@ export default function FinancePoolsPage() {
         })()}
 
         {/* Living / Spending Pool */}
-        <div className="bg-white rounded-2xl border-2 border-[#FF2EB8]/45 p-5 shadow-[4px_4px_0px_0px_rgba(255,46,184,0.12)] md:col-span-2 lg:col-span-2 hover:scale-[1.01] hover:shadow-[6px_6px_0px_0px_rgba(255,46,184,0.15)] transition-all flex flex-col justify-between">
-          <div>
-            <div className="flex items-start gap-4 mb-4">
-              <div className="w-11 h-11 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
-                <ShoppingCart className="w-5 h-5 text-[#FF2EB8]" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-1.5">
-                  <h3 className="text-base font-bold text-slate-900">Living Pool</h3>
-                  {isDrawdown && <Badge variant="outline" className="text-[10px] text-amber-600 border-amber-200 bg-amber-50">Drawdown</Badge>}
+        {totalCash < emergencyFloor ? (
+          <div className="bg-[#FFF5FA] rounded-2xl border-2 border-dashed border-rose-300 p-6 md:col-span-2 lg:col-span-2 flex flex-col items-center justify-center text-center space-y-3 shadow-none">
+            <div className="w-12 h-12 rounded-2xl bg-rose-100/80 flex items-center justify-center text-rose-600 shrink-0">
+              <Lock className="w-6 h-6 text-rose-600" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-slate-900 mb-1">Living Pool Hidden</h3>
+              <p className="text-xs font-medium text-slate-600 max-w-md">
+                Your Living Pool is locked & hidden until your Emergency Reserve is 100% funded (<strong className="text-slate-900">{fmt(emergencyFloor)}</strong>). Currently <span className="text-rose-600 font-bold">{fmt(Math.max(0, emergencyFloor - Math.min(totalCash, emergencyFloor)))} short</span> — all auto-stashed cash and surplus flows into Emergency Reserve first.
+              </p>
+            </div>
+            <Badge variant="outline" className="text-[10px] bg-rose-50 text-rose-700 border-rose-200 font-semibold px-2.5 py-1">
+              Priority #1: Fill Emergency Reserve
+            </Badge>
+          </div>
+        ) : (
+          <div className="bg-white rounded-2xl border-2 border-[#FF2EB8]/45 p-5 shadow-[4px_4px_0px_0px_rgba(255,46,184,0.12)] md:col-span-2 lg:col-span-2 hover:scale-[1.01] hover:shadow-[6px_6px_0px_0px_rgba(255,46,184,0.15)] transition-all flex flex-col justify-between">
+            <div>
+              <div className="flex items-start gap-4 mb-4">
+                <div className="w-11 h-11 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
+                  <ShoppingCart className="w-5 h-5 text-[#FF2EB8]" />
                 </div>
-                <p className="text-3xl font-black text-slate-900 tracking-tight">{fmt(livingRemainder)}</p>
-                <p className="text-xs text-slate-500 mt-1 font-medium">
-                  {isDrawdown ? `Over ${Math.round(weeksUntilIncome)} weeks` : 'After emergency + goals'}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <h3 className="text-base font-bold text-slate-900">Living Pool</h3>
+                    {isDrawdown && <Badge variant="outline" className="text-[10px] text-amber-600 border-amber-200 bg-amber-50">Drawdown</Badge>}
+                  </div>
+                  <p className="text-3xl font-black text-slate-900 tracking-tight">{fmt(livingRemainder)}</p>
+                  <p className="text-xs text-slate-500 mt-1 font-medium">
+                    {isDrawdown ? `Over ${Math.round(weeksUntilIncome)} weeks` : 'After emergency + goals'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Sub-breakdown */}
+              <div className="space-y-3 border-t border-slate-100 pt-4">
+                {targetSavings > 0 && (
+                  <>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="flex items-center gap-2 text-slate-600 font-medium">
+                        <span className="w-2 h-2 rounded-full bg-[#8b5cf6] flex-shrink-0" />
+                        🎯 Target Savings
+                      </span>
+                      <span className="font-bold text-slate-900">{fmt(targetSavings)}</span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 ml-4 -mt-2">
+                      Protected — want this left when income starts
+                    </p>
+                  </>
+                )}
+
+                <div className="flex items-center justify-between text-sm">
+                  <span className="flex items-center gap-2 text-slate-800 font-bold">
+                    Spendable Pool
+                  </span>
+                  <span className="font-extrabold text-slate-900">{fmt(spendablePool)}</span>
+                </div>
+
+                <div className="border-t border-dashed border-slate-200 my-2.5" />
+
+                <div className="flex items-center justify-between text-sm">
+                  <span className="flex items-center gap-2 text-slate-600 font-medium">
+                    <span className="w-2 h-2 rounded-full bg-[#FF2EB8]/60 flex-shrink-0" />
+                    📋 Fixed Bills Reserve
+                  </span>
+                  <span className="font-bold text-slate-900">{fmt(fixedReserve)}</span>
+                </div>
+                <p className="text-[11px] text-slate-400 ml-4 -mt-2">
+                  {fmt(fixedMonthlyTotal)}/mo{isDrawdown ? ` × ${Math.round(weeksUntilIncome)} wks` : ''}
+                </p>
+
+                <div className="flex items-center justify-between text-sm">
+                  <span className="flex items-center gap-2 text-slate-600 font-medium">
+                    <span className="w-2 h-2 rounded-full bg-[#8b5cf6]/60 flex-shrink-0" />
+                    🛒 Essential Variable
+                  </span>
+                  <span className="font-bold text-slate-900">{fmt(essentialReserve)}</span>
+                </div>
+                <p className="text-[11px] text-slate-400 ml-4 -mt-2">
+                  {fmt(essentialVariable)}/mo — based on last 4 normal weeks
+                </p>
+
+                <div className="border-t border-dashed border-slate-200 my-2.5" />
+
+                <div className="flex items-center justify-between text-sm">
+                  <span className="flex items-center gap-2 font-bold text-[#FF2EB8]">
+                    <span className="w-2 h-2 rounded-full bg-[#FFB8E6] flex-shrink-0" />
+                    💰 Fun Money
+                  </span>
+                  <span className="font-extrabold text-[#FF2EB8] text-xl">{fmt(funMoney)}</span>
+                </div>
+                <p className="text-[11px] text-slate-500 font-medium ml-4 -mt-2">
+                  {fmt(weeklyFromRemainder)}/wk — your weekly discretionary budget
                 </p>
               </div>
             </div>
-
-            {/* Sub-breakdown */}
-            <div className="space-y-3 border-t border-slate-100 pt-4">
-              {targetSavings > 0 && (
-                <>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="flex items-center gap-2 text-slate-600 font-medium">
-                      <span className="w-2 h-2 rounded-full bg-[#8b5cf6] flex-shrink-0" />
-                      🎯 Target Savings
-                    </span>
-                    <span className="font-bold text-slate-900">{fmt(targetSavings)}</span>
-                  </div>
-                  <p className="text-[11px] text-slate-400 ml-4 -mt-2">
-                    Protected — want this left when income starts
-                  </p>
-                </>
-              )}
-
-              <div className="flex items-center justify-between text-sm">
-                <span className="flex items-center gap-2 text-slate-800 font-bold">
-                  Spendable Pool
-                </span>
-                <span className="font-extrabold text-slate-900">{fmt(spendablePool)}</span>
-              </div>
-
-              <div className="border-t border-dashed border-slate-200 my-2.5" />
-
-              <div className="flex items-center justify-between text-sm">
-                <span className="flex items-center gap-2 text-slate-600 font-medium">
-                  <span className="w-2 h-2 rounded-full bg-[#FF2EB8]/60 flex-shrink-0" />
-                  📋 Fixed Bills Reserve
-                </span>
-                <span className="font-bold text-slate-900">{fmt(fixedReserve)}</span>
-              </div>
-              <p className="text-[11px] text-slate-400 ml-4 -mt-2">
-                {fmt(fixedMonthlyTotal)}/mo{isDrawdown ? ` × ${Math.round(weeksUntilIncome)} wks` : ''}
-              </p>
-
-              <div className="flex items-center justify-between text-sm">
-                <span className="flex items-center gap-2 text-slate-600 font-medium">
-                  <span className="w-2 h-2 rounded-full bg-[#8b5cf6]/60 flex-shrink-0" />
-                  🛒 Essential Variable
-                </span>
-                <span className="font-bold text-slate-900">{fmt(essentialReserve)}</span>
-              </div>
-              <p className="text-[11px] text-slate-400 ml-4 -mt-2">
-                {fmt(essentialVariable)}/mo — based on last 4 normal weeks
-              </p>
-
-              <div className="border-t border-dashed border-slate-200 my-2.5" />
-
-              <div className="flex items-center justify-between text-sm">
-                <span className="flex items-center gap-2 font-bold text-[#FF2EB8]">
-                  <span className="w-2 h-2 rounded-full bg-[#FFB8E6] flex-shrink-0" />
-                  💰 Fun Money
-                </span>
-                <span className="font-extrabold text-[#FF2EB8] text-xl">{fmt(funMoney)}</span>
-              </div>
-              <p className="text-[11px] text-slate-500 font-medium ml-4 -mt-2">
-                {fmt(weeklyFromRemainder)}/wk — your weekly discretionary budget
-              </p>
-            </div>
           </div>
-        </div>
+        )}
 
         {/* Goal Pool Cards */}
         {finance.goals.map(goal => {
