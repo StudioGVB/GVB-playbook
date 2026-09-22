@@ -300,23 +300,20 @@ export function useFinanceDataState() {
           .filter(t => !excludedAccountIds.has(t.account_id))
           .map(t => {
             let postedAt = t.posted_at;
-            const descLower = (t.description || '').toLowerCase();
+            const rawTimestamp = (t as any).raw?.settledAt || (t as any).raw?.createdAt;
 
-            // Self-healing: if today's transactions (easyJet, Piccadilly, Lidl, Morrisons, Savings) were shifted to 19 Sept by previous loop, restore to 22 Sept
-            const isTodayTxCandidate =
-              (descLower.includes('easyjet') ||
-                descLower.includes('piccadilly') ||
-                descLower.includes('lidl') ||
-                descLower.includes('morrisons') ||
-                descLower.includes('savings')) &&
-              String(postedAt).startsWith('2026-09-19');
-
-            if (isTodayTxCandidate) {
-              const todayIso = '2026-09-22T12:00:00+01:00';
-              postedAt = todayIso;
-              supabase.from('finance_transactions').update({ posted_at: todayIso }).eq('id', t.id).then();
+            // 1. If raw Up Bank API timestamp exists, resolve true UK local date/time
+            if (rawTimestamp) {
+              const d = new Date(rawTimestamp);
+              if (!isNaN(d.getTime())) {
+                const trueUkIso = formatInTimezone(d, livingTz, 'ISO') + '+01:00';
+                if (postedAt !== trueUkIso) {
+                  postedAt = trueUkIso;
+                  supabase.from('finance_transactions').update({ posted_at: trueUkIso }).eq('id', t.id).then();
+                }
+              }
             }
-            // If naive date string (lacking timezone offset), recalibrate from bank time to UK time
+            // 2. If naive date string (lacking timezone offset), recalibrate from bank time to UK time
             else if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}$/.test(String(postedAt))) {
               const recalibratedDate = recalibrateBankTimestamp(postedAt, 'Australia/Melbourne', livingTz);
               const recalibratedIso = formatInTimezone(recalibratedDate, livingTz, 'ISO') + '+01:00';
@@ -1037,6 +1034,48 @@ export function useFinanceDataState() {
       } catch (err) {
         console.error('Match transfers error:', err);
         toast.error('Network error during transfer matching');
+      }
+    },
+    rescanAndFixTimezones: async () => {
+      if (!user) return;
+      const livingTz = (settings as any)?.user_timezone || 'Europe/London';
+      try {
+        const { data: allTxs, error } = await supabase
+          .from('finance_transactions')
+          .select('*')
+          .eq('user_id', user.id);
+
+        if (error || !allTxs) {
+          toast.error('Failed to fetch transactions for rescan');
+          return;
+        }
+
+        let fixedCount = 0;
+        for (const t of allTxs) {
+          const rawTimestamp = (t as any).raw?.settledAt || (t as any).raw?.createdAt;
+          let targetIso: string | null = null;
+
+          if (rawTimestamp) {
+            const d = new Date(rawTimestamp);
+            if (!isNaN(d.getTime())) {
+              targetIso = formatInTimezone(d, livingTz, 'ISO') + '+01:00';
+            }
+          } else if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}$/.test(String(t.posted_at))) {
+            const recal = recalibrateBankTimestamp(t.posted_at, 'Australia/Melbourne', livingTz);
+            targetIso = formatInTimezone(recal, livingTz, 'ISO') + '+01:00';
+          }
+
+          if (targetIso && targetIso !== t.posted_at) {
+            await supabase.from('finance_transactions').update({ posted_at: targetIso }).eq('id', t.id);
+            fixedCount++;
+          }
+        }
+
+        toast.success(`Rescanned & corrected ${fixedCount} transaction dates to UK local time! 🚀`);
+        await fetchAll();
+      } catch (err) {
+        console.error('Failed to rescan timezones:', err);
+        toast.error('Error during timezone rescan');
       }
     },
     refetch: fetchAll,

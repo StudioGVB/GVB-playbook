@@ -657,6 +657,18 @@ export default function FinanceSettingsPanel({ finance }: Props) {
               </SelectContent>
             </Select>
           </div>
+
+          <div className="pt-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => (finance as any).rescanAndFixTimezones()}
+              className="w-full text-xs font-bold text-indigo-700 bg-indigo-50/80 border-indigo-300 hover:bg-indigo-100 flex items-center justify-center gap-1.5 cursor-pointer py-2"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              Rescan & Fix All Past Month Transaction Dates
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
