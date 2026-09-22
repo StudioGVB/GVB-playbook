@@ -80,6 +80,8 @@ const App = () => (
               <Route path="/finance/settings" element={<FinanceAccountsPage defaultTab="settings" />} />
               <Route path="/finance/history" element={<FinanceAccountsPage defaultTab="history" />} />
               <Route path="/afford" element={<Navigate to="/finance/budget" replace />} />
+              <Route path="/can-i-buy" element={<Navigate to="/finance/budget" replace />} />
+              <Route path="/can-i-buy-this" element={<Navigate to="/finance/budget" replace />} />
 
               <Route path="/brain-dump" element={<BrainDump />} />
               <Route path="/meals" element={<Meals />} />

@@ -25,6 +25,7 @@ import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
+import PurchaseTimingEvaluator from '@/components/finance/PurchaseTimingEvaluator';
 
 
 const FREQ_TO_WEEKLY: Record<string, number> = {
@@ -961,6 +962,23 @@ export default function FinanceBudget() {
           )}
         </div>
       </div>
+
+      {/* === AI PURCHASE TIMING EVALUATOR ("Can I Buy This?") === */}
+      {assumptions && (
+        <PurchaseTimingEvaluator
+          finance={finance}
+          assumptions={assumptions}
+          fixedExpensesMonthly={fixedExpensesMonthly}
+          totalBoost={boostAmount}
+          onReservePurchase={(title, amount, targetDate) => {
+            if (targetDate) {
+              toast.success(`Planned purchase "${title}" (${fmt(amount)}) for ${targetDate}`);
+            } else {
+              toast.success(`Earmarked ${fmt(amount)} for "${title}" out of this week's fun budget!`);
+            }
+          }}
+        />
+      )}
 
 
 

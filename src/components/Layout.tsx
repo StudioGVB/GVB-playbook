@@ -22,7 +22,7 @@ const mainNavItems = [
 
 const financeSubItems = [
   { to: '/finance/monthly', icon: CalendarDays, label: 'Monthly Report' },
-  { to: '/finance/budget', icon: Wallet, label: 'Budget Rules' },
+  { to: '/finance/budget', icon: Wallet, label: 'Budget & Can I Buy This?' },
   { to: '/finance/income', icon: DollarSign, label: 'Income' },
   { to: '/finance/pools', icon: Scale, label: 'Pools & Balance Sheet' },
   { to: '/finance/transactions', icon: Upload, label: 'Transactions' },
