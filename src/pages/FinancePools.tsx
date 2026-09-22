@@ -226,13 +226,12 @@ export default function FinancePoolsPage() {
   const totalForBar = Math.max(totalCash, segments.reduce((s, seg) => s + seg.amount, 0)) || 1;
 
   // Paycheck Detection & Auto-Waterfall Engine
-  const currentMonthStart = useMemo(() => startOfMonth(new Date()), []);
-  const currentMonthEnd = useMemo(() => endOfMonth(new Date()), []);
-
-  const paycheckTx = useMemo(
-    () => detectPaycheck(finance.transactions, finance.categories, currentMonthStart, currentMonthEnd),
-    [finance.transactions, finance.categories, currentMonthStart, currentMonthEnd]
+  const detectedPaycheck = useMemo(
+    () => detectPaycheck(finance.transactions, finance.categories),
+    [finance.transactions, finance.categories]
   );
+
+  const paycheckTx = detectedPaycheck?.transaction || null;
 
   const [paycheckAllocated, setPaycheckAllocated] = useState(false);
 
@@ -295,7 +294,7 @@ export default function FinancePoolsPage() {
       // 3. Mark processed to prevent double-ups
       markPaycheckProcessed(paycheckTx.id);
       setPaycheckAllocated(true);
-      toast.success(`Allocated ${fmt(paycheckTx.amount)} paycheck across living costs, emergency reserve, and goal pools! 🚀`);
+      toast.success(`Allocated ${fmt(paycheckTx.amount)} paycheck for ${detectedPaycheck?.targetMonthName || 'pools'}! 🚀`);
     } catch (err) {
       console.error('Failed to allocate paycheck:', err);
       toast.error('Failed to allocate paycheck to pools');
@@ -468,20 +467,20 @@ export default function FinancePoolsPage() {
 
         <TabsContent value="pools" className="space-y-6">
           {/* Paycheck Landed Auto-Allocation Banner */}
-          {paycheckTx && waterfallBreakdown && (
+          {paycheckTx && waterfallBreakdown && detectedPaycheck && (
             <Card className="bg-gradient-to-r from-emerald-50 via-white to-sky-50 border-2 border-emerald-300 shadow-[6px_6px_0px_0px_rgba(16,185,129,0.12)] font-body">
               <CardContent className="p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div className="space-y-1.5">
                   <div className="flex items-center gap-2">
                     <Badge className="bg-emerald-600 text-white font-display font-bold text-xs px-2.5 py-0.5 rounded-full">
-                      🎉 Paycheck Landed
+                      🎉 {detectedPaycheck.isNextMonthPaycheck ? `${detectedPaycheck.targetMonthName} Paycheck Landed` : 'Paycheck Landed'}
                     </Badge>
                     <span className="text-xs text-slate-500 font-semibold">
                       {format(new Date(paycheckTx.posted_at), 'd MMM yyyy')} · {paycheckTx.merchant || paycheckTx.description || 'Income Deposit'}
                     </span>
                   </div>
                   <h2 className="text-2xl font-display font-black text-slate-900 tracking-tight">
-                    +{fmt(paycheckTx.amount)} Monthly Paycheck
+                    +{fmt(paycheckTx.amount)} for {detectedPaycheck.targetMonthName}
                   </h2>
                   <div className="flex flex-wrap items-center gap-2 pt-1 text-xs text-slate-700">
                     <span className="bg-amber-100 text-amber-900 font-semibold px-2 py-0.5 rounded-md border border-amber-200">
