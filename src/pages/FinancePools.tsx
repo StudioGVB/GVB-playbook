@@ -14,7 +14,10 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import PriorMonthAllocator from '@/components/finance/PriorMonthAllocator';
 import FinanceBalanceSheet from '@/pages/FinanceBalanceSheet';
 import WeeklyPoolSavingsCard from '@/components/finance/WeeklyPoolSavingsCard';
-import { format } from 'date-fns';
+import { format, startOfMonth, endOfMonth } from 'date-fns';
+import { detectPaycheck, calculatePaycheckWaterfall, isPaycheckProcessed, markPaycheckProcessed } from '@/lib/paycheckEngine';
+import { baseAmt } from '@/lib/financeUtils';
+import { toast } from 'sonner';
 
 
 const POOL_ICON_KEYWORDS: [string[], LucideIcon][] = [
@@ -222,6 +225,83 @@ export default function FinancePoolsPage() {
   ];
   const totalForBar = Math.max(totalCash, segments.reduce((s, seg) => s + seg.amount, 0)) || 1;
 
+  // Paycheck Detection & Auto-Waterfall Engine
+  const currentMonthStart = useMemo(() => startOfMonth(new Date()), []);
+  const currentMonthEnd = useMemo(() => endOfMonth(new Date()), []);
+
+  const paycheckTx = useMemo(
+    () => detectPaycheck(finance.transactions, finance.categories, currentMonthStart, currentMonthEnd),
+    [finance.transactions, finance.categories, currentMonthStart, currentMonthEnd]
+  );
+
+  const [paycheckAllocated, setPaycheckAllocated] = useState(false);
+
+  useEffect(() => {
+    if (paycheckTx) {
+      setPaycheckAllocated(isPaycheckProcessed(paycheckTx.id));
+    }
+  }, [paycheckTx]);
+
+  const waterfallBreakdown = useMemo(() => {
+    if (!paycheckTx) return null;
+    const pAmt = baseAmt(paycheckTx);
+    return calculatePaycheckWaterfall(
+      pAmt,
+      emergencyFloor,
+      currentEmergencyFunded,
+      finance.goals,
+      fixedMonthlyTotal,
+      essentialVariable,
+      finance.convertToBase
+    );
+  }, [paycheckTx, emergencyFloor, currentEmergencyFunded, finance.goals, fixedMonthlyTotal, essentialVariable, finance.convertToBase]);
+
+  const handleExecutePaycheckAllocation = async () => {
+    if (!paycheckTx || !waterfallBreakdown || paycheckAllocated) return;
+    try {
+      // 1. Top up emergency fund if needed
+      if (waterfallBreakdown.emergencyTopUp > 0) {
+        const emergencyGoal = finance.goals.find(g => (g as any).is_emergency === true || g.name.toLowerCase().includes('emergency'));
+        if (emergencyGoal) {
+          await finance.updateGoal(emergencyGoal.id, {
+            assigned_amount: (emergencyGoal.assigned_amount || 0) + waterfallBreakdown.emergencyTopUp,
+            is_emergency: true,
+          } as any);
+        } else {
+          await finance.addGoal({
+            name: 'Emergency Reserve',
+            target_amount: emergencyFloor,
+            currency: baseCurrency,
+            priority: 1,
+            safety_mode: 'balanced',
+            assigned_amount: waterfallBreakdown.emergencyTopUp,
+            color: '#ef6b6b',
+            is_emergency: true,
+          } as any);
+        }
+      }
+
+      // 2. Fund goal pools with monthly targets
+      for (const item of waterfallBreakdown.goalAllocations) {
+        if (item.allocatedAmount <= 0) continue;
+        const g = finance.goals.find(x => x.id === item.goalId);
+        if (g) {
+          await finance.updateGoal(g.id, {
+            assigned_amount: (g.assigned_amount || 0) + item.allocatedAmount,
+          } as any);
+        }
+      }
+
+      // 3. Mark processed to prevent double-ups
+      markPaycheckProcessed(paycheckTx.id);
+      setPaycheckAllocated(true);
+      toast.success(`Allocated ${fmt(paycheckTx.amount)} paycheck across living costs, emergency reserve, and goal pools! 🚀`);
+    } catch (err) {
+      console.error('Failed to allocate paycheck:', err);
+      toast.error('Failed to allocate paycheck to pools');
+    }
+  };
+
   const handleEditGoal = async () => {
     if (!editGoalId || !editName.trim() || !editTarget) return;
     // If marking as stash, clear is_stash from any other goal first
@@ -387,7 +467,59 @@ export default function FinancePoolsPage() {
         </TabsList>
 
         <TabsContent value="pools" className="space-y-6">
-      {/* Total Cash Hero */}
+          {/* Paycheck Landed Auto-Allocation Banner */}
+          {paycheckTx && waterfallBreakdown && (
+            <Card className="bg-gradient-to-r from-emerald-50 via-white to-sky-50 border-2 border-emerald-300 shadow-[6px_6px_0px_0px_rgba(16,185,129,0.12)] font-body">
+              <CardContent className="p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <Badge className="bg-emerald-600 text-white font-display font-bold text-xs px-2.5 py-0.5 rounded-full">
+                      🎉 Paycheck Landed
+                    </Badge>
+                    <span className="text-xs text-slate-500 font-semibold">
+                      {format(new Date(paycheckTx.posted_at), 'd MMM yyyy')} · {paycheckTx.merchant || paycheckTx.description || 'Income Deposit'}
+                    </span>
+                  </div>
+                  <h2 className="text-2xl font-display font-black text-slate-900 tracking-tight">
+                    +{fmt(paycheckTx.amount)} Monthly Paycheck
+                  </h2>
+                  <div className="flex flex-wrap items-center gap-2 pt-1 text-xs text-slate-700">
+                    <span className="bg-amber-100 text-amber-900 font-semibold px-2 py-0.5 rounded-md border border-amber-200">
+                      1. Living Reserve: {fmt(waterfallBreakdown.totalLivingCostReserve)}
+                    </span>
+                    <span className="bg-rose-100 text-rose-900 font-semibold px-2 py-0.5 rounded-md border border-rose-200">
+                      2. Emergency Top-up: {fmt(waterfallBreakdown.emergencyTopUp)}
+                    </span>
+                    <span className="bg-purple-100 text-purple-900 font-semibold px-2 py-0.5 rounded-md border border-purple-200">
+                      3. Goal Pools: {fmt(waterfallBreakdown.totalGoalAllocations)}
+                    </span>
+                    <span className="bg-emerald-100 text-emerald-900 font-bold px-2 py-0.5 rounded-md border border-emerald-200">
+                      4. Fun Money: {fmt(waterfallBreakdown.funMoneyLeftover)}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="shrink-0 flex items-center gap-2">
+                  {paycheckAllocated ? (
+                    <Badge variant="outline" className="bg-emerald-100/70 text-emerald-800 border-emerald-300 font-display font-bold text-xs px-3 py-2 rounded-xl flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                      Allocated to Pools
+                    </Badge>
+                  ) : (
+                    <Button
+                      onClick={handleExecutePaycheckAllocation}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-display font-extrabold text-sm px-5 py-2.5 rounded-xl shadow-lg shadow-emerald-600/25 flex items-center gap-2 cursor-pointer transition-all hover:scale-105"
+                    >
+                      <Sparkles className="w-4 h-4" />
+                      Auto-Allocate to Pools
+                    </Button>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Total Cash Hero */}
 
       <div className="bg-white rounded-3xl border-2 border-[#FF7AD1]/30 p-6 shadow-[6px_6px_0px_0px_rgba(255,46,184,0.1)]">
         <p className="text-[#FF2EB8] text-xs font-display font-bold uppercase tracking-[0.18em] mb-1">Total Across All Accounts</p>
