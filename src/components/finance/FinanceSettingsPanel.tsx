@@ -7,12 +7,13 @@ import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { CheckCircle2, XCircle, Loader2, Shield, Pencil, Trash2, EyeOff, Palette, Plus, Receipt, Lock, Eye } from 'lucide-react';
+import { CheckCircle2, XCircle, Loader2, Shield, Pencil, Trash2, EyeOff, Palette, Plus, Receipt, Lock, Eye, Globe } from 'lucide-react';
 import DeleteConfirmDialog from '@/components/DeleteConfirmDialog';
 import type { useFinanceData } from '@/hooks/useFinanceData';
 import { useFixedExpenses } from '@/hooks/useFixedExpenses';
 import { formatCurrency } from '@/lib/financeUtils';
 import { useFinanceAssumptions } from '@/hooks/useFinanceAssumptions';
+import { TIMEZONE_PRESETS } from '@/lib/timezoneEngine';
 import { supabase } from '@/integrations/supabase/client';
 
 type Props = { finance: ReturnType<typeof useFinanceData> };
@@ -134,6 +135,7 @@ export default function FinanceSettingsPanel({ finance }: Props) {
 
   const monzoAccount = accounts.find(a => a.provider === 'monzo');
   const isMonzoConnected = !!monzoAccount || monzoStatus?.connected === true;
+  const [livingTimezone, setLivingTimezone] = useState((settings as any)?.user_timezone || 'Europe/London');
 
   useEffect(() => {
     if (settings) {
@@ -141,6 +143,9 @@ export default function FinanceSettingsPanel({ finance }: Props) {
       setAudGbp(String(rates.AUD_GBP ?? 0.52));
       setGbpAud(String(rates.GBP_AUD ?? 1.92));
       setBaseCurrency(settings.base_currency || 'GBP');
+      if ((settings as any).user_timezone) {
+        setLivingTimezone((settings as any).user_timezone);
+      }
     }
   }, [settings]);
 
@@ -608,6 +613,49 @@ export default function FinanceSettingsPanel({ finance }: Props) {
             >
               🇦🇺 Australian Dollar ($ AUD)
             </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Living Location & Timezone Recalibration */}
+      <Card className="border-2 border-indigo-200 bg-gradient-to-r from-indigo-50/50 via-white to-sky-50/50 shadow-sm font-body">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center justify-between font-display">
+            <span className="flex items-center gap-2">
+              <Globe className="w-4 h-4 text-indigo-600" />
+              Living Location & Timezone Recalibration
+            </span>
+            <Badge variant="outline" className="bg-indigo-100 text-indigo-800 border-indigo-300 font-bold text-xs">
+              Active: {livingTimezone}
+            </Badge>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-xs text-slate-600 leading-relaxed">
+            Specify where you physically live (e.g. Manchester, UK). Transactions from overseas banks (like <strong>Up Bank Australia</strong>) will automatically recalibrate timestamps from Australian time to your local Manchester time, so 3:30 PM BST purchases stay on the actual day you spent them.
+          </p>
+
+          <div className="space-y-2">
+            <Label className="text-xs font-semibold text-slate-700">Your Living Timezone</Label>
+            <Select
+              value={livingTimezone}
+              onValueChange={(val) => {
+                setLivingTimezone(val);
+                updateSettings({ user_timezone: val } as any);
+                toast.success(`Living timezone set to ${val}`);
+              }}
+            >
+              <SelectTrigger className="w-full font-medium text-xs bg-white">
+                <SelectValue placeholder="Select timezone" />
+              </SelectTrigger>
+              <SelectContent>
+                {TIMEZONE_PRESETS.map((tz) => (
+                  <SelectItem key={tz.value} value={tz.value} className="text-xs">
+                    {tz.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </CardContent>
       </Card>

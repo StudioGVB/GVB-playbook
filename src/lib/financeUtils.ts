@@ -11,26 +11,18 @@ export const SPEND_EXCLUSION_RANGES: { start: Date; end: Date; label: string }[]
 
 // ---- UK Timezone Date Helpers ----
 
+import { recalibrateBankTimestamp } from './timezoneEngine';
+
 /**
- * Parses any posted_at string or Date into a Date object formatted for UK local time (Europe/London).
- * Automatically converts Australian AEST (+10:00 / +11:00) timestamps to the true UK date & time.
+ * Parses any posted_at string or Date into a Date object formatted for local living time (defaults to Europe/London).
+ * Automatically recalibrates Australian AEST (+10:00 / +11:00) timestamps from Up Bank to true UK local time.
  */
-export function parseUkDate(postedAt: string | Date | null | undefined): Date {
-  if (!postedAt) return new Date();
-  if (postedAt instanceof Date) return postedAt;
-
-  let str = String(postedAt).trim();
-
-  // If string is naive date without timezone e.g. "2026-09-08 03:30:00" or "2026-09-08T03:30:00"
-  // treat as Australian AEST (+10:00) timestamp coming from Up Bank
-  if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}$/.test(str)) {
-    str += '+10:00';
-  } else if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
-    str += 'T12:00:00+10:00';
-  }
-
-  const d = new Date(str);
-  return isNaN(d.getTime()) ? new Date() : d;
+export function parseUkDate(
+  postedAt: string | Date | null | undefined,
+  bankTimezone: string = 'Australia/Melbourne',
+  livingTimezone: string = 'Europe/London'
+): Date {
+  return recalibrateBankTimestamp(postedAt, bankTimezone, livingTimezone);
 }
 
 /**
