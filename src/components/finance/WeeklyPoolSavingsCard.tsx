@@ -6,6 +6,7 @@ import { Sparkles, ArrowRight, ShieldCheck, Clock, Calendar, CheckCircle2, Alert
 import { formatCurrency } from '@/lib/financeUtils';
 import type { useFinanceData, FinanceGoal } from '@/hooks/useFinanceData';
 import { toast } from 'sonner';
+import { sendLocalNotification } from '@/lib/notifications';
 import { format, differenceInCalendarDays, differenceInCalendarWeeks } from 'date-fns';
 
 interface Props {
@@ -113,6 +114,12 @@ export default function WeeklyPoolSavingsCard({ finance, spendablePool = 0, funM
       toast.success(
         `Successfully transferred ${fmt(totalWeeklyRequired)} across ${activePoolsCount} pools! Spendable cash updated.`
       );
+
+      sendLocalNotification('⚡ Pool Savings Locked!', {
+        body: `${fmt(totalWeeklyRequired)} successfully allocated across ${activePoolsCount} savings pools. Your true safe-to-spend cash has been updated.`,
+        icon: '/favicon.png',
+        url: '/finance/pools',
+      });
     } catch (err: any) {
       toast.error('Failed to complete weekly transfer: ' + (err?.message || 'Unknown error'));
     } finally {
