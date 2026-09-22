@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
-import { Home, CheckSquare, FolderKanban, CreditCard, Brain, LogOut, Settings, Menu, X, TrendingUp, ArrowLeftRight, Wallet, Upload, FileText, ChevronDown, History, CalendarDays, Plane, Receipt, DollarSign, Scale, UtensilsCrossed } from 'lucide-react';
+import { Home, CheckSquare, FolderKanban, CreditCard, Brain, LogOut, Settings, Menu, X, TrendingUp, ArrowLeftRight, Wallet, Upload, FileText, ChevronDown, History, CalendarDays, Plane, Receipt, DollarSign, Scale, UtensilsCrossed, ShoppingBag, Sparkles } from 'lucide-react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
