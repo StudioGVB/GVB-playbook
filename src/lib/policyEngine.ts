@@ -207,6 +207,7 @@ export function computeEssentialVariableMonthly(
   for (let w = 1; w <= 12; w++) {
     const ws = startOfWeek(subWeeks(now, w), { weekStartsOn: 1 });
     const we = startOfWeek(subWeeks(now, w - 1), { weekStartsOn: 1 });
+    const weekKey = format(ws, 'yyyy-MM-dd');
     const resolveWeekType = (key: string): WeekType => {
       if (!weekTypeMap) return 'normal';
       if (typeof (weekTypeMap as any).get === 'function') return (weekTypeMap as any).get(key) || 'normal';
