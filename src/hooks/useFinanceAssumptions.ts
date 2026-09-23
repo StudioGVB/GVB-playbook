@@ -60,25 +60,82 @@ export function useFinanceAssumptionsState() {
         };
         setAssumptions(updatedAssumptions);
       } else {
-        // Create defaults using upsert
-        const { data: created } = await supabase
+        const fallback: FinanceAssumptions = {
+          id: 'default-assumptions',
+          user_id: user.id,
+          future_monthly_survival_cost: 0,
+          buffer_months: 3,
+          weekly_fun_budget: 150,
+          expected_monthly_income: null,
+          discretionary_savings_cap: 0,
+          discretionary_start_date: null,
+          discretionary_end_date: null,
+          baseline_savings_percent: 10,
+          income_start_date: null,
+          estimated_essential_variable: 0,
+          target_savings: 0,
+          carry_forward_debt: 0,
+          last_debt_week: null,
+          travel_start_date: null,
+          travel_end_date: null,
+          travel_pool_amount: 0,
+          travel_checklist: [],
+          gross_annual_salary: 37000,
+          pension_percent: 0,
+          student_loan_plan: null,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+        setAssumptions(fallback);
+        // Attempt upsert in background
+        supabase
           .from('finance_assumptions' as any)
           .upsert({
             user_id: user.id,
             future_monthly_survival_cost: 0,
             buffer_months: 3,
-            weekly_fun_budget: 100,
+            weekly_fun_budget: 150,
             discretionary_savings_cap: 0,
             target_savings: 0,
             gross_annual_salary: 37000,
             student_loan_plan: null,
           } as any, { onConflict: 'user_id' })
           .select()
-          .maybeSingle();
-        if (created) setAssumptions(created as any);
+          .maybeSingle()
+          .then(({ data: created }) => {
+            if (created) setAssumptions(created as any);
+          });
       }
     } catch (err) {
       console.error('Assumptions fetch error', err);
+      if (!assumptions) {
+        setAssumptions({
+          id: 'fallback-error-assumptions',
+          user_id: user.id,
+          future_monthly_survival_cost: 0,
+          buffer_months: 3,
+          weekly_fun_budget: 150,
+          expected_monthly_income: null,
+          discretionary_savings_cap: 0,
+          discretionary_start_date: null,
+          discretionary_end_date: null,
+          baseline_savings_percent: 10,
+          income_start_date: null,
+          estimated_essential_variable: 0,
+          target_savings: 0,
+          carry_forward_debt: 0,
+          last_debt_week: null,
+          travel_start_date: null,
+          travel_end_date: null,
+          travel_pool_amount: 0,
+          travel_checklist: [],
+          gross_annual_salary: 37000,
+          pension_percent: 0,
+          student_loan_plan: null,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+      }
     } finally {
       setLoading(false);
     }
