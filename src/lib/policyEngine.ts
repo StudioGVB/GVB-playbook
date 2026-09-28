@@ -663,6 +663,7 @@ export function computeMoneySplit(
   let poolSavingsMonthly = 0;
   for (const g of (goals || [])) {
     if ((g as any)?.is_stash) continue;
+    if (g.start_date && new Date(g.start_date) > now) continue;
     const targetBase = convertToBase ? convertToBase(g.target_amount || 0, g.currency) : (g.target_amount || 0);
     const assignedBase = convertToBase ? convertToBase(g.assigned_amount || 0, g.currency) : (g.assigned_amount || 0);
     const remainingBase = Math.max(0, targetBase - assignedBase);

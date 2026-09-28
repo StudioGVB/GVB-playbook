@@ -70,25 +70,73 @@ export function generate3MonthReportData({ finance, assumptions, fixedExpenses, 
   const avgMonthlyIncome = totalIncome3Mo / 3;
   const avgMonthlySpend = totalSpent3Mo / 3;
 
-  // Upcoming Income / Payday Prediction (e.g. Gamma Salary on last day of month)
+  // Upcoming Income / Payday Predictions (Gamma Salary + Venture + Side Income)
   const gammaTxns = incomeTxns.filter(tx =>
     (tx.merchant || tx.description || '').toLowerCase().includes('gamma') ||
     (tx.merchant || tx.description || '').toLowerCase().includes('salary')
   );
 
-  const lastGammaAmt = gammaTxns.length > 0 ? baseAmt(gammaTxns[0]) : (assumptions?.expected_monthly_income || 3083.33);
+  const lastGammaAmt = gammaTxns.length > 0 ? Math.abs(baseAmt(gammaTxns[0])) : (assumptions?.expected_monthly_income || 3083.33);
   const nextPaydayDate = endOfMonth(now);
   const daysUntilPayday = Math.max(0, differenceInDays(nextPaydayDate, now));
 
+  // Venture Advisory Income (£70/week)
+  const ventureWeeklyAmt = 70.00;
+  const ventureMonthlyAmt = (ventureWeeklyAmt * 52) / 12; // ~£303.33/month
+
+  const streams = [
+    {
+      source: 'Gamma Salary (Primary Paycheck)',
+      amount: lastGammaAmt,
+      frequency: 'Monthly (Last day of month)',
+      scheduleNote: `Deposited on last day of month (${format(nextPaydayDate, 'MMM d, yyyy')} — ${daysUntilPayday === 0 ? 'Today!' : `in ${daysUntilPayday} day${daysUntilPayday > 1 ? 's' : ''}`})`,
+      monthlyEquivalent: lastGammaAmt,
+    },
+    {
+      source: 'Venture Advisory (Weekly Income)',
+      amount: ventureWeeklyAmt,
+      frequency: 'Weekly (£70.00/week)',
+      scheduleNote: `Weekly recurring income (~${fmt(ventureMonthlyAmt)}/month)`,
+      monthlyEquivalent: ventureMonthlyAmt,
+    }
+  ];
+
+  // Also check for any other income categories or transactions
+  const otherIncomeCategories = new Map<string, number>();
+  for (const tx of incomeTxns) {
+    const desc = (tx.merchant || tx.description || '').toLowerCase();
+    if (desc.includes('gamma') || desc.includes('salary') || desc.includes('venture')) continue;
+    const cat = catMap.get(tx.category_id || '')?.name || (tx.merchant || tx.description || 'Other Income');
+    const amt = Math.abs(baseAmt(tx));
+    otherIncomeCategories.set(cat, (otherIncomeCategories.get(cat) || 0) + amt);
+  }
+
+  for (const [catName, total3Mo] of otherIncomeCategories.entries()) {
+    const avgMo = total3Mo / 3;
+    streams.push({
+      source: `${catName} (Side / Project Income)`,
+      amount: avgMo,
+      frequency: 'Variable',
+      scheduleNote: `Total over last 3 months: ${fmt(total3Mo)} (${fmt(avgMo)}/mo avg)`,
+      monthlyEquivalent: avgMo,
+    });
+  }
+
+  const totalExpectedMonthly = streams.reduce((acc, s) => acc + s.monthlyEquivalent, 0);
+
   const predictedIncome = {
-    source: 'Gamma Salary (Primary Paycheck)',
-    amount: lastGammaAmt,
-    paydayDate: format(nextPaydayDate, 'EEEE, MMM d, yyyy'),
-    daysRemaining: daysUntilPayday,
-    formattedText: `Getting paid by Gamma (${fmt(lastGammaAmt)}) on ${format(nextPaydayDate, 'MMM d, yyyy')} (${daysUntilPayday === 0 ? 'Today!' : `in ${daysUntilPayday} day${daysUntilPayday > 1 ? 's' : ''}`})`,
+    streams,
+    totalExpectedMonthly,
+    lastGammaAmt,
+    ventureWeeklyAmt,
+    ventureMonthlyAmt,
+    nextPaydayDate: format(nextPaydayDate, 'EEEE, MMM d, yyyy'),
+    daysUntilPayday,
+    formattedText: `Primary: Gamma (${fmt(lastGammaAmt)} on ${format(nextPaydayDate, 'MMM d')}) + Venture (${fmt(ventureWeeklyAmt)}/wk, ~${fmt(ventureMonthlyAmt)}/mo) = Combined ~${fmt(totalExpectedMonthly)}/month expected income`,
   };
 
   const gammaRuleNote = "Gamma salary is deposited on the LAST day of each calendar month.";
+  const ventureRuleNote = "Venture income is deposited WEEKLY at £70.00/week (~£303.33/month).";
   const rentRuleNote = "Rent is due on the 1ST day of each calendar month.";
 
   // Actual Emergency Fund Saved vs Policy Cushion Floor
@@ -163,6 +211,7 @@ export function generate3MonthReportData({ finance, assumptions, fixedExpenses, 
     emergencyTargetFloor,
     emergencyShortfall,
     gammaRuleNote,
+    ventureRuleNote,
     rentRuleNote,
     incomeTxns,
     expenseTxns,
@@ -194,6 +243,7 @@ export function generateAIMasterPrompt(data: ReturnType<typeof generate3MonthRep
     emergencyTargetFloor,
     emergencyShortfall,
     gammaRuleNote,
+    ventureRuleNote,
     rentRuleNote,
     categoryTotals,
     activePools,
@@ -206,8 +256,12 @@ export function generateAIMasterPrompt(data: ReturnType<typeof generate3MonthRep
 Period: ${startDateStr} to ${endDateStr} | Base Currency: ${baseCurrency}
 
 ## 1. PREDICTED UPCOMING INCOME & PAYDAY
-- ${predictedIncome.formattedText}
-- Income Pattern: ${gammaRuleNote}
+- Summary: ${predictedIncome.formattedText}
+${predictedIncome.streams.map(s => `- **${s.source}**: ${fmt(s.amount)} (${s.frequency}) | ${s.scheduleNote}`).join('\n')}
+- Income Patterns & Rules:
+  - ${gammaRuleNote}
+  - ${ventureRuleNote}
+  - Total Combined Expected Monthly Income: ~${fmt(predictedIncome.totalExpectedMonthly)}/month
 
 ## 2. EXECUTIVE FINANCIAL OVERVIEW
 - Total 3-Month Income: ${fmt(totalIncome3Mo)} (Avg: ${fmt(avgMonthlyIncome)}/month)

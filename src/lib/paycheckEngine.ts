@@ -159,6 +159,7 @@ export function calculatePaycheckWaterfall(
 
   for (const g of goals) {
     if ((g as any).is_stash) continue; // Exclude savings stash from step 3 goal targets
+    if (g.start_date && new Date(g.start_date) > now) continue; // Exclude goals starting in the future
     const targetBase = convertToBase(g.target_amount || 0, g.currency);
     const assignedBase = convertToBase(g.assigned_amount || 0, g.currency);
     const remainingNeeded = Math.max(0, targetBase - assignedBase);

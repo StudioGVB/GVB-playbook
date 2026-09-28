@@ -200,6 +200,7 @@ export default function FinanceBalanceSheet() {
     const now = new Date();
     for (const g of finance.goals) {
       if ((g as any).is_stash) continue;
+      if (g.start_date && new Date(g.start_date) > now) continue;
       const targetBase = finance.convertToBase(g.target_amount || 0, g.currency);
       const assignedBase = finance.convertToBase(g.assigned_amount || 0, g.currency);
       const remainingBase = Math.max(0, targetBase - assignedBase);

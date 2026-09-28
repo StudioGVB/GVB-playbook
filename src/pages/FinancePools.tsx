@@ -90,6 +90,7 @@ export default function FinancePoolsPage() {
   const [newCurrency, setNewCurrency] = useState('AUD');
   const [newColor, setNewColor] = useState(POOL_COLORS[0]);
   const [newPercentAllocation, setNewPercentAllocation] = useState('0');
+  const [newStartDate, setNewStartDate] = useState('');
   const [newDeadline, setNewDeadline] = useState('');
   // Move funds dialog
   const [moveOpen, setMoveOpen] = useState(false);
@@ -105,6 +106,7 @@ export default function FinancePoolsPage() {
   const [editColor, setEditColor] = useState(POOL_COLORS[0]);
   const [editIsStash, setEditIsStash] = useState(false);
   const [editPercentAllocation, setEditPercentAllocation] = useState('0');
+  const [editStartDate, setEditStartDate] = useState('');
   const [editDeadline, setEditDeadline] = useState('');
 
   const baseCurrency = finance.settings?.base_currency || 'AUD';
@@ -317,6 +319,7 @@ export default function FinancePoolsPage() {
       color: editColor,
       is_stash: editIsStash,
       percent_allocation: parseFloat(editPercentAllocation) || 0,
+      start_date: editStartDate || null,
       deadline: editDeadline || null,
     } as any);
     toast.success('Pool updated');
@@ -332,6 +335,7 @@ export default function FinancePoolsPage() {
     setEditColor(goal.color || POOL_COLORS[0]);
     setEditIsStash((goal as any).is_stash === true);
     setEditPercentAllocation(String(goal.percent_allocation || 0));
+    setEditStartDate((goal as any).start_date || '');
     setEditDeadline(goal.deadline || '');
     setEditOpen(true);
   };
@@ -346,9 +350,10 @@ export default function FinancePoolsPage() {
       safety_mode: 'balanced',
       color: newColor,
       percent_allocation: parseFloat(newPercentAllocation) || 0,
+      start_date: newStartDate || null,
       deadline: newDeadline || null,
     } as any);
-    setNewName(''); setNewAmount(''); setNewColor(POOL_COLORS[0]); setNewPercentAllocation('0'); setNewDeadline(''); setCreateOpen(false);
+    setNewName(''); setNewAmount(''); setNewColor(POOL_COLORS[0]); setNewPercentAllocation('0'); setNewStartDate(''); setNewDeadline(''); setCreateOpen(false);
   };
 
   const handleMoveFunds = async () => {
@@ -972,10 +977,17 @@ export default function FinancePoolsPage() {
               <Input type="number" value={newPercentAllocation} onChange={e => setNewPercentAllocation(e.target.value)} placeholder="15" min="0" max="100" />
               <p className="text-[10px] text-muted-foreground">Used if no due date is set.</p>
             </div>
-            <div className="space-y-2">
-              <Label>Target Date / Due Date (Optional)</Label>
-              <Input type="date" value={newDeadline} onChange={e => setNewDeadline(e.target.value)} />
-              <p className="text-[10px] text-muted-foreground">If set, calculates the exact monthly target savings to hit this goal in time.</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Savings Start Date (Optional)</Label>
+                <Input type="date" value={newStartDate} onChange={e => setNewStartDate(e.target.value)} />
+                <p className="text-[10px] text-muted-foreground">Contributions begin on/after this date.</p>
+              </div>
+              <div className="space-y-2">
+                <Label>Target Date / Due Date (Optional)</Label>
+                <Input type="date" value={newDeadline} onChange={e => setNewDeadline(e.target.value)} />
+                <p className="text-[10px] text-muted-foreground">Calculates exact pace to hit goal in time.</p>
+              </div>
             </div>
             <div className="space-y-2">
               <Label>Color</Label>
@@ -1029,10 +1041,17 @@ export default function FinancePoolsPage() {
               <Input type="number" value={editPercentAllocation} onChange={e => setEditPercentAllocation(e.target.value)} min="0" max="100" />
               <p className="text-[10px] text-muted-foreground">Used if no due date is set.</p>
             </div>
-            <div className="space-y-2">
-              <Label>Target Date / Due Date (Optional)</Label>
-              <Input type="date" value={editDeadline} onChange={e => setEditDeadline(e.target.value)} />
-              <p className="text-[10px] text-muted-foreground">If set, calculates the exact monthly target savings to hit this goal in time.</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Savings Start Date (Optional)</Label>
+                <Input type="date" value={editStartDate} onChange={e => setEditStartDate(e.target.value)} />
+                <p className="text-[10px] text-muted-foreground">Contributions begin on/after this date.</p>
+              </div>
+              <div className="space-y-2">
+                <Label>Target Date / Due Date (Optional)</Label>
+                <Input type="date" value={editDeadline} onChange={e => setEditDeadline(e.target.value)} />
+                <p className="text-[10px] text-muted-foreground">Calculates exact pace to hit goal in time.</p>
+              </div>
             </div>
             <div className="space-y-2">
               <Label>Color</Label>

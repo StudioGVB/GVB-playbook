@@ -301,7 +301,11 @@ export default function FinancialReportExporterModal({ trigger }: Props) {
               <h5 className="text-xs font-bold uppercase tracking-wider text-slate-400">Context Rules Included in Exporter:</h5>
               <div className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300 font-medium">
                 <Check className="w-4 h-4 text-emerald-500" />
-                <span>Gamma Salary: <strong>Last day of each month ({reportData.predictedIncome.paydayDate})</strong></span>
+                <span>Gamma Salary: <strong>Last day of each month ({reportData.predictedIncome.nextPaydayDate})</strong></span>
+              </div>
+              <div className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300 font-medium">
+                <Check className="w-4 h-4 text-emerald-500" />
+                <span>Venture Income: <strong>Weekly at £70.00/week (~{reportData.fmt(reportData.predictedIncome.ventureMonthlyAmt)}/month)</strong></span>
               </div>
               <div className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300 font-medium">
                 <Check className="w-4 h-4 text-emerald-500" />

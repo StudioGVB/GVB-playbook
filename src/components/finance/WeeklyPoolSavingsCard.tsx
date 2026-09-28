@@ -34,15 +34,30 @@ export default function WeeklyPoolSavingsCard({ finance, spendablePool = 0, funM
       const remainingBase = Math.max(0, targetBase - assignedBase);
 
       let weeklyRequiredBase = 0;
+      let futureWeeklyPace = 0;
       let daysRemaining: number | null = null;
       let weeksRemaining: number | null = null;
-      let status: 'completed' | 'on_track' | 'urgent' | 'no_deadline' = 'no_deadline';
+      let status: 'completed' | 'on_track' | 'urgent' | 'no_deadline' | 'upcoming' = 'no_deadline';
+
+      const now = new Date();
+      const isFutureStart = !!goal.start_date && new Date(goal.start_date) > now;
 
       if (remainingBase <= 0.01) {
         status = 'completed';
+      } else if (isFutureStart) {
+        status = 'upcoming';
+        weeklyRequiredBase = 0;
+        if (goal.deadline) {
+          const dl = new Date(goal.deadline);
+          const st = new Date(goal.start_date!);
+          const totalDays = Math.max(1, differenceInCalendarDays(dl, st));
+          const totalWeeks = Math.max(1, totalDays / 7);
+          futureWeeklyPace = remainingBase / totalWeeks;
+        } else if (goal.percent_allocation && goal.percent_allocation > 0) {
+          futureWeeklyPace = (goal.percent_allocation / 100) * 100;
+        }
       } else if (goal.deadline) {
         const dl = new Date(goal.deadline);
-        const now = new Date();
         daysRemaining = differenceInCalendarDays(dl, now);
 
         if (daysRemaining <= 0) {
@@ -66,9 +81,11 @@ export default function WeeklyPoolSavingsCard({ finance, spendablePool = 0, funM
         assignedBase,
         remainingBase,
         weeklyRequiredBase,
+        futureWeeklyPace,
         daysRemaining,
         weeksRemaining,
         status,
+        isFutureStart,
       };
     });
   }, [finance.goals, finance.convertToBase]);
@@ -234,7 +251,7 @@ export default function WeeklyPoolSavingsCard({ finance, spendablePool = 0, funM
             <p className="text-xs text-slate-500 italic py-4">No active pools created yet.</p>
           ) : (
             <div className="space-y-2">
-              {poolBreakdown.map(({ goal, remainingBase, weeklyRequiredBase, daysRemaining, status }) => {
+              {poolBreakdown.map(({ goal, remainingBase, weeklyRequiredBase, futureWeeklyPace, daysRemaining, status, isFutureStart }) => {
                 const goalColor = goal.color || '#4558ff';
                 const isComplete = remainingBase <= 0.01;
 
@@ -252,8 +269,11 @@ export default function WeeklyPoolSavingsCard({ finance, spendablePool = 0, funM
                         <span className="font-display font-bold text-slate-900 text-sm block truncate">
                           {goal.name}
                         </span>
-                        <div className="flex items-center gap-2 text-[11px] text-slate-500 font-medium">
+                        <div className="flex items-center gap-2 text-[11px] text-slate-500 font-medium flex-wrap">
                           <span>Left to save: <strong>{fmt(remainingBase)}</strong></span>
+                          {goal.start_date && (
+                            <span>• Starts {format(new Date(goal.start_date), 'MMM d, yyyy')}</span>
+                          )}
                           {goal.deadline && (
                             <span>• Due {format(new Date(goal.deadline), 'MMM d')} ({daysRemaining && daysRemaining > 0 ? `${daysRemaining}d` : 'Due'})</span>
                           )}
@@ -264,15 +284,17 @@ export default function WeeklyPoolSavingsCard({ finance, spendablePool = 0, funM
                     <div className="flex items-center justify-between sm:justify-end gap-4 shrink-0">
                       <div className="text-right">
                         <span className="text-sm font-display font-black text-[#FF2EB8] tabular-nums block">
-                          {isComplete ? 'Fully Funded' : `${fmt(weeklyRequiredBase)}/wk`}
+                          {isComplete ? 'Fully Funded' : isFutureStart ? `£0.00/wk now` : `${fmt(weeklyRequiredBase)}/wk`}
                         </span>
-                        <span className="text-[10px] text-slate-400 font-medium">
-                          {isComplete ? 'Goal reached 🎉' : `≈ ${fmt(weeklyRequiredBase * 4.33)}/mo`}
+                        <span className="text-[10px] text-slate-400 font-medium block">
+                          {isComplete ? 'Goal reached 🎉' : isFutureStart ? `≈ ${fmt(futureWeeklyPace)}/wk from ${format(new Date(goal.start_date!), 'MMM d')}` : `≈ ${fmt(weeklyRequiredBase * 4.33)}/mo`}
                         </span>
                       </div>
 
                       {isComplete ? (
                         <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200 text-[10px]">Done</Badge>
+                      ) : isFutureStart ? (
+                        <Badge className="bg-indigo-50 text-indigo-700 border-indigo-200 text-[10px]">Starts {format(new Date(goal.start_date!), 'MMM d')}</Badge>
                       ) : status === 'urgent' ? (
                         <Badge className="bg-amber-100 text-amber-800 border-amber-200 text-[10px]">Pace up</Badge>
                       ) : (
