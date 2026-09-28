@@ -507,23 +507,23 @@ export function FinanceDashboard() {
             {/* Col 1: Total Monthly Income */}
             <div className="space-y-4">
               <div>
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-0.5">Total Monthly Income</span>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-0.5">Total Net Monthly Income</span>
                 <span className="text-2xl font-display font-black text-blue-600 block tabular-nums leading-none">
                   {fmt(realTimeTotalIncome)}
                 </span>
                 <span className="text-[9px] text-slate-400 font-mono mt-1 block">
-                  ((37000/52)*4.33) + Convert(35 AUD * 4 * 4.25) + Etsy + Back Pocket
+                  Net Gamma ({fmt(netGammaMonthly)}) + Venture ({fmt(ventureMonthly)}) + Side Income
                 </span>
               </div>
 
               <div className="space-y-2 border-t border-slate-100 pt-3">
                 <div className="flex justify-between text-xs">
-                  <span className="text-slate-500">Base Contract (37k/52 * 4.33):</span>
-                  <span className="font-bold tabular-nums text-slate-800">{fmt(baseContractMonthly)}</span>
+                  <span className="text-slate-500">Gamma Net Salary (37k PAYE):</span>
+                  <span className="font-bold tabular-nums text-slate-800">{fmt(netGammaMonthly)}</span>
                 </div>
                 <div className="flex justify-between text-xs">
-                  <span className="text-slate-500">Secondary Job (35 AUD/h * 4 * 4.25):</span>
-                  <span className="font-bold tabular-nums text-slate-800">{fmt(secondaryJobMonthly)}</span>
+                  <span className="text-slate-500">Venture Advisory (£70/wk):</span>
+                  <span className="font-bold tabular-nums text-slate-800">{fmt(ventureMonthly)}</span>
                 </div>
                 <div className="flex justify-between text-xs">
                   <span className="text-slate-500">Etsy Shop (Actual):</span>
@@ -541,7 +541,7 @@ export function FinanceDashboard() {
               <div>
                 <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-0.5">Monthly Outgoings</span>
                 <span className="text-2xl font-display font-black text-rose-600 block tabular-nums leading-none">
-                  {fmt(totalSpent)}
+                  {fmt(totalSpentSoFar)}
                 </span>
                 <span className="text-[9px] text-slate-400 mt-1 block">
                   Actual spent so far vs. {fmt(fixedMonthly + monthlyEssentialBudget + monthlyFunBudget)} budgeted
