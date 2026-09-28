@@ -35,6 +35,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import FinancialReportExporterModal from '@/components/finance/FinancialReportExporterModal';
 
 
 
@@ -501,19 +502,22 @@ export default function FinanceMonthly() {
       {/* Header with month selector */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <h1 className="text-3xl sm:text-4xl font-display font-bold text-slate-900 tracking-tight">Monthly Overview</h1>
-        <div className="flex items-center gap-2 self-start sm:self-auto">
-          <Button variant="ghost" size="icon" onClick={() => setSelectedMonth(m => subMonths(m, 1))}>
-            <ChevronLeft className="w-4 h-4" />
-          </Button>
-          <span className="text-sm font-semibold min-w-[140px] text-center">{monthLabel}</span>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setSelectedMonth(m => addMonths(m, 1))}
-            disabled={monthEnd >= new Date()}
-          >
-            <ChevronRight className="w-4 h-4" />
-          </Button>
+        <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+          <FinancialReportExporterModal />
+          <div className="flex items-center gap-1 bg-white/70 backdrop-blur-sm p-1 rounded-2xl border border-pink-200/50">
+            <Button variant="ghost" size="icon" onClick={() => setSelectedMonth(m => subMonths(m, 1))}>
+              <ChevronLeft className="w-4 h-4" />
+            </Button>
+            <span className="text-sm font-semibold min-w-[130px] text-center">{monthLabel}</span>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setSelectedMonth(m => addMonths(m, 1))}
+              disabled={monthEnd >= new Date()}
+            >
+              <ChevronRight className="w-4 h-4" />
+            </Button>
+          </div>
         </div>
       </div>
 

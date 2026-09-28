@@ -25,6 +25,7 @@ import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
+import FinancialReportExporterModal from '@/components/finance/FinancialReportExporterModal';
 
 
 const FREQ_TO_WEEKLY: Record<string, number> = {
@@ -659,7 +660,8 @@ export default function FinanceBudget() {
           )}
         </div>
 
-        <div className="flex items-center gap-2 self-end sm:self-auto">
+        <div className="flex flex-wrap items-center gap-2 self-end sm:self-auto">
+          <FinancialReportExporterModal />
           {currentWeekType !== 'normal' && (
             <Badge variant="secondary" className="text-[10px]">
               {currentWeekType === 'travel' ? '🏖 Holiday week' : '⚡ Exception week'}
