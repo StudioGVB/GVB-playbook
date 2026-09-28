@@ -307,7 +307,11 @@ export function computePolicySnapshot(
     pensionPercent: assumptions.pension_percent || 0,
     studentLoanPlan: assumptions.student_loan_plan as any,
   }).netMonthly;
-  const monthlyIncome = assumptions.expected_monthly_income || salaryTakeHome || 0;
+  const ventureSideMonthly = (70 * 52) / 12;
+  const baseNetIncome = salaryTakeHome > 0 ? salaryTakeHome + ventureSideMonthly : 0;
+  const monthlyIncome = (assumptions.expected_monthly_income && assumptions.expected_monthly_income > 0)
+    ? assumptions.expected_monthly_income
+    : baseNetIncome;
   const isDrawdownMode = monthlyIncome === 0;
 
   // Core pools
@@ -621,13 +625,17 @@ export function computeMoneySplit(
   convertToBase: (amount: number, currency: string) => number,
   fixedExpensesMonthly?: number,
 ): MoneySplit {
-  // 1. Calculate effective net monthly income
+  // 1. Calculate effective net monthly income (Net Salary via PAYE Tax/NI + Venture Advisory £70/wk)
   const salaryTakeHome = calcTakeHome({
     grossAnnual: assumptions.gross_annual_salary || 0,
     pensionPercent: assumptions.pension_percent || 0,
     studentLoanPlan: assumptions.student_loan_plan as any,
   }).netMonthly;
-  const monthlyIncome = assumptions.expected_monthly_income || salaryTakeHome || 0;
+  const ventureSideMonthly = (70 * 52) / 12; // ~£303.33/mo
+  const baseNetIncome = salaryTakeHome > 0 ? salaryTakeHome + ventureSideMonthly : 0;
+  const monthlyIncome = assumptions.expected_monthly_income && assumptions.expected_monthly_income > 0
+    ? assumptions.expected_monthly_income
+    : baseNetIncome;
 
   // 2. Committed fixed bills (use passed fixed expenses if provided, else historic average)
   let monthlyMandatory = fixedExpensesMonthly ?? 0;
@@ -684,11 +692,8 @@ export function computeMoneySplit(
   // 5. Fun Money = Genuine Leftover (Income - Fixed Bills - Essential Living - Pool Savings)
   const calculatedFunMonthly = Math.max(0, effectiveIncome - monthlyMandatory - essentialVariable - goalSavingsAmount);
   
-  // If user has explicitly overridden weekly_fun_budget with a custom non-default amount (> 0 and != 100), respect it.
-  // Otherwise use the calculated cash flow leftover divided by 4.33 weeks per month.
-  const weeklyFunAmount = (assumptions.weekly_fun_budget && assumptions.weekly_fun_budget > 0 && assumptions.weekly_fun_budget !== 100)
-    ? assumptions.weekly_fun_budget
-    : calculatedFunMonthly / 4.33;
+  // Strictly enforce true dynamic cashflow leftover so that 100% of savings goals and bills are protected first
+  const weeklyFunAmount = calculatedFunMonthly / 4.33;
 
   const funAmount = weeklyFunAmount * 4.33;
   const funPercent = effectiveIncome > 0 ? (funAmount / effectiveIncome) * 100 : 0;
