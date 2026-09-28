@@ -118,6 +118,34 @@ export function generate3MonthReportData({ finance, assumptions, fixedExpenses, 
     paidExternally: e.paid_externally ? 'Yes (External)' : 'Direct',
   }));
 
+  // Map transactions with category names and Pool/Bill tags
+  const goalMap = new Map(finance.goals.map(g => [g.id, g]));
+
+  const formattedTxns = recentTxns.map(tx => {
+    const catObj = catMap.get(tx.category_id || '');
+    const categoryName = catObj?.name || (tx.category_id ? 'Uncategorised' : 'Uncategorised');
+    const tags: string[] = [];
+
+    if (tx.is_fixed || (tx as any).fixed_expense_id || catObj?.type === 'fixed') {
+      tags.push('Bill');
+    }
+
+    if (tx.goal_id) {
+      const pool = goalMap.get(tx.goal_id);
+      tags.push(pool ? `Pool: ${pool.name}` : 'Pool');
+    }
+
+    const categoryWithTags = tags.length > 0 ? `${categoryName} [${tags.join(', ')}]` : categoryName;
+
+    return {
+      ...tx,
+      categoryName,
+      categoryWithTags,
+      isBill: tags.includes('Bill'),
+      poolName: tx.goal_id ? (goalMap.get(tx.goal_id)?.name || 'Pool') : null,
+    };
+  });
+
   return {
     baseCurrency,
     fmt,
@@ -138,7 +166,7 @@ export function generate3MonthReportData({ finance, assumptions, fixedExpenses, 
     rentRuleNote,
     incomeTxns,
     expenseTxns,
-    recentTxns,
+    recentTxns: formattedTxns,
     categoryTotals: Array.from(categoryTotals.values()).sort((a, b) => b.total - a.total),
     activePools,
     formattedFixedBills,
@@ -211,13 +239,13 @@ ${categoryTotals.slice(0, 15).map(c =>
 ).join('\n')}
 
 ## 7. ITEMIZED TRANSACTIONS LOG (LAST 90 DAYS)
-Date       | Type    | Amount      | Merchant / Description        | Category
+Date       | Type    | Amount      | Merchant / Description        | Category & Tags
 -----------|---------|-------------|-------------------------------|------------------
 ${data.recentTxns.slice(0, 100).map(tx => {
   const typeStr = tx.amount > 0 ? 'INCOME ' : 'EXPENSE';
   const dateStr = format(parseUkDate(tx.posted_at), 'yyyy-MM-dd');
   const merchant = (tx.merchant || tx.description || 'Unknown').padEnd(30).slice(0, 30);
-  return `${dateStr} | ${typeStr} | ${fmt(Math.abs(tx.amount)).padEnd(11)} | ${merchant} | ${tx.category_id || 'Uncategorised'}`;
+  return `${dateStr} | ${typeStr} | ${fmt(Math.abs(tx.amount)).padEnd(11)} | ${merchant} | ${tx.categoryWithTags}`;
 }).join('\n')}`;
 }
 
@@ -251,12 +279,13 @@ export function generateCSVReport(data: ReturnType<typeof generate3MonthReportDa
   rows.push('');
 
   rows.push('"ITEMIZED TRANSACTIONS (LAST 90 DAYS)"');
-  rows.push('"Date","Type","Amount","Merchant / Description","Category"');
+  rows.push('"Date","Type","Amount","Merchant / Description","Category & Tags"');
   for (const tx of recentTxns) {
     const typeStr = tx.amount > 0 ? 'INCOME' : 'EXPENSE';
     const dateStr = format(parseUkDate(tx.posted_at), 'yyyy-MM-dd');
     const merchant = (tx.merchant || tx.description || 'Unknown').replace(/"/g, '""');
-    rows.push(`"${dateStr}","${typeStr}","${Math.abs(tx.amount)}","${merchant}","${tx.category_id || 'Uncategorised'}"`);
+    const catStr = tx.categoryWithTags.replace(/"/g, '""');
+    rows.push(`"${dateStr}","${typeStr}","${Math.abs(tx.amount)}","${merchant}","${catStr}"`);
   }
 
   return rows.join('\n');
