@@ -264,6 +264,15 @@ export default function FinancialReportExporterModal({ trigger }: Props) {
 
           {/* TAB 4: 3-Mo Summary Preview */}
           <TabsContent value="preview" className="space-y-4 pt-4">
+            {/* Predicted Income Highlight Banner */}
+            <div className="bg-gradient-to-r from-emerald-500/10 to-teal-500/10 border border-emerald-500/30 p-4 rounded-2xl flex items-center gap-3">
+              <Zap className="w-5 h-5 text-emerald-600 shrink-0" />
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-300 block">Predicted Upcoming Income</span>
+                <span className="text-sm font-bold text-slate-900 dark:text-white">{reportData.predictedIncome.formattedText}</span>
+              </div>
+            </div>
+
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <Card className="border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-800/80 rounded-2xl p-4">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">3-Mo Income</span>
@@ -276,8 +285,9 @@ export default function FinancialReportExporterModal({ trigger }: Props) {
               </Card>
 
               <Card className="border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-800/80 rounded-2xl p-4">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">Net Surplus</span>
-                <span className="text-lg font-black text-slate-900 dark:text-white mt-1 block">{reportData.fmt(reportData.netSurplus3Mo)}</span>
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">Actual Emergency Saved</span>
+                <span className="text-lg font-black text-slate-900 dark:text-white mt-1 block">{reportData.fmt(reportData.actualEmergencySaved)}</span>
+                <span className="text-[10px] text-slate-500 block">Floor target: {reportData.fmt(reportData.emergencyTargetFloor)}</span>
               </Card>
 
               <Card className="border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-800/80 rounded-2xl p-4">
@@ -291,11 +301,15 @@ export default function FinancialReportExporterModal({ trigger }: Props) {
               <h5 className="text-xs font-bold uppercase tracking-wider text-slate-400">Context Rules Included in Exporter:</h5>
               <div className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300 font-medium">
                 <Check className="w-4 h-4 text-emerald-500" />
-                <span>Gamma Salary: <strong>Last day of each month</strong></span>
+                <span>Gamma Salary: <strong>Last day of each month ({reportData.predictedIncome.paydayDate})</strong></span>
               </div>
               <div className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300 font-medium">
                 <Check className="w-4 h-4 text-emerald-500" />
-                <span>Rent Due: <strong>1st of each month</strong></span>
+                <span>Rent Due: <strong>1st day of each month</strong></span>
+              </div>
+              <div className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300 font-medium">
+                <Check className="w-4 h-4 text-emerald-500" />
+                <span>Pool Terminology: <strong>Current Saved Balance (Real Actuals)</strong></span>
               </div>
             </div>
           </TabsContent>

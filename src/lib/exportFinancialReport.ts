@@ -3,7 +3,7 @@ import { FinanceAssumptions } from '@/hooks/useFinanceAssumptions';
 import { FixedExpense } from '@/hooks/useFixedExpenses';
 import { PolicySnapshot } from '@/lib/policyEngine';
 import { formatCurrency, baseAmt, parseUkDate } from '@/lib/financeUtils';
-import { subDays, subMonths, format, startOfMonth, endOfMonth } from 'date-fns';
+import { subMonths, format, endOfMonth, differenceInDays, addMonths } from 'date-fns';
 
 export interface ReportExportData {
   finance: {
@@ -70,19 +70,37 @@ export function generate3MonthReportData({ finance, assumptions, fixedExpenses, 
   const avgMonthlyIncome = totalIncome3Mo / 3;
   const avgMonthlySpend = totalSpent3Mo / 3;
 
-  // Income Sources Context (e.g. Gamma paid on last day of month)
+  // Upcoming Income / Payday Prediction (e.g. Gamma Salary on last day of month)
   const gammaTxns = incomeTxns.filter(tx =>
     (tx.merchant || tx.description || '').toLowerCase().includes('gamma') ||
     (tx.merchant || tx.description || '').toLowerCase().includes('salary')
   );
 
+  const lastGammaAmt = gammaTxns.length > 0 ? baseAmt(gammaTxns[0]) : (assumptions?.expected_monthly_income || 3083.33);
+  const nextPaydayDate = endOfMonth(now);
+  const daysUntilPayday = Math.max(0, differenceInDays(nextPaydayDate, now));
+
+  const predictedIncome = {
+    source: 'Gamma Salary (Primary Paycheck)',
+    amount: lastGammaAmt,
+    paydayDate: format(nextPaydayDate, 'EEEE, MMM d, yyyy'),
+    daysRemaining: daysUntilPayday,
+    formattedText: `Getting paid by Gamma (${fmt(lastGammaAmt)}) on ${format(nextPaydayDate, 'MMM d, yyyy')} (${daysUntilPayday === 0 ? 'Today!' : `in ${daysUntilPayday} day${daysUntilPayday > 1 ? 's' : ''}`})`,
+  };
+
   const gammaRuleNote = "Gamma salary is deposited on the LAST day of each calendar month.";
   const rentRuleNote = "Rent is due on the 1ST day of each calendar month.";
 
-  // Active Goals & Pools
+  // Actual Emergency Fund Saved vs Policy Cushion Floor
+  const emergencyGoal = finance.goals.find(g => (g as any).is_emergency === true || g.name.toLowerCase().includes('emergency'));
+  const actualEmergencySaved = emergencyGoal ? (emergencyGoal.assigned_amount || 0) : 0;
+  const emergencyTargetFloor = snapshot?.emergencyFloor || 0;
+  const emergencyShortfall = Math.max(0, emergencyTargetFloor - actualEmergencySaved);
+
+  // Active Goals & Pools with "Current Saved Balance" terminology
   const activePools = finance.goals.map(g => ({
     name: g.name,
-    assignedAmount: g.assigned_amount || 0,
+    currentSavedBalance: g.assigned_amount || 0,
     targetAmount: g.target_amount || 0,
     targetDate: g.target_date ? format(new Date(g.target_date), 'MMM d, yyyy') : 'No fixed date',
     currency: g.currency || baseCurrency,
@@ -112,6 +130,10 @@ export function generate3MonthReportData({ finance, assumptions, fixedExpenses, 
     avgMonthlySpend,
     essentialSpent3Mo,
     funSpent3Mo,
+    predictedIncome,
+    actualEmergencySaved,
+    emergencyTargetFloor,
+    emergencyShortfall,
     gammaRuleNote,
     rentRuleNote,
     incomeTxns,
@@ -125,7 +147,7 @@ export function generate3MonthReportData({ finance, assumptions, fixedExpenses, 
   };
 }
 
-/** Generate Structured Markdown Prompt for LLMs (ChatGPT, Claude, Gemini) */
+/** Generate Clean, Factual Financial Markdown Summary (No AI Instructions/Prompts) */
 export function generateAIMasterPrompt(data: ReturnType<typeof generate3MonthReportData>): string {
   const {
     baseCurrency,
@@ -139,10 +161,12 @@ export function generateAIMasterPrompt(data: ReturnType<typeof generate3MonthRep
     avgMonthlySpend,
     essentialSpent3Mo,
     funSpent3Mo,
+    predictedIncome,
+    actualEmergencySaved,
+    emergencyTargetFloor,
+    emergencyShortfall,
     gammaRuleNote,
     rentRuleNote,
-    incomeTxns,
-    expenseTxns,
     categoryTotals,
     activePools,
     formattedFixedBills,
@@ -150,95 +174,79 @@ export function generateAIMasterPrompt(data: ReturnType<typeof generate3MonthRep
     assumptions,
   } = data;
 
-  return `SYSTEM INSTRUCTION / USER FINANCIAL CONTEXT DATASET
-================================================================================
-You are my personal AI Financial Advisor and Cashflow Strategist.
-Below is my comprehensive 3-month financial dataset exported from my GVB Playbook application (${startDateStr} to ${endDateStr}).
+  return `# GVB PLAYBOOK — 3-MONTH FINANCIAL SNAPSHOT REPORT
+Period: ${startDateStr} to ${endDateStr} | Base Currency: ${baseCurrency}
 
-Use this dataset to analyze my cashflow velocity, spot spending leaks, project runway, and answer any financial planning questions I ask.
-================================================================================
+## 1. PREDICTED UPCOMING INCOME & PAYDAY
+- ${predictedIncome.formattedText}
+- Income Pattern: ${gammaRuleNote}
 
-1. EXECUTIVE FINANCIAL OVERVIEW (${startDateStr} to ${endDateStr})
---------------------------------------------------------------------------------
-- Base Currency: ${baseCurrency}
+## 2. EXECUTIVE FINANCIAL OVERVIEW
 - Total 3-Month Income: ${fmt(totalIncome3Mo)} (Avg: ${fmt(avgMonthlyIncome)}/month)
 - Total 3-Month Spending: ${fmt(totalSpent3Mo)} (Avg: ${fmt(avgMonthlySpend)}/month)
-- 3-Month Net Surplus / Deficit: ${fmt(netSurplus3Mo)}
-- Essential Spending (Bills + Groceries + Transport): ${fmt(essentialSpent3Mo)} (${Math.round((essentialSpent3Mo / (totalSpent3Mo || 1)) * 100)}%)
+- Net Surplus / Deficit (3-Mo): ${fmt(netSurplus3Mo)}
+- Essential Spending (Bills, Groceries, Transport): ${fmt(essentialSpent3Mo)} (${Math.round((essentialSpent3Mo / (totalSpent3Mo || 1)) * 100)}%)
 - Fun / Discretionary Spending: ${fmt(funSpent3Mo)} (${Math.round((funSpent3Mo / (totalSpent3Mo || 1)) * 100)}%)
-- Liquid Cash Available: ${fmt(snapshot?.availableSavings || 0)}
-- Protected Emergency Floor: ${fmt(snapshot?.emergencyFloor || 0)}
 - Weekly Fun Budget Allowance: ${fmt(snapshot?.weeklyFunBudget || 150)}/week
 
-2. SPECIAL PAY CADENCE & RECURRING RULES
---------------------------------------------------------------------------------
-- INCOME PATTERN: ${gammaRuleNote}
-- RENT COMMITMENT: ${rentRuleNote}
-- EMERGENCY BUFFER TARGET: ${assumptions?.buffer_months || 3} months of living survival costs.
+## 3. EMERGENCY FUND STATUS
+- Actual Emergency Fund Saved: ${fmt(actualEmergencySaved)}
+- Target Emergency Cushion Floor (${assumptions?.buffer_months || 3} months): ${fmt(emergencyTargetFloor)}
+- Emergency Buffer Shortfall: ${fmt(emergencyShortfall)} (${actualEmergencySaved >= emergencyTargetFloor ? '100% Fully Funded ✅' : 'In Progress ⏳'})
 
-3. FIXED EXPENSES & RECURRING COMMITMENTS
---------------------------------------------------------------------------------
+## 4. UPCOMING SAVINGS POOLS & GOALS
+${activePools.length === 0 ? "No active goals or pools." : activePools.map(p => 
+  `- Pool "${p.name}": Current Saved Balance ${fmt(p.currentSavedBalance)} of ${fmt(p.targetAmount)} target (Shortfall: ${fmt(p.shortfall)}, Target Date: ${p.targetDate})`
+).join('\n')}
+
+## 5. FIXED EXPENSES & RECURRING BILLS
+- Rent Rule: ${rentRuleNote}
 ${formattedFixedBills.length === 0 ? "No fixed bills recorded." : formattedFixedBills.map(b => 
   `- ${b.name}: ${fmt(b.amount)} (${b.frequency}, Due: ${b.dueDay}, AutoPay: ${b.autoPay}, Paid: ${b.paidExternally})`
 ).join('\n')}
 
-4. UPCOMING SAVINGS POOLS & GOALS
---------------------------------------------------------------------------------
-${activePools.length === 0 ? "No active goals or pools." : activePools.map(p => 
-  `- Pool "${p.name}": Assigned ${fmt(p.assignedAmount)} of ${fmt(p.targetAmount)} target (Shortfall: ${fmt(p.shortfall)}, Target Date: ${p.targetDate})`
-).join('\n')}
-
-5. TOP SPENDING CATEGORIES (LAST 3 MONTHS)
---------------------------------------------------------------------------------
+## 6. TOP SPENDING CATEGORIES (LAST 3 MONTHS)
 ${categoryTotals.slice(0, 15).map(c => 
   `- ${c.name} [${c.isEssential ? 'Essential' : 'Fun'}]: ${fmt(c.total)} (Avg ${fmt(c.total / 3)}/mo)`
 ).join('\n')}
 
-6. ITEMIZED RECENT TRANSACTIONS (LAST 90 DAYS)
---------------------------------------------------------------------------------
-Date       | Type    | Amount      | Merchant / Note               | Category
+## 7. ITEMIZED TRANSACTIONS LOG (LAST 90 DAYS)
+Date       | Type    | Amount      | Merchant / Description        | Category
 -----------|---------|-------------|-------------------------------|------------------
 ${data.recentTxns.slice(0, 100).map(tx => {
   const typeStr = tx.amount > 0 ? 'INCOME ' : 'EXPENSE';
   const dateStr = format(parseUkDate(tx.posted_at), 'yyyy-MM-dd');
   const merchant = (tx.merchant || tx.description || 'Unknown').padEnd(30).slice(0, 30);
   return `${dateStr} | ${typeStr} | ${fmt(Math.abs(tx.amount)).padEnd(11)} | ${merchant} | ${tx.category_id || 'Uncategorised'}`;
-}).join('\n')}
-
-================================================================================
-INSTRUCTIONS FOR THE AI ADVISOR:
-1. Review my 3-month income vs spending habits.
-2. Confirm if my spending aligns with my weekly fun budget (${fmt(snapshot?.weeklyFunBudget || 150)}/wk).
-3. Evaluate if I am safely on track for my upcoming pools and fixed bill due dates.
-4. Answer my follow-up financial questions with realistic, actionable advice.
-================================================================================`;
+}).join('\n')}`;
 }
 
 /** Generate CSV Content string for Excel / Google Sheets */
 export function generateCSVReport(data: ReturnType<typeof generate3MonthReportData>): string {
-  const { fmt, baseCurrency, recentTxns, activePools, formattedFixedBills } = data;
+  const { fmt, baseCurrency, recentTxns, activePools, formattedFixedBills, predictedIncome } = data;
 
   const rows: string[] = [];
   rows.push(`"GVB Playbook 3-Month Financial Export (${data.startDateStr} to ${data.endDateStr})"`);
   rows.push(`"Base Currency", "${baseCurrency}"`);
+  rows.push(`"Predicted Income", "${predictedIncome.formattedText}"`);
   rows.push(`"Total 3-Month Income", "${data.totalIncome3Mo}"`);
   rows.push(`"Total 3-Month Spending", "${data.totalSpent3Mo}"`);
   rows.push(`"Net Surplus", "${data.netSurplus3Mo}"`);
-  rows.push(`"Special Income Rule", "${data.gammaRuleNote}"`);
-  rows.push(`"Special Rent Rule", "${data.rentRuleNote}"`);
+  rows.push(`"Actual Emergency Fund Saved", "${data.actualEmergencySaved}"`);
+  rows.push(`"Target Emergency Floor", "${data.emergencyTargetFloor}"`);
+  rows.push('');
+
+  rows.push('"UPCOMING SAVINGS POOLS & GOALS"');
+  rows.push('"Goal Name","Current Saved Balance","Target Amount","Shortfall","Target Date"');
+  for (const p of activePools) {
+    rows.push(`"${p.name}","${p.currentSavedBalance}","${p.targetAmount}","${p.shortfall}","${p.targetDate}"`);
+  }
   rows.push('');
 
   rows.push('"FIXED EXPENSES & BILLS"');
   rows.push('"Name","Amount","Frequency","Due Day","Auto Pay","Paid Externally"');
   for (const b of formattedFixedBills) {
     rows.push(`"${b.name}","${b.amount}","${b.frequency}","${b.dueDay}","${b.autoPay}","${b.paidExternally}"`);
-  }
-  rows.push('');
-
-  rows.push('"UPCOMING POOLS & GOALS"');
-  rows.push('"Goal Name","Assigned Amount","Target Amount","Shortfall","Target Date"');
-  for (const p of activePools) {
-    rows.push(`"${p.name}","${p.assignedAmount}","${p.targetAmount}","${p.shortfall}","${p.targetDate}"`);
   }
   rows.push('');
 
@@ -269,7 +277,7 @@ export function downloadFile(content: string, filename: string, mimeType: string
 
 /** Print-to-PDF / Open Formatted Printable Window */
 export function printPDFReport(data: ReturnType<typeof generate3MonthReportData>) {
-  const markdownPrompt = generateAIMasterPrompt(data);
+  const reportText = generateAIMasterPrompt(data);
   const printWindow = window.open('', '_blank');
   if (!printWindow) return;
 
@@ -277,22 +285,19 @@ export function printPDFReport(data: ReturnType<typeof generate3MonthReportData>
     <!DOCTYPE html>
     <html>
       <head>
-        <title>GVB Playbook 3-Month Financial AI Report</title>
+        <title>GVB Playbook 3-Month Financial Report</title>
         <style>
           body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 30px; color: #1e293b; background: #fff; line-height: 1.5; }
           h1 { font-size: 22px; color: #db2777; border-bottom: 2px solid #fbcfe8; padding-bottom: 8px; margin-bottom: 20px; }
-          h2 { font-size: 16px; color: #0f172a; margin-top: 24px; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px; }
+          h2 { font-size: 15px; color: #0f172a; margin-top: 20px; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px; }
           .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
-          .card { background: #f8fafc; border: 1px solid #e2e8f0; padding: 12px; rounded-radius: 8px; border-radius: 8px; }
+          .card { background: #f8fafc; border: 1px solid #e2e8f0; padding: 12px; border-radius: 8px; }
           .card-title { font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: bold; }
-          .card-value { font-size: 18px; font-weight: 800; color: #0f172a; margin-top: 4px; }
+          .card-value { font-size: 17px; font-weight: 800; color: #0f172a; margin-top: 4px; }
           table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12px; }
           th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #e2e8f0; }
           th { background: #f1f5f9; color: #475569; font-weight: 700; }
-          .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 10px; font-weight: bold; }
-          .badge-income { background: #dcfce7; color: #166534; }
-          .badge-expense { background: #fee2e2; color: #991b1b; }
-          pre { background: #1e293b; color: #f8fafc; padding: 16px; border-radius: 8px; overflow-x: auto; font-size: 11px; white-space: pre-wrap; }
+          pre { background: #f8fafc; color: #0f172a; border: 1px solid #cbd5e1; padding: 16px; border-radius: 8px; overflow-x: auto; font-size: 11px; white-space: pre-wrap; font-family: monospace; }
           @media print {
             body { padding: 0; }
             .no-print { display: none; }
@@ -306,8 +311,13 @@ export function printPDFReport(data: ReturnType<typeof generate3MonthReportData>
           </button>
         </div>
 
-        <h1>📊 GVB Playbook — 3-Month Financial AI Report</h1>
+        <h1>📊 GVB Playbook — 3-Month Financial Report</h1>
         <p style="font-size: 12px; color: #64748b;">Period: <strong>${data.startDateStr}</strong> to <strong>${data.endDateStr}</strong> | Base Currency: <strong>${data.baseCurrency}</strong></p>
+
+        <div class="card" style="margin-bottom: 16px; background: #fff5fa; border-color: #fbcfe8;">
+          <div class="card-title" style="color: #db2777;">💵 Predicted Upcoming Income</div>
+          <div style="font-size: 14px; font-weight: bold; color: #0f172a; margin-top: 4px;">${data.predictedIncome.formattedText}</div>
+        </div>
 
         <div class="grid">
           <div class="card">
@@ -319,27 +329,21 @@ export function printPDFReport(data: ReturnType<typeof generate3MonthReportData>
             <div class="card-value" style="color: #dc2626;">${data.fmt(data.totalSpent3Mo)}</div>
           </div>
           <div class="card">
-            <div class="card-title">Net Surplus</div>
-            <div class="card-value">${data.fmt(data.netSurplus3Mo)}</div>
+            <div class="card-title">Actual Emergency Saved</div>
+            <div class="card-value">${data.fmt(data.actualEmergencySaved)}</div>
           </div>
           <div class="card">
-            <div class="card-title">Weekly Fun Budget</div>
-            <div class="card-value" style="color: #db2777;">${data.fmt(data.snapshot?.weeklyFunBudget || 150)}</div>
+            <div class="card-title">Target Cushion Floor</div>
+            <div class="card-value" style="color: #db2777;">${data.fmt(data.emergencyTargetFloor)}</div>
           </div>
         </div>
-
-        <h2>📌 Special Income & Fixed Bill Cadence</h2>
-        <ul>
-          <li><strong>Income Pattern:</strong> ${data.gammaRuleNote}</li>
-          <li><strong>Rent Pattern:</strong> ${data.rentRuleNote}</li>
-        </ul>
 
         <h2>🎯 Upcoming Savings Pools & Goals</h2>
         <table>
           <thead>
             <tr>
               <th>Goal Name</th>
-              <th>Assigned Amount</th>
+              <th>Current Saved Balance</th>
               <th>Target Amount</th>
               <th>Shortfall</th>
               <th>Target Date</th>
@@ -349,7 +353,7 @@ export function printPDFReport(data: ReturnType<typeof generate3MonthReportData>
             ${data.activePools.map(p => `
               <tr>
                 <td><strong>${p.name}</strong></td>
-                <td>${data.fmt(p.assignedAmount)}</td>
+                <td>${data.fmt(p.currentSavedBalance)}</td>
                 <td>${data.fmt(p.targetAmount)}</td>
                 <td>${data.fmt(p.shortfall)}</td>
                 <td>${p.targetDate}</td>
@@ -358,8 +362,8 @@ export function printPDFReport(data: ReturnType<typeof generate3MonthReportData>
           </tbody>
         </table>
 
-        <h2>🤖 Structured LLM Master Prompt (Formatted for ChatGPT / Claude / Gemini)</h2>
-        <pre>${markdownPrompt}</pre>
+        <h2>📋 Complete Financial Text Snapshot</h2>
+        <pre>${reportText}</pre>
 
         <script>
           setTimeout(() => {
