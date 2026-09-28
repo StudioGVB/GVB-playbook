@@ -376,23 +376,23 @@ export function computePolicySnapshot(
     weeklyFunBudget = 0;
   }
 
+  // Last week performance & overspend deduction
+  const lastWeekStart = subWeeks(weekStart, 1);
+  const lastWeekFunSpent = computeWeeklyFunSpend(transactions, categories, lastWeekStart, weekStart, trips);
+  const lastWeekOverspend = Math.max(0, lastWeekFunSpent - baseWeeklyFun);
+
   // Carry-forward debt: deduct last week's overspend from this week's fun budget
-  // Hard-capped at 100 (base currency) so a single bad week can't wipe out this week's allowance.
-  const CARRY_FORWARD_CAP = 100;
-  const carryForwardDebt = Math.min(assumptions.carry_forward_debt ?? 0, CARRY_FORWARD_CAP);
   const currentWeekKey = format(weekStart, 'yyyy-MM-dd');
   const debtAppliesThisWeek = assumptions.last_debt_week === currentWeekKey;
-  const effectiveDebt = debtAppliesThisWeek && !isTravelWeek ? carryForwardDebt : 0;
+  const storedDebt = debtAppliesThisWeek ? (assumptions.carry_forward_debt ?? 0) : 0;
+  const carryForwardDebt = Math.max(lastWeekOverspend, storedDebt);
+  const effectiveDebt = !isTravelWeek ? carryForwardDebt : 0;
+
+  // Deduct last week's overspend from this week's fun budget
   weeklyFunBudget = Math.max(0, weeklyFunBudget - effectiveDebt);
 
-  // Rollover: disabled in drawdown mode (living pool already self-corrects)
-  let rollover = 0;
-  if (!isDrawdownMode) {
-    const lastWeekStart = subWeeks(weekStart, 1);
-    const lastWeekSpent = computeWeeklyFunSpend(transactions, categories, lastWeekStart, weekStart, trips);
-    rollover = Math.max(0, baseWeeklyFun + boostAmount - lastWeekSpent);
-    weeklyFunBudget += rollover;
-  }
+  // Underspent rollover is NOT added to weeklyFunBudget (it is swept into Savings Stash by auto-settle)
+  const rollover = Math.max(0, baseWeeklyFun - lastWeekFunSpent);
 
   // Bidirectional overspend: each category's excess eats into the other
   const essentialSpentThisWeek = computeWeeklyEssentialSpend(transactions, categories, weekStart, undefined, trips);

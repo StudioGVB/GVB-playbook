@@ -10,7 +10,7 @@ import { formatCurrency } from '@/lib/financeUtils';
 import type { useFinanceData } from '@/hooks/useFinanceData';
 import type { FinanceAssumptions } from '@/hooks/useFinanceAssumptions';
 import type { WeeklyBoost } from '@/hooks/useWeeklyBoosts';
-import { Wallet, Calendar, TrendingDown, Target, Shield, PiggyBank, Plane, Clock, Zap, X, Gauge, ChevronDown } from 'lucide-react';
+import { Wallet, Calendar, TrendingDown, Target, Shield, PiggyBank, Plane, Clock, Zap, X, Gauge, ChevronDown, AlertTriangle } from 'lucide-react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 
 interface Props {
@@ -77,6 +77,16 @@ export default function WeeklyAllowanceHero({ finance, assumptions, fixedExpense
       {/* Hero Card */}
       <Card className={`border-2 ${statusColors.ring} ${statusColors.bg} overflow-hidden`}>
         <CardContent className="p-0">
+          {/* Overspend warning flag banner */}
+          {snapshot.carryForwardDebt > 0 && !isDrawdownMode && (
+            <div className="bg-amber-500/10 border-b border-amber-500/20 px-4 py-2.5 flex items-center gap-2.5 text-xs text-amber-700 dark:text-amber-300 font-medium">
+              <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
+              <span>
+                You spent <strong className="font-bold">{fmt(snapshot.carryForwardDebt)}</strong> more than you should have last week, so you need to spend <strong className="font-bold">{fmt(snapshot.carryForwardDebt)}</strong> less this week to stay on track.
+              </span>
+            </div>
+          )}
+
           {/* Drawdown badge */}
           {isDrawdownMode && (
             <div className="bg-amber-500/10 px-4 py-2 flex items-center justify-center gap-2 text-xs font-semibold text-amber-600 border-b border-amber-500/10">

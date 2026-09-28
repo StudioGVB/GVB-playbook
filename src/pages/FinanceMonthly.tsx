@@ -118,12 +118,12 @@ export default function FinanceMonthly() {
     });
   }, [finance.transactions, prevMonthStart, prevMonthEnd]);
 
-  // Only treat as fixed when explicitly linked to a Cost-of-Living bill.
-  // A generic "Bills" category is not enough: the user must choose which
-  // bill it belongs to so Bolt/transport/etc. don't get counted as fixed.
+  // Treat transaction as fixed bill if linked to fixed expense, has is_fixed flag, or belongs to fixed category
   const isFixedTx = useCallback((tx: any): boolean => {
-    return !!tx.fixed_expense_id;
-  }, []);
+    if (tx.is_fixed || tx.fixed_expense_id) return true;
+    const cat = catMap.get(tx.category_id || '');
+    return cat?.type === 'fixed';
+  }, [catMap]);
 
   // Spending breakdown
   const { essentialSpent, funSpent, fixedSpent, incomeTotal, categoryBreakdown, dailyData } = useMemo(() => {

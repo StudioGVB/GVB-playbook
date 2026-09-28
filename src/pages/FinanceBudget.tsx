@@ -313,38 +313,13 @@ export default function FinanceBudget() {
           await updateAssumptions({ carry_forward_debt: 0, last_debt_week: null }, true);
         }
       } else if (netDifference < 0) {
-        // OVERSPENT: Deduct straight out of Savings Stash
+        // OVERSPENT: Carry forward to this week's fun budget so weekly allowance decreases to stay on track
         const overspend = Math.abs(netDifference);
-        const currentStashBal = stashGoal?.assigned_amount || 0;
-        const deductFromStash = Math.min(currentStashBal, overspend);
-        const remainingUncovered = overspend - deductFromStash;
-
-        if (stashGoal && deductFromStash > 0) {
-          await finance.updateGoal(stashGoal.id, {
-            assigned_amount: Math.max(0, currentStashBal - deductFromStash),
-            is_stash: true,
-          } as any);
-        }
-
-        if (remainingUncovered > 0) {
-          const CARRY_FORWARD_CAP = 100;
-          const cappedDebt = Math.min(remainingUncovered, CARRY_FORWARD_CAP);
-          await updateAssumptions({
-            carry_forward_debt: cappedDebt,
-            last_debt_week: format(weekStart, 'yyyy-MM-dd'),
-          }, true);
-
-          if (deductFromStash > 0) {
-            toast.warning(`Deducted ${fmt(deductFromStash)} from Savings Stash for last week's overspend (${fmt(cappedDebt)} carried forward) 📉`);
-          } else {
-            toast.warning(`Last week's overspend of ${fmt(cappedDebt)} carried forward to this week (Stash empty)`);
-          }
-        } else {
-          if (assumptions.carry_forward_debt > 0) {
-            await updateAssumptions({ carry_forward_debt: 0, last_debt_week: null }, true);
-          }
-          toast.info(`Last week's overspend of ${fmt(overspend)} was deducted straight from Savings Stash 📉`);
-        }
+        await updateAssumptions({
+          carry_forward_debt: overspend,
+          last_debt_week: format(weekStart, 'yyyy-MM-dd'),
+        }, true);
+        toast.warning(`You spent ${fmt(overspend)} more than you should have last week. Deducted ${fmt(overspend)} from this week's budget to stay on track. 📉`);
       } else {
         if (assumptions.carry_forward_debt > 0) {
           await updateAssumptions({ carry_forward_debt: 0, last_debt_week: null }, true);

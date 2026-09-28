@@ -30,8 +30,10 @@ import { useFixedExpenses } from '@/hooks/useFixedExpenses';
 import { useWeeklyBoosts } from '@/hooks/useWeeklyBoosts';
 import { useWeekTypes } from '@/hooks/useWeekTypes';
 import { computePolicySnapshot } from '@/lib/policyEngine';
-import { formatCurrency, baseAmt } from '@/lib/financeUtils';
+import { formatCurrency, baseAmt, parseUkDate } from '@/lib/financeUtils';
+import { calcTakeHome } from '@/lib/ukTakeHome';
 import { MultiSegmentDonut } from '@/components/finance/MultiSegmentDonut';
+import { MondayWeeklyReviewCard } from '@/components/finance/MondayWeeklyReviewCard';
 import { startOfMonth, endOfMonth, getDaysInMonth, getDate, format } from 'date-fns';
 
 export function FinanceDashboard() {
@@ -49,6 +51,7 @@ export function FinanceDashboard() {
   const [loadingStatus, setLoadingStatus] = useState(true);
   const [daysRange, setDaysRange] = useState<number>(90);
   const [showAdvanced, setShowAdvanced] = useState<boolean>(false);
+  const [showMondayPreview, setShowMondayPreview] = useState<boolean>(false);
 
   // Fetch status on mount
   useEffect(() => {
@@ -96,7 +99,8 @@ export function FinanceDashboard() {
   // Filters for current month transactions
   const monthTxns = useMemo(() => {
     return finance.transactions.filter(tx => {
-      const d = new Date(tx.posted_at);
+      if (tx.is_reimbursable) return false;
+      const d = parseUkDate(tx.posted_at);
       return d >= monthStart && d <= monthEnd;
     });
   }, [finance.transactions, monthStart, monthEnd]);
@@ -108,8 +112,7 @@ export function FinanceDashboard() {
 
   // Is transaction fixed expense?
   const isFixedTx = (tx: typeof finance.transactions[0]) => {
-    if (tx.is_fixed) return true;
-    if (tx.fixed_expense_id) return true;
+    if (tx.is_fixed || tx.fixed_expense_id) return true;
     const cat = finance.categories.find(c => c.id === tx.category_id);
     return cat?.type === 'fixed';
   };
@@ -134,6 +137,7 @@ export function FinanceDashboard() {
   }, [monthTxns, finance.categories, essentialCatIds]);
 
   const fixedMonthly = fixedExpensesMonthlyAll;
+  const totalSpentSoFar = essentialSpent + funSpent + fixedSpent;
   const totalSpent = essentialSpent + funSpent + fixedMonthly;
 
   const monthlyEssentialBudget = snapshot ? snapshot.weeklyEssentialBudget * 4.33 : 0;
@@ -333,12 +337,15 @@ export function FinanceDashboard() {
       .reduce((sum, tx) => sum + baseAmt(tx), 0);
   }, [finance.transactions]);
 
-  const baseContractWeekly = 37000 / 52;
-  const baseContractMonthly = baseContractWeekly * 4.33; // standard monthly equivalent of weekly contract
-  const secondaryJobAudMonthly = 35 * 4 * 4.25; // 35 AUD/h * 4 hours/wk * 4.25 wks/mo
-  const secondaryJobMonthly = finance.convertToBase(secondaryJobAudMonthly, 'AUD');
+  const grossAnnualSalary = assumptions?.gross_annual_salary || 37000;
+  const netGammaMonthly = calcTakeHome({
+    grossAnnual: grossAnnualSalary,
+    pensionPercent: assumptions?.pension_percent || 0,
+    studentLoanPlan: null,
+  }).netMonthly;
+  const ventureMonthly = (70 * 52) / 12; // ~£303.33/mo
   
-  const realTimeTotalIncome = baseContractMonthly + secondaryJobMonthly + etsyIncome + backPocketIncome;
+  const realTimeTotalIncome = netGammaMonthly + ventureMonthly + etsyIncome + backPocketIncome;
   const realTimeNetBalance = realTimeTotalIncome - (fixedMonthly + monthlyEssentialBudget + monthlyFunBudget);
 
   // Breakdown of where net balance goes (which pools)
@@ -472,6 +479,13 @@ export function FinanceDashboard() {
           </button>
         </div>
       </div>
+
+      {/* Monday Weekly Review Breakdown Card */}
+      <MondayWeeklyReviewCard
+        finance={finance}
+        assumptions={assumptions}
+        forceShow={showMondayPreview}
+      />
 
       {/* Real-Time Cash Flow Blueprint Card */}
       <div className="bg-white border border-border/80 rounded-[2.2rem] p-6 shadow-sm mb-6 relative overflow-hidden text-slate-800">
