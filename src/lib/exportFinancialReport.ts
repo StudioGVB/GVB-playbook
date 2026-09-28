@@ -257,7 +257,7 @@ Period: ${startDateStr} to ${endDateStr} | Base Currency: ${baseCurrency}
 
 ## 1. PREDICTED UPCOMING INCOME & PAYDAY
 - Summary: ${predictedIncome.formattedText}
-${predictedIncome.streams.map(s => `- **${s.source}**: ${fmt(s.amount)} (${s.frequency}) | ${s.scheduleNote}`).join('\n')}
+${predictedIncome.streams.map(s => `- ${s.source}: ${fmt(s.amount)} (${s.frequency}) | ${s.scheduleNote}`).join('\n')}
 - Income Patterns & Rules:
   - ${gammaRuleNote}
   - ${ventureRuleNote}

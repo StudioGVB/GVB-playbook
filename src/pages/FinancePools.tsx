@@ -831,11 +831,21 @@ export default function FinancePoolsPage() {
                   )}
                 </div>
 
-                {/* Due date & required allocation stats */}
+                {/* Start date, Due date & required allocation stats */}
                 <div className="text-xs space-y-1.5 border-t border-slate-100 pt-3 mt-1">
+                  {goal.start_date && (
+                    <div className="flex justify-between">
+                      <span className="text-slate-500 font-semibold">Savings Start:</span>
+                      <span className="font-bold text-indigo-600">
+                        {format(new Date(goal.start_date), 'MMM d, yyyy')}
+                        {new Date(goal.start_date) > new Date() && ' (Upcoming)'}
+                      </span>
+                    </div>
+                  )}
                   {goal.deadline ? (() => {
                     const dl = new Date(goal.deadline);
                     const now = new Date();
+                    const isFutureStart = !!goal.start_date && new Date(goal.start_date) > now;
                     const daysRemaining = Math.ceil((dl.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
                     const isOverdue = daysRemaining < 0;
                     const daysLabel = isOverdue 
@@ -844,12 +854,20 @@ export default function FinancePoolsPage() {
                         ? 'Due today' 
                         : `${daysRemaining}d left`;
                     const daysRemainingClamped = Math.max(1, daysRemaining);
-                    const weeksRemaining = daysRemainingClamped / 7;
                     const targetVal = finance.convertToBase(goal.target_amount || 0, goal.currency);
                     const assignedVal = finance.convertToBase(goal.assigned_amount || 0, goal.currency);
                     const remaining = Math.max(0, targetVal - assignedVal);
-                    const weeklyRequired = remaining / weeksRemaining;
-                    const monthlyRequired = weeklyRequired * 4.33;
+
+                    let weeklyRequired = 0;
+                    if (isFutureStart) {
+                      const st = new Date(goal.start_date!);
+                      const daysBetween = Math.max(1, Math.ceil((dl.getTime() - st.getTime()) / (1000 * 60 * 60 * 24)));
+                      const weeksBetween = daysBetween / 7;
+                      weeklyRequired = remaining / weeksBetween;
+                    } else {
+                      const weeksRemaining = daysRemainingClamped / 7;
+                      weeklyRequired = remaining / weeksRemaining;
+                    }
                     
                     return (
                       <>
@@ -862,7 +880,7 @@ export default function FinancePoolsPage() {
                         <div className="flex justify-between">
                           <span className="text-slate-500 font-semibold">Weekly Pace:</span>
                           <span className="font-extrabold text-indigo-600">
-                            {formatCurrency(weeklyRequired, baseCurrency)}/wk
+                            {formatCurrency(weeklyRequired, baseCurrency)}/wk {isFutureStart && `(from ${format(new Date(goal.start_date!), 'MMM d')})`}
                           </span>
                         </div>
                         <div className="flex justify-between">

@@ -18,6 +18,7 @@ export default function FinanceGoals({ finance }: Props) {
   const [name, setName] = useState('');
   const [amount, setAmount] = useState('');
   const [currency, setCurrency] = useState(settings?.base_currency || 'AUD');
+  const [startDate, setStartDate] = useState('');
   const [deadline, setDeadline] = useState('');
   const [priority, setPriority] = useState('2');
   const [safetyMode, setSafetyMode] = useState('balanced');
@@ -29,12 +30,14 @@ export default function FinanceGoals({ finance }: Props) {
       name: name.trim(),
       target_amount: parseFloat(amount),
       currency,
+      start_date: startDate || undefined,
       deadline: deadline || undefined,
       priority: parseInt(priority),
       safety_mode: safetyMode,
     });
     setName('');
     setAmount('');
+    setStartDate('');
     setDeadline('');
     setOpen(false);
   };
@@ -99,9 +102,14 @@ export default function FinanceGoals({ finance }: Props) {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
+                  <Label>Start Date (optional)</Label>
+                  <Input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} />
+                </div>
+                <div className="space-y-2">
                   <Label>Deadline (optional)</Label>
                   <Input type="date" value={deadline} onChange={e => setDeadline(e.target.value)} />
                 </div>
+              </div>
                 <div className="space-y-2">
                   <Label>Safety Mode</Label>
                   <Select value={safetyMode} onValueChange={setSafetyMode}>
