@@ -116,23 +116,23 @@ export default function FinancialReportExporterModal({ trigger }: Props) {
         )}
       </DialogTrigger>
 
-      <DialogContent className="max-w-4xl max-h-[90vh] rounded-3xl p-6 sm:p-8 overflow-hidden font-body bg-white dark:bg-slate-900 border border-pink-200/50">
+      <DialogContent className="max-w-4xl max-h-[92vh] rounded-3xl p-6 sm:p-8 overflow-hidden font-body bg-white dark:bg-slate-900 border border-pink-200/50 shadow-2xl">
         <DialogHeader className="border-b border-slate-100 dark:border-slate-800 pb-4">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-pink-500 to-rose-500 text-white flex items-center justify-center shadow-lg shadow-pink-500/20 shrink-0">
+          <div className="flex items-start gap-4">
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-pink-500 to-rose-500 text-white flex items-center justify-center shadow-lg shadow-pink-500/20 shrink-0 mt-0.5">
               <Bot className="w-6 h-6" />
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <DialogTitle className="text-xl font-bold text-slate-900 dark:text-white">
+            <div className="space-y-1 flex-1">
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <DialogTitle className="text-xl font-extrabold tracking-tight text-slate-900 dark:text-white">
                   3-Month AI Financial Report & Exporter
                 </DialogTitle>
-                <Badge className="bg-pink-100 text-pink-700 dark:bg-pink-950 dark:text-pink-300 font-bold border-pink-200 text-xs">
+                <Badge className="bg-pink-100 text-pink-700 dark:bg-pink-950 dark:text-pink-300 font-bold border-pink-200 text-xs px-2.5 py-0.5 rounded-full">
                   AI Ready
                 </Badge>
               </div>
-              <DialogDescription className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                Export comprehensive 90-day financial data (income, rent due 1st, Gamma pay last day, fixed bills, pools) for AI bots or spreadsheets.
+              <DialogDescription className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                Export comprehensive 90-day financial data (income, rent due 1st, Gamma pay last day, fixed bills, pools) formatted for AI bots or spreadsheets.
               </DialogDescription>
             </div>
           </div>
@@ -140,20 +140,20 @@ export default function FinancialReportExporterModal({ trigger }: Props) {
 
         {/* Export Options Tabs */}
         <Tabs defaultValue="copy-ai" className="w-full mt-4">
-          <TabsList className="grid grid-cols-4 w-full bg-slate-100 dark:bg-slate-800/80 p-1.5 rounded-2xl">
-            <TabsTrigger value="copy-ai" className="rounded-xl text-xs font-bold gap-1.5">
+          <TabsList className="grid grid-cols-4 w-full bg-slate-100 dark:bg-slate-800/80 p-1.5 rounded-2xl border border-slate-200/60 dark:border-slate-800">
+            <TabsTrigger value="copy-ai" className="rounded-xl text-xs font-bold gap-1.5 transition-all data-[state=active]:bg-white dark:data-[state=active]:bg-slate-900 data-[state=active]:shadow-sm">
               <Bot className="w-4 h-4 text-[#FF2EB8]" />
               Copy AI Prompt
             </TabsTrigger>
-            <TabsTrigger value="pdf" className="rounded-xl text-xs font-bold gap-1.5">
+            <TabsTrigger value="pdf" className="rounded-xl text-xs font-bold gap-1.5 transition-all data-[state=active]:bg-white dark:data-[state=active]:bg-slate-900 data-[state=active]:shadow-sm">
               <FileText className="w-4 h-4 text-rose-500" />
               Save PDF
             </TabsTrigger>
-            <TabsTrigger value="csv" className="rounded-xl text-xs font-bold gap-1.5">
+            <TabsTrigger value="csv" className="rounded-xl text-xs font-bold gap-1.5 transition-all data-[state=active]:bg-white dark:data-[state=active]:bg-slate-900 data-[state=active]:shadow-sm">
               <FileSpreadsheet className="w-4 h-4 text-emerald-500" />
               CSV Spreadsheet
             </TabsTrigger>
-            <TabsTrigger value="preview" className="rounded-xl text-xs font-bold gap-1.5">
+            <TabsTrigger value="preview" className="rounded-xl text-xs font-bold gap-1.5 transition-all data-[state=active]:bg-white dark:data-[state=active]:bg-slate-900 data-[state=active]:shadow-sm">
               <Sparkles className="w-4 h-4 text-amber-500" />
               3-Mo Summary
             </TabsTrigger>
@@ -164,30 +164,39 @@ export default function FinancialReportExporterModal({ trigger }: Props) {
             <div className="bg-pink-50/70 dark:bg-pink-950/30 border border-pink-200/60 rounded-2xl p-4 flex items-start gap-3">
               <Bot className="w-5 h-5 text-[#FF2EB8] shrink-0 mt-0.5" />
               <div className="space-y-1">
-                <h4 className="text-sm font-bold text-slate-900 dark:text-white">Formated for ChatGPT, Claude, and Gemini</h4>
-                <p className="text-xs text-slate-600 dark:text-slate-300">
+                <h4 className="text-sm font-bold text-slate-900 dark:text-white">Formatted for ChatGPT, Claude, and Gemini</h4>
+                <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
                   Copy this master prompt into any AI bot. It includes your 3-month income, Gamma pay schedule (last day of month), Rent schedule (1st of month), itemized transactions, and active savings pools.
                 </p>
               </div>
             </div>
 
-            <div className="relative">
-              <ScrollArea className="h-64 w-full rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-950 text-slate-100 p-4 font-mono text-xs">
-                <pre className="whitespace-pre-wrap">{aiPromptMarkdown}</pre>
+            <div className="relative group">
+              <Button
+                size="sm"
+                onClick={handleCopyPrompt}
+                className="absolute top-3 right-3 z-10 bg-slate-800/80 hover:bg-slate-700 text-xs text-slate-200 border border-slate-700 backdrop-blur-sm gap-1.5 rounded-lg px-3 py-1 h-8"
+              >
+                {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                {copied ? 'Copied' : 'Quick Copy'}
+              </Button>
+
+              <ScrollArea className="h-64 w-full rounded-2xl border border-slate-800 bg-slate-950 text-slate-200 p-4 font-mono text-[11px] leading-relaxed shadow-inner">
+                <pre className="whitespace-pre-wrap selection:bg-pink-500 selection:text-white">{aiPromptMarkdown}</pre>
               </ScrollArea>
             </div>
 
-            <div className="flex items-center justify-between pt-2">
-              <span className="text-xs text-slate-500">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
+              <span className="text-xs text-slate-500 font-medium">
                 Period: <strong>{reportData.startDateStr}</strong> to <strong>{reportData.endDateStr}</strong> ({reportData.recentTxns.length} txns)
               </span>
 
               <Button
                 onClick={handleCopyPrompt}
-                className="bg-[#FF2EB8] hover:bg-[#FF2EB8]/90 text-white font-bold rounded-xl px-5 shadow-lg shadow-pink-500/20 gap-2"
+                className="bg-gradient-to-r from-pink-600 to-rose-500 hover:from-pink-700 hover:to-rose-600 text-white font-bold rounded-xl px-6 py-2 shadow-lg shadow-pink-500/20 gap-2 transition-all"
               >
-                {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                {copied ? 'Copied Master AI Prompt!' : 'Copy AI Master Prompt'}
+                {copied ? <Check className="w-4 h-4 text-emerald-300" /> : <Copy className="w-4 h-4" />}
+                {copied ? 'Copied Master AI Prompt!' : 'Copy Master AI Prompt'}
               </Button>
             </div>
           </TabsContent>
@@ -198,7 +207,7 @@ export default function FinancialReportExporterModal({ trigger }: Props) {
               <Printer className="w-5 h-5 text-rose-500 shrink-0 mt-0.5" />
               <div className="space-y-1">
                 <h4 className="text-sm font-bold text-slate-900 dark:text-white">Printable Document & PDF Export</h4>
-                <p className="text-xs text-slate-600 dark:text-slate-300">
+                <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
                   Opens a formatted report window with charts, metric tables, and upcoming pools ready to save as a PDF document.
                 </p>
               </div>
@@ -214,20 +223,20 @@ export default function FinancialReportExporterModal({ trigger }: Props) {
               <Card className="border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 rounded-2xl p-4">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">Income & Bills</span>
                 <span className="text-base font-bold text-slate-900 dark:text-white mt-1 block">Included</span>
-                <span className="text-[10px] text-slate-500 block">Gamma pay & Rent rules</span>
+                <span className="text-[10px] text-slate-500 block">Gamma, Venture & Rent rules</span>
               </Card>
 
               <Card className="border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 rounded-2xl p-4">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">Savings Pools</span>
                 <span className="text-base font-bold text-slate-900 dark:text-white mt-1 block">{reportData.activePools.length} Pools</span>
-                <span className="text-[10px] text-slate-500 block">Assigned & shortfalls</span>
+                <span className="text-[10px] text-slate-500 block">Current saved & shortfalls</span>
               </Card>
             </div>
 
             <div className="flex items-center justify-end pt-2">
               <Button
                 onClick={handlePrintPDF}
-                className="bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl px-5 shadow-lg shadow-rose-500/20 gap-2"
+                className="bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl px-6 py-2 shadow-lg shadow-rose-500/20 gap-2 transition-all"
               >
                 <Printer className="w-4 h-4" />
                 Open PDF Report Window
@@ -241,20 +250,20 @@ export default function FinancialReportExporterModal({ trigger }: Props) {
               <FileSpreadsheet className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
               <div className="space-y-1">
                 <h4 className="text-sm font-bold text-slate-900 dark:text-white">Excel & Google Sheets CSV Export</h4>
-                <p className="text-xs text-slate-600 dark:text-slate-300">
+                <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
                   Downloads a `.csv` file containing multi-section data (Summary, Fixed Expenses, Goals/Pools, Itemized Transactions).
                 </p>
               </div>
             </div>
 
-            <ScrollArea className="h-56 w-full rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-900 text-slate-200 p-4 font-mono text-xs">
+            <ScrollArea className="h-56 w-full rounded-2xl border border-slate-800 bg-slate-950 text-slate-200 p-4 font-mono text-[11px] leading-relaxed shadow-inner">
               <pre className="whitespace-pre-wrap">{csvContent.slice(0, 1200)}...</pre>
             </ScrollArea>
 
             <div className="flex items-center justify-end pt-2">
               <Button
                 onClick={handleDownloadCSV}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl px-5 shadow-lg shadow-emerald-500/20 gap-2"
+                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl px-6 py-2 shadow-lg shadow-emerald-500/20 gap-2 transition-all"
               >
                 <Download className="w-4 h-4" />
                 Download CSV Spreadsheet (.csv)
@@ -265,55 +274,57 @@ export default function FinancialReportExporterModal({ trigger }: Props) {
           {/* TAB 4: 3-Mo Summary Preview */}
           <TabsContent value="preview" className="space-y-4 pt-4">
             {/* Predicted Income Highlight Banner */}
-            <div className="bg-gradient-to-r from-emerald-500/10 to-teal-500/10 border border-emerald-500/30 p-4 rounded-2xl flex items-center gap-3">
-              <Zap className="w-5 h-5 text-emerald-600 shrink-0" />
-              <div>
+            <div className="bg-gradient-to-r from-emerald-500/10 via-teal-500/10 to-emerald-500/5 border border-emerald-500/30 p-4 rounded-2xl flex items-start sm:items-center gap-3 shadow-sm">
+              <Zap className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5 sm:mt-0" />
+              <div className="space-y-0.5">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-300 block">Predicted Upcoming Income</span>
-                <span className="text-sm font-bold text-slate-900 dark:text-white">{reportData.predictedIncome.formattedText}</span>
+                <span className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white leading-relaxed">{reportData.predictedIncome.formattedText}</span>
               </div>
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <Card className="border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-800/80 rounded-2xl p-4">
+              <Card className="border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-800/80 rounded-2xl p-4 shadow-sm">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">3-Mo Income</span>
                 <span className="text-lg font-black text-emerald-600 dark:text-emerald-400 mt-1 block">{reportData.fmt(reportData.totalIncome3Mo)}</span>
               </Card>
 
-              <Card className="border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-800/80 rounded-2xl p-4">
+              <Card className="border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-800/80 rounded-2xl p-4 shadow-sm">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">3-Mo Spending</span>
                 <span className="text-lg font-black text-rose-600 dark:text-rose-400 mt-1 block">{reportData.fmt(reportData.totalSpent3Mo)}</span>
               </Card>
 
-              <Card className="border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-800/80 rounded-2xl p-4">
+              <Card className="border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-800/80 rounded-2xl p-4 shadow-sm">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">Actual Emergency Saved</span>
                 <span className="text-lg font-black text-slate-900 dark:text-white mt-1 block">{reportData.fmt(reportData.actualEmergencySaved)}</span>
                 <span className="text-[10px] text-slate-500 block">Floor target: {reportData.fmt(reportData.emergencyTargetFloor)}</span>
               </Card>
 
-              <Card className="border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-800/80 rounded-2xl p-4">
+              <Card className="border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-800/80 rounded-2xl p-4 shadow-sm">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">Fun Budget</span>
                 <span className="text-lg font-black text-[#FF2EB8] mt-1 block">{reportData.fmt(snapshot?.weeklyFunBudget || 150)}/wk</span>
               </Card>
             </div>
 
             {/* Special Rules */}
-            <div className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-2xl border border-slate-200/70 dark:border-slate-800 space-y-2">
-              <h5 className="text-xs font-bold uppercase tracking-wider text-slate-400">Context Rules Included in Exporter:</h5>
-              <div className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300 font-medium">
-                <Check className="w-4 h-4 text-emerald-500" />
-                <span>Gamma Salary: <strong>Last day of each month ({reportData.predictedIncome.nextPaydayDate})</strong></span>
-              </div>
-              <div className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300 font-medium">
-                <Check className="w-4 h-4 text-emerald-500" />
-                <span>Venture Income: <strong>Weekly at £70.00/week (~{reportData.fmt(reportData.predictedIncome.ventureMonthlyAmt)}/month)</strong></span>
-              </div>
-              <div className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300 font-medium">
-                <Check className="w-4 h-4 text-emerald-500" />
-                <span>Rent Due: <strong>1st day of each month</strong></span>
-              </div>
-              <div className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300 font-medium">
-                <Check className="w-4 h-4 text-emerald-500" />
-                <span>Pool Terminology: <strong>Current Saved Balance (Real Actuals)</strong></span>
+            <div className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-2xl border border-slate-200/70 dark:border-slate-800 space-y-2.5">
+              <h5 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Context Rules Included in Exporter:</h5>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300 font-medium">
+                  <Check className="w-4 h-4 text-emerald-500 shrink-0" />
+                  <span>Gamma Salary: <strong>Last day of month ({reportData.predictedIncome.nextPaydayDate})</strong></span>
+                </div>
+                <div className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300 font-medium">
+                  <Check className="w-4 h-4 text-emerald-500 shrink-0" />
+                  <span>Venture Income: <strong>£70.00/week (~{reportData.fmt(reportData.predictedIncome.ventureMonthlyAmt)}/mo)</strong></span>
+                </div>
+                <div className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300 font-medium">
+                  <Check className="w-4 h-4 text-emerald-500 shrink-0" />
+                  <span>Rent Due: <strong>1st day of each month</strong></span>
+                </div>
+                <div className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300 font-medium">
+                  <Check className="w-4 h-4 text-emerald-500 shrink-0" />
+                  <span>Pool Terminology: <strong>Current Saved Balance</strong></span>
+                </div>
               </div>
             </div>
           </TabsContent>
