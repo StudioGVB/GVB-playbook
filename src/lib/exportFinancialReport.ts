@@ -148,9 +148,11 @@ export function generate3MonthReportData({ finance, assumptions, fixedExpenses, 
   // Active Goals & Pools with "Current Saved Balance" terminology
   const activePools = finance.goals.map(g => ({
     name: g.name,
+    description: g.description || '',
     currentSavedBalance: g.assigned_amount || 0,
     targetAmount: g.target_amount || 0,
-    targetDate: g.target_date ? format(new Date(g.target_date), 'MMM d, yyyy') : 'No fixed date',
+    targetDate: g.deadline ? format(new Date(g.deadline), 'MMM d, yyyy') : (g.target_date ? format(new Date(g.target_date), 'MMM d, yyyy') : 'No fixed date'),
+    startDate: g.start_date ? format(new Date(g.start_date), 'MMM d, yyyy') : null,
     currency: g.currency || baseCurrency,
     shortfall: Math.max(0, (g.target_amount || 0) - (g.assigned_amount || 0)),
   }));
@@ -278,7 +280,7 @@ ${predictedIncome.streams.map(s => `- ${s.source}: ${fmt(s.amount)} (${s.frequen
 
 ## 4. UPCOMING SAVINGS POOLS & GOALS
 ${activePools.length === 0 ? "No active goals or pools." : activePools.map(p => 
-  `- Pool "${p.name}": Current Saved Balance ${fmt(p.currentSavedBalance)} of ${fmt(p.targetAmount)} target (Shortfall: ${fmt(p.shortfall)}, Target Date: ${p.targetDate})`
+  `- Pool "${p.name}"${p.description ? ` (Purpose: ${p.description})` : ''}: Current Saved Balance ${fmt(p.currentSavedBalance)} of ${fmt(p.targetAmount)} target (Shortfall: ${fmt(p.shortfall)}, Target Date: ${p.targetDate}${p.startDate ? `, Savings Start Date: ${p.startDate}` : ''})`
 ).join('\n')}
 
 ## 5. FIXED EXPENSES & RECURRING BILLS

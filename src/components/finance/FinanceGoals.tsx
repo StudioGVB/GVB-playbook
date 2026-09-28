@@ -16,6 +16,7 @@ export default function FinanceGoals({ finance }: Props) {
   const { goals, goalPlans, transactions, categories, settings, addGoal, deleteGoal, saveGoalPlan } = finance;
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
   const [amount, setAmount] = useState('');
   const [currency, setCurrency] = useState(settings?.base_currency || 'AUD');
   const [startDate, setStartDate] = useState('');
@@ -28,6 +29,7 @@ export default function FinanceGoals({ finance }: Props) {
     if (!name.trim() || !amount) return;
     await addGoal({
       name: name.trim(),
+      description: description.trim() || undefined,
       target_amount: parseFloat(amount),
       currency,
       start_date: startDate || undefined,
@@ -36,6 +38,7 @@ export default function FinanceGoals({ finance }: Props) {
       safety_mode: safetyMode,
     });
     setName('');
+    setDescription('');
     setAmount('');
     setStartDate('');
     setDeadline('');
@@ -83,6 +86,10 @@ export default function FinanceGoals({ finance }: Props) {
               <div className="space-y-2">
                 <Label>Goal Name</Label>
                 <Input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Emergency Fund" />
+              </div>
+              <div className="space-y-2">
+                <Label>Description / Purpose (Optional)</Label>
+                <Input value={description} onChange={e => setDescription(e.target.value)} placeholder="What is this goal for? (Included in AI summary)" />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
@@ -151,7 +158,10 @@ export default function FinanceGoals({ finance }: Props) {
                   <div className="flex items-start justify-between">
                     <div>
                       <CardTitle className="text-base">{goal.name}</CardTitle>
-                      <p className="text-sm text-muted-foreground mt-0.5">
+                      {goal.description && (
+                        <p className="text-xs text-muted-foreground mt-0.5">{goal.description}</p>
+                      )}
+                      <p className="text-xs text-muted-foreground/80 mt-0.5">
                         {formatCurrency(goal.target_amount, goal.currency)}
                         {goal.deadline && ` · by ${goal.deadline}`}
                         {' · '}

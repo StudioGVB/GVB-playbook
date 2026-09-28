@@ -86,6 +86,7 @@ export default function FinancePoolsPage() {
   // Create pool dialog
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState('');
+  const [newDescription, setNewDescription] = useState('');
   const [newAmount, setNewAmount] = useState('');
   const [newCurrency, setNewCurrency] = useState('AUD');
   const [newColor, setNewColor] = useState(POOL_COLORS[0]);
@@ -101,6 +102,7 @@ export default function FinancePoolsPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [editGoalId, setEditGoalId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
+  const [editDescription, setEditDescription] = useState('');
   const [editTarget, setEditTarget] = useState('');
   const [editCurrency, setEditCurrency] = useState('AUD');
   const [editColor, setEditColor] = useState(POOL_COLORS[0]);
@@ -314,6 +316,7 @@ export default function FinancePoolsPage() {
     }
     await finance.updateGoal(editGoalId, {
       name: editName.trim(),
+      description: editDescription.trim() || null,
       target_amount: parseFloat(editTarget),
       currency: editCurrency,
       color: editColor,
@@ -330,6 +333,7 @@ export default function FinancePoolsPage() {
   const openEditDialog = (goal: typeof finance.goals[0]) => {
     setEditGoalId(goal.id);
     setEditName(goal.name);
+    setEditDescription(goal.description || '');
     setEditTarget(String(goal.target_amount));
     setEditCurrency(goal.currency);
     setEditColor(goal.color || POOL_COLORS[0]);
@@ -344,6 +348,7 @@ export default function FinancePoolsPage() {
     if (!newName.trim() || !newAmount) return;
     await finance.addGoal({
       name: newName.trim(),
+      description: newDescription.trim() || null,
       target_amount: parseFloat(newAmount),
       currency: newCurrency,
       priority: finance.goals.length + 1,
@@ -353,7 +358,7 @@ export default function FinancePoolsPage() {
       start_date: newStartDate || null,
       deadline: newDeadline || null,
     } as any);
-    setNewName(''); setNewAmount(''); setNewColor(POOL_COLORS[0]); setNewPercentAllocation('0'); setNewStartDate(''); setNewDeadline(''); setCreateOpen(false);
+    setNewName(''); setNewDescription(''); setNewAmount(''); setNewColor(POOL_COLORS[0]); setNewPercentAllocation('0'); setNewStartDate(''); setNewDeadline(''); setCreateOpen(false);
   };
 
   const handleMoveFunds = async () => {
@@ -787,6 +792,11 @@ export default function FinancePoolsPage() {
                         {(goal as any).is_stash && <Badge variant="secondary" className="text-[9px] px-1.5 py-0 bg-slate-100 text-slate-600 border border-slate-200">Stash</Badge>}
                         {tripInfo && <Badge variant="outline" className="text-[9px] px-1.5 py-0 border-sky-200 text-sky-600 bg-sky-50">Trip</Badge>}
                       </div>
+                      {goal.description && (
+                        <p className="text-[11px] text-slate-500 font-normal mt-0.5 line-clamp-2 leading-tight">
+                          {goal.description}
+                        </p>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center gap-0.5 flex-shrink-0">
@@ -974,6 +984,11 @@ export default function FinancePoolsPage() {
               <Label>Pool Name</Label>
               <Input value={newName} onChange={e => setNewName(e.target.value)} placeholder="e.g. Europe Trip" />
             </div>
+            <div className="space-y-2">
+              <Label>Description / Purpose (Optional)</Label>
+              <Input value={newDescription} onChange={e => setNewDescription(e.target.value)} placeholder="What is this fund for? (e.g. Flight to Tokyo and accommodation)" />
+              <p className="text-[10px] text-muted-foreground">Included in AI financial summaries so your AI knows what the fund is for.</p>
+            </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Target Amount</Label>
@@ -1037,6 +1052,11 @@ export default function FinancePoolsPage() {
             <div className="space-y-2">
               <Label>Pool Name</Label>
               <Input value={editName} onChange={e => setEditName(e.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <Label>Description / Purpose (Optional)</Label>
+              <Input value={editDescription} onChange={e => setEditDescription(e.target.value)} placeholder="What is this fund for?" />
+              <p className="text-[10px] text-muted-foreground">Included in AI financial summaries so your AI knows what the fund is for.</p>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">

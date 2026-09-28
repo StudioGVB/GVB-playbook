@@ -64,6 +64,7 @@ export interface FinanceGoal {
   id: string;
   user_id: string;
   name: string;
+  description?: string | null;
   target_amount: number;
   currency: string;
   start_date?: string | null;
@@ -549,7 +550,7 @@ export function useFinanceDataState() {
     fetchAll();
   };
 
-  const addGoal = async (goal: { name: string; target_amount: number; currency: string; start_date?: string | null; deadline?: string; priority?: number; safety_mode?: string; assigned_amount?: number; color?: string }) => {
+  const addGoal = async (goal: { name: string; description?: string | null; target_amount: number; currency: string; start_date?: string | null; deadline?: string; priority?: number; safety_mode?: string; assigned_amount?: number; color?: string }) => {
     if (!user) return null;
     const { data, error } = await supabase.from('finance_goals').insert({ user_id: user.id, ...goal }).select().single();
     if (error) { toast.error('Failed to create goal'); return null; }
