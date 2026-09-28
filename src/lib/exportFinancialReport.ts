@@ -3,7 +3,8 @@ import { FinanceAssumptions } from '@/hooks/useFinanceAssumptions';
 import { FixedExpense } from '@/hooks/useFixedExpenses';
 import { PolicySnapshot } from '@/lib/policyEngine';
 import { formatCurrency, baseAmt, parseUkDate } from '@/lib/financeUtils';
-import { subMonths, format, endOfMonth, differenceInDays, addMonths } from 'date-fns';
+import { calcTakeHome } from '@/lib/ukTakeHome';
+import { subMonths, format, endOfMonth, differenceInDays } from 'date-fns';
 
 export interface ReportExportData {
   finance: {
@@ -70,15 +71,30 @@ export function generate3MonthReportData({ finance, assumptions, fixedExpenses, 
   const avgMonthlyIncome = totalIncome3Mo / 3;
   const avgMonthlySpend = totalSpent3Mo / 3;
 
-  // Upcoming Income / Payday Predictions (Gamma Salary + Venture + Side Income)
+  // Upcoming Income / Payday Predictions (Gamma Salary + Tax Deduction + Venture + Side Income)
   const gammaTxns = incomeTxns.filter(tx =>
     (tx.merchant || tx.description || '').toLowerCase().includes('gamma') ||
     (tx.merchant || tx.description || '').toLowerCase().includes('salary')
   );
 
   const lastGammaAmt = gammaTxns.length > 0 ? Math.abs(baseAmt(gammaTxns[0])) : (assumptions?.expected_monthly_income || 3083.33);
+  const grossAnnualGamma = assumptions?.gross_annual_salary || (lastGammaAmt * 12);
+  const grossMonthlyGamma = grossAnnualGamma / 12;
   const nextPaydayDate = endOfMonth(now);
   const daysUntilPayday = Math.max(0, differenceInDays(nextPaydayDate, now));
+
+  // UK PAYE Tax & NI Calculations (No student loans)
+  const takeHome = calcTakeHome({
+    grossAnnual: grossAnnualGamma,
+    pensionPercent: assumptions?.pension_percent || 0,
+    studentLoanPlan: null, // User explicitly has no student loans
+  });
+
+  const monthlyIncomeTax = takeHome.incomeTax / 12;
+  const monthlyNI = takeHome.nationalInsurance / 12;
+  const monthlyPension = takeHome.pension / 12;
+  const totalMonthlyDeductions = monthlyIncomeTax + monthlyNI + monthlyPension;
+  const netMonthlyGamma = takeHome.netMonthly;
 
   // Venture Advisory Income (£70/week)
   const ventureWeeklyAmt = 70.00;
@@ -86,11 +102,11 @@ export function generate3MonthReportData({ finance, assumptions, fixedExpenses, 
 
   const streams = [
     {
-      source: 'Gamma Salary (Primary Paycheck)',
-      amount: lastGammaAmt,
+      source: 'Gamma Salary (Gross)',
+      amount: grossMonthlyGamma,
       frequency: 'Monthly (Last day of month)',
-      scheduleNote: `Deposited on last day of month (${format(nextPaydayDate, 'MMM d, yyyy')} — ${daysUntilPayday === 0 ? 'Today!' : `in ${daysUntilPayday} day${daysUntilPayday > 1 ? 's' : ''}`})`,
-      monthlyEquivalent: lastGammaAmt,
+      scheduleNote: `Gross Pay: ${fmt(grossMonthlyGamma)}/mo | Tax & NI: -${fmt(totalMonthlyDeductions)}/mo | Net Pay: ${fmt(netMonthlyGamma)}/mo (Deposit ${format(nextPaydayDate, 'MMM d, yyyy')} — ${daysUntilPayday === 0 ? 'Today!' : `in ${daysUntilPayday} day${daysUntilPayday > 1 ? 's' : ''}`})`,
+      monthlyEquivalent: netMonthlyGamma,
     },
     {
       source: 'Venture Advisory (Weekly Income)',
@@ -122,22 +138,28 @@ export function generate3MonthReportData({ finance, assumptions, fixedExpenses, 
     });
   }
 
-  const totalExpectedMonthly = streams.reduce((acc, s) => acc + s.monthlyEquivalent, 0);
+  const totalNetExpectedMonthlyCashflow = streams.reduce((acc, s) => acc + s.monthlyEquivalent, 0);
 
   const predictedIncome = {
     streams,
-    totalExpectedMonthly,
-    lastGammaAmt,
+    grossAnnualGamma,
+    grossMonthlyGamma,
+    monthlyIncomeTax,
+    monthlyNI,
+    totalMonthlyDeductions,
+    netMonthlyGamma,
     ventureWeeklyAmt,
     ventureMonthlyAmt,
+    totalNetExpectedMonthlyCashflow,
     nextPaydayDate: format(nextPaydayDate, 'EEEE, MMM d, yyyy'),
     daysUntilPayday,
-    formattedText: `Primary: Gamma (${fmt(lastGammaAmt)} on ${format(nextPaydayDate, 'MMM d')}) + Venture (${fmt(ventureWeeklyAmt)}/wk, ~${fmt(ventureMonthlyAmt)}/mo) = Combined ~${fmt(totalExpectedMonthly)}/month expected income`,
+    formattedText: `Gross Gamma: ${fmt(grossMonthlyGamma)}/mo → Tax & NI (-${fmt(totalMonthlyDeductions)}/mo) = Net Gamma: ${fmt(netMonthlyGamma)}/mo + Venture: ${fmt(ventureWeeklyAmt)}/wk (~${fmt(ventureMonthlyAmt)}/mo) → Total Net Monthly Cashflow: ~${fmt(totalNetExpectedMonthlyCashflow)}/month`,
   };
 
   const gammaRuleNote = "Gamma salary is deposited on the LAST day of each calendar month.";
   const ventureRuleNote = "Venture income is deposited WEEKLY at £70.00/week (~£303.33/month).";
   const rentRuleNote = "Rent is due on the 1ST day of each calendar month.";
+  const taxRuleNote = `Tax & NI Deduction: UK PAYE 2025/26 (Income Tax: -${fmt(monthlyIncomeTax)}/mo, NI: -${fmt(monthlyNI)}/mo, Student Loan: None). Net Gamma = ${fmt(netMonthlyGamma)}/month.`;
 
   // Actual Emergency Fund Saved vs Policy Cushion Floor
   const emergencyGoal = finance.goals.find(g => (g as any).is_emergency === true || g.name.toLowerCase().includes('emergency'));
@@ -247,6 +269,7 @@ export function generateAIMasterPrompt(data: ReturnType<typeof generate3MonthRep
     gammaRuleNote,
     ventureRuleNote,
     rentRuleNote,
+    taxRuleNote,
     categoryTotals,
     activePools,
     formattedFixedBills,
@@ -257,18 +280,24 @@ export function generateAIMasterPrompt(data: ReturnType<typeof generate3MonthRep
   return `# GVB PLAYBOOK — 3-MONTH FINANCIAL SNAPSHOT REPORT
 Period: ${startDateStr} to ${endDateStr} | Base Currency: ${baseCurrency}
 
-## 1. PREDICTED UPCOMING INCOME & PAYDAY
-- Summary: ${predictedIncome.formattedText}
-${predictedIncome.streams.map(s => `- ${s.source}: ${fmt(s.amount)} (${s.frequency}) | ${s.scheduleNote}`).join('\n')}
-- Income Patterns & Rules:
+## 1. PREDICTED UPCOMING INCOME, TAX & PAYDAY CASHFLOW
+- Cashflow Summary: ${predictedIncome.formattedText}
+- Income & Deductions Breakdown:
+  - Gross Gamma Salary: ${fmt(predictedIncome.grossMonthlyGamma)}/month (${fmt(predictedIncome.grossAnnualGamma)}/year)
+  - Estimated UK Tax & NI Deductions: -${fmt(predictedIncome.totalMonthlyDeductions)}/month (Income Tax: -${fmt(predictedIncome.monthlyIncomeTax)}/mo, NI: -${fmt(predictedIncome.monthlyNI)}/mo, Student Loan: £0)
+  - Net Gamma Take-Home Paycheck: ${fmt(predictedIncome.netMonthlyGamma)}/month (Deposited last day of month)
+  - Venture Advisory Side Income: ${fmt(predictedIncome.ventureWeeklyAmt)}/week (~${fmt(predictedIncome.ventureMonthlyAmt)}/month)
+  - Total Net Expected Monthly Cashflow: ~${fmt(predictedIncome.totalNetExpectedMonthlyCashflow)}/month
+- Income Patterns & Tax Rules:
   - ${gammaRuleNote}
   - ${ventureRuleNote}
-  - Total Combined Expected Monthly Income: ~${fmt(predictedIncome.totalExpectedMonthly)}/month
+  - ${taxRuleNote}
 
 ## 2. EXECUTIVE FINANCIAL OVERVIEW
-- Total 3-Month Income: ${fmt(totalIncome3Mo)} (Avg: ${fmt(avgMonthlyIncome)}/month)
-- Total 3-Month Spending: ${fmt(totalSpent3Mo)} (Avg: ${fmt(avgMonthlySpend)}/month)
+- Total 3-Month Historical Income: ${fmt(totalIncome3Mo)} (Avg: ${fmt(avgMonthlyIncome)}/month)
+- Total 3-Month Historical Spending: ${fmt(totalSpent3Mo)} (Avg: ${fmt(avgMonthlySpend)}/month)
 - Net Surplus / Deficit (3-Mo): ${fmt(netSurplus3Mo)}
+- Expected Net Monthly Incoming Cashflow: ${fmt(predictedIncome.totalNetExpectedMonthlyCashflow)}/month
 - Essential Spending (Bills, Groceries, Transport): ${fmt(essentialSpent3Mo)} (${Math.round((essentialSpent3Mo / (totalSpent3Mo || 1)) * 100)}%)
 - Fun / Discretionary Spending: ${fmt(funSpent3Mo)} (${Math.round((funSpent3Mo / (totalSpent3Mo || 1)) * 100)}%)
 - Weekly Fun Budget Allowance: ${fmt(snapshot?.weeklyFunBudget || 150)}/week

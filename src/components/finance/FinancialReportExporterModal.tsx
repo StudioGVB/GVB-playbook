@@ -315,15 +315,19 @@ export default function FinancialReportExporterModal({ trigger }: Props) {
                 </div>
                 <div className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300 font-medium">
                   <Check className="w-4 h-4 text-emerald-500 shrink-0" />
+                  <span>UK Tax & NI: <strong>Deducted -{reportData.fmt(reportData.predictedIncome.totalMonthlyDeductions)}/mo (No Student Loan)</strong></span>
+                </div>
+                <div className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300 font-medium">
+                  <Check className="w-4 h-4 text-emerald-500 shrink-0" />
                   <span>Venture Income: <strong>£70.00/week (~{reportData.fmt(reportData.predictedIncome.ventureMonthlyAmt)}/mo)</strong></span>
                 </div>
                 <div className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300 font-medium">
                   <Check className="w-4 h-4 text-emerald-500 shrink-0" />
                   <span>Rent Due: <strong>1st day of each month</strong></span>
                 </div>
-                <div className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300 font-medium">
+                <div className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300 font-medium sm:col-span-2">
                   <Check className="w-4 h-4 text-emerald-500 shrink-0" />
-                  <span>Pool Terminology: <strong>Current Saved Balance</strong></span>
+                  <span>Pool Terminology: <strong>Current Saved Balance (Real Actuals)</strong></span>
                 </div>
               </div>
             </div>
