@@ -107,13 +107,13 @@ serve(async (req) => {
         const intervalStart = since.toISOString()
         const intervalEnd = new Date().toISOString()
         
-        let allTransactions: Array<{ tx: any; dbAccountId: string }> = []
+        let allTransactions: Array<{ tx: any; dbAccountId: string; currency?: string }> = []
 
         for (const bal of balances) {
           const dbAccountId = extToDbId[String(bal.id)]
           if (!dbAccountId) continue
 
-          const stmtUrl = `https://api.wise.com/v3/profiles/${profileId}/balance-statements/${bal.id}/statement.json?currency=${bal.currency}&intervalStart=${intervalStart}&intervalEnd=${intervalEnd}&type=COMPACT`
+          const stmtUrl = `https://api.wise.com/v3/profiles/${profileId}/balance-statements/${bal.id}/statement.json?intervalStart=${intervalStart}&intervalEnd=${intervalEnd}&type=COMPACT`
           
           let stmtRes = await fetch(stmtUrl, {
             headers: {
@@ -123,7 +123,7 @@ serve(async (req) => {
           })
 
           if (!stmtRes.ok) {
-            const fallbackUrl = `https://api.wise.com/v3/profiles/${profileId}/balance-statements/${bal.id}/statement.json?currency=${bal.currency}&intervalStart=${intervalStart}&intervalEnd=${intervalEnd}`
+            const fallbackUrl = `https://api.wise.com/v3/profiles/${profileId}/balance-statements/${bal.id}/statement.json?intervalStart=${intervalStart}&intervalEnd=${intervalEnd}`
             stmtRes = await fetch(fallbackUrl, {
               headers: {
                 'Authorization': `Bearer ${token}`,
@@ -132,13 +132,36 @@ serve(async (req) => {
             })
           }
 
-          if (!stmtRes.ok) continue
+          if (stmtRes.ok) {
+            const stmtData = await stmtRes.json()
+            const txs = stmtData.transactions || stmtData.bankTransactions || stmtData.compactTransactions || []
+            for (const tx of txs) {
+              allTransactions.push({ tx, dbAccountId, currency: bal.currency })
+            }
+          }
+        }
 
-          const stmtData = await stmtRes.json()
-          const txs = stmtData.transactions || []
-          
-          for (const tx of txs) {
-            allTransactions.push({ tx, dbAccountId })
+        // Endpoint D: Fallback to Profile Activities endpoint if statement endpoint returned 0 transactions
+        if (allTransactions.length === 0) {
+          const actUrl = `https://api.wise.com/v1/profiles/${profileId}/activities?limit=100`
+          const actRes = await fetch(actUrl, {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Accept': 'application/json',
+            },
+          })
+
+          if (actRes.ok) {
+            const actData = await actRes.json()
+            const activities = actData.activities || (Array.isArray(actData) ? actData : [])
+            for (const act of activities) {
+              const actCurrency = act.primaryAmount?.split(' ')[1] || act.currency || 'GBP'
+              const matchedBal = balances.find((b: any) => b.currency === actCurrency) || balances[0]
+              const dbAccountId = matchedBal ? extToDbId[String(matchedBal.id)] : Object.values(extToDbId)[0]
+              if (dbAccountId) {
+                allTransactions.push({ tx: act, dbAccountId, currency: actCurrency })
+              }
+            }
           }
         }
 
@@ -153,11 +176,26 @@ serve(async (req) => {
         }
 
         // 6. Transform transactions
-        const txBatch = await Promise.all(allTransactions.map(async ({ tx, dbAccountId }) => {
-          const rawVal = parseFloat(tx.amount?.value || '0')
-          const rawAmount = tx.type === 'DEBIT' ? -rawVal : rawVal
-          const postedAt = tx.date || new Date().toISOString()
-          const description = tx.details?.description || tx.description || tx.details?.title || tx.reference || 'Wise transaction'
+        const txBatch = await Promise.all(allTransactions.map(async ({ tx, dbAccountId, currency }) => {
+          let numVal = 0
+          if (typeof tx.amount === 'number') {
+            numVal = tx.amount
+          } else if (tx.amount?.value !== undefined) {
+            numVal = parseFloat(tx.amount.value) || 0
+          } else if (typeof tx.amount === 'string') {
+            numVal = parseFloat(tx.amount) || 0
+          } else if (typeof tx.primaryAmount === 'string') {
+            const match = tx.primaryAmount.match(/([0-9.,]+)/)
+            if (match) numVal = parseFloat(match[1].replace(/,/g, '')) || 0
+          }
+
+          const typeStr = (tx.type || tx.details?.type || '').toUpperCase()
+          const isDebit = typeStr === 'DEBIT' || typeStr === 'MONEY_OUT' || typeStr === 'CARD_PAYMENT' || (typeStr === 'TRANSFER' && numVal > 0 && !tx.type?.includes('CREDIT'))
+          const absAmount = Math.abs(numVal)
+          const rawAmount = isDebit ? -absAmount : (typeStr === 'CREDIT' || typeStr === 'MONEY_IN' || typeStr === 'DEPOSIT' ? absAmount : numVal)
+
+          const postedAt = tx.date || tx.postedAt || tx.createdOn || new Date().toISOString()
+          const description = tx.details?.description || tx.details?.title || tx.details?.paymentReference || tx.title || tx.description || tx.reference || 'Wise transaction'
           const merchant = tx.details?.merchant?.name || tx.details?.senderName || tx.details?.recipientName || tx.merchant || null
           
           const fingerprint = await computeFingerprint(userId, dbAccountId, postedAt, rawAmount, description)
@@ -173,7 +211,7 @@ serve(async (req) => {
             description,
             merchant,
             amount: rawAmount,
-            currency: tx.amount?.currency || 'GBP',
+            currency: tx.amount?.currency || currency || 'GBP',
             is_transfer: isSalary,
             transfer_side: isSalary ? 'in' : undefined,
             transfer_status: isSalary ? 'auto_confirmed' : undefined,

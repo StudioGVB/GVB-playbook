@@ -790,7 +790,7 @@ export function useFinanceDataState() {
         return;
       }
 
-      toast.success(`Synced Wise accounts: imported ${data.transactionsImported} transactions`);
+      toast.success(data.message || `Synced Wise accounts: imported ${data.transactionsImported} transactions`);
       
       // Auto-categorise after sync
       await categorizeTransactions();

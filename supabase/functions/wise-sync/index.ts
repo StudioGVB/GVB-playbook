@@ -150,7 +150,8 @@ serve(async (req) => {
       const dbAccountId = extToDbId[String(bal.id)]
       if (!dbAccountId) continue
 
-      const stmtUrl = `https://api.wise.com/v3/profiles/${bal.profileId}/balance-statements/${bal.id}/statement.json?currency=${bal.currency}&intervalStart=${intervalStart}&intervalEnd=${intervalEnd}&type=COMPACT`
+      // Endpoint A: v3 statement COMPACT
+      const stmtUrl = `https://api.wise.com/v3/profiles/${bal.profileId}/balance-statements/${bal.id}/statement.json?intervalStart=${intervalStart}&intervalEnd=${intervalEnd}&type=COMPACT`
       
       let stmtRes = await fetch(stmtUrl, {
         headers: {
@@ -159,8 +160,9 @@ serve(async (req) => {
         },
       })
 
+      // Endpoint B: v3 statement FULL
       if (!stmtRes.ok) {
-        const fallbackUrl = `https://api.wise.com/v3/profiles/${bal.profileId}/balance-statements/${bal.id}/statement.json?currency=${bal.currency}&intervalStart=${intervalStart}&intervalEnd=${intervalEnd}`
+        const fallbackUrl = `https://api.wise.com/v3/profiles/${bal.profileId}/balance-statements/${bal.id}/statement.json?intervalStart=${intervalStart}&intervalEnd=${intervalEnd}`
         stmtRes = await fetch(fallbackUrl, {
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -169,8 +171,9 @@ serve(async (req) => {
         })
       }
 
+      // Endpoint C: v1 statement
       if (!stmtRes.ok) {
-        const v1Url = `https://api.wise.com/v1/profiles/${bal.profileId}/balance-statements/${bal.id}/statement.json?currency=${bal.currency}&intervalStart=${intervalStart}&intervalEnd=${intervalEnd}&type=COMPACT`
+        const v1Url = `https://api.wise.com/v1/profiles/${bal.profileId}/balance-statements/${bal.id}/statement.json?intervalStart=${intervalStart}&intervalEnd=${intervalEnd}`
         stmtRes = await fetch(v1Url, {
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -181,12 +184,40 @@ serve(async (req) => {
 
       if (stmtRes.ok) {
         const stmtData = await stmtRes.json()
-        const txs = stmtData.transactions || stmtData.bankTransactions || []
+        const txs = stmtData.transactions || stmtData.bankTransactions || stmtData.compactTransactions || []
         for (const tx of txs) {
           allTransactions.push({ tx, dbAccountId, currency: bal.currency })
         }
       } else {
         console.error(`Wise statement fetch failed for ${bal.currency} (profile ${bal.profileId}): ${stmtRes.status}`)
+      }
+    }
+
+    // Endpoint D: Fallback to Profile Activities endpoint if statement endpoint returned 0 transactions
+    if (allTransactions.length === 0) {
+      console.log('Statement endpoints returned 0 txs; trying Profile Activities fallback...')
+      for (const prof of profiles) {
+        const actUrl = `https://api.wise.com/v1/profiles/${prof.id}/activities?limit=100`
+        const actRes = await fetch(actUrl, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Accept': 'application/json',
+          },
+        })
+
+        if (actRes.ok) {
+          const actData = await actRes.json()
+          const activities = actData.activities || (Array.isArray(actData) ? actData : [])
+          for (const act of activities) {
+            // Match to DB account by currency or primary balance
+            const actCurrency = act.primaryAmount?.split(' ')[1] || act.currency || 'GBP'
+            const matchedBal = allBalances.find(b => b.currency === actCurrency && b.profileId === prof.id) || allBalances[0]
+            const dbAccountId = matchedBal ? extToDbId[String(matchedBal.id)] : Object.values(extToDbId)[0]
+            if (dbAccountId) {
+              allTransactions.push({ tx: act, dbAccountId, currency: actCurrency })
+            }
+          }
+        }
       }
     }
 
@@ -202,12 +233,25 @@ serve(async (req) => {
 
     // 6. Transform transactions
     const txBatch = await Promise.all(allTransactions.map(async ({ tx, dbAccountId, currency }) => {
-      // Amount is negative for DEBIT
-      const rawVal = parseFloat(tx.amount?.value || '0')
-      const rawAmount = tx.type === 'DEBIT' ? -rawVal : rawVal
+      let numVal = 0
+      if (typeof tx.amount === 'number') {
+        numVal = tx.amount
+      } else if (tx.amount?.value !== undefined) {
+        numVal = parseFloat(tx.amount.value) || 0
+      } else if (typeof tx.amount === 'string') {
+        numVal = parseFloat(tx.amount) || 0
+      } else if (typeof tx.primaryAmount === 'string') {
+        const match = tx.primaryAmount.match(/([0-9.,]+)/)
+        if (match) numVal = parseFloat(match[1].replace(/,/g, '')) || 0
+      }
+
+      const typeStr = (tx.type || tx.details?.type || '').toUpperCase()
+      const isDebit = typeStr === 'DEBIT' || typeStr === 'MONEY_OUT' || typeStr === 'CARD_PAYMENT' || (typeStr === 'TRANSFER' && numVal > 0 && !tx.type?.includes('CREDIT'))
+      const absAmount = Math.abs(numVal)
+      const rawAmount = isDebit ? -absAmount : (typeStr === 'CREDIT' || typeStr === 'MONEY_IN' || typeStr === 'DEPOSIT' ? absAmount : numVal)
       
-      const postedAt = tx.date || tx.postedAt || new Date().toISOString()
-      const description = tx.details?.description || tx.details?.title || tx.details?.paymentReference || tx.description || tx.reference || 'Wise transaction'
+      const postedAt = tx.date || tx.postedAt || tx.createdOn || new Date().toISOString()
+      const description = tx.details?.description || tx.details?.title || tx.details?.paymentReference || tx.title || tx.description || tx.reference || 'Wise transaction'
       const merchant = tx.details?.merchant?.name || tx.details?.senderName || tx.details?.recipientName || tx.merchant || null
       
       const fingerprint = await computeFingerprint(userId, dbAccountId, postedAt, rawAmount, description)
@@ -224,7 +268,7 @@ serve(async (req) => {
         description,
         merchant,
         amount: rawAmount,
-        currency: tx.amount?.currency || currency || 'AUD',
+        currency: tx.amount?.currency || currency || 'GBP',
         is_transfer: isSalary,
         transfer_side: isSalary ? 'in' : undefined,
         transfer_status: isSalary ? 'auto_confirmed' : undefined,
@@ -293,10 +337,15 @@ serve(async (req) => {
       }
     }
 
+    const message = transactionsImported > 0
+      ? `Synced ${accountRows.length} Wise account(s), imported ${transactionsImported} transaction(s)`
+      : `Verified ${accountRows.length} Wise account balance(s) (${allTransactions.length} transaction(s) scanned, 0 new)`
+
     return new Response(JSON.stringify({
       success: true,
       accountsSynced: accountRows.length,
       transactionsImported,
+      message,
     }), {
       status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
