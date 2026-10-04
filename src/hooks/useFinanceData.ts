@@ -930,9 +930,35 @@ export function useFinanceDataState() {
       if (data.categorized > 0) {
         toast.success(`Categorised ${data.categorized} transactions (${data.rule} rules, ${data.ai} AI)`);
       } else {
-        toast.info(data.message || 'All transactions already categorised');
+        toast.info(data.message || 'All transactions categorised');
       }
-      fetchAll();
+
+      // Repair pass: Unflag transfers for income (Gamma/Salary/Venture) & auto-link Rent (Evans Rental)
+      const incomeCat = categories.find(c => c.type === 'income' || c.name.toLowerCase() === 'income');
+      const rentCat = categories.find(c => c.name.toLowerCase() === 'rent');
+
+      for (const t of transactions) {
+        const descUpper = (t.description || '').toUpperCase();
+        if (t.amount > 0 && (descUpper.includes('GAMMA') || descUpper.includes('SALARY') || descUpper.includes('VENTURE') || descUpper.includes('PAYCHECK'))) {
+          if (t.is_transfer || (incomeCat && t.category_id !== incomeCat.id)) {
+            await supabase.from('finance_transactions').update({
+              is_transfer: false,
+              category_id: incomeCat?.id || t.category_id,
+            }).eq('id', t.id);
+          }
+        }
+        if (t.amount < 0 && (descUpper.includes('EVANS') || descUpper.includes('RENTAL') || descUpper.includes('LANDLORD'))) {
+          if (!t.is_fixed || (rentCat && t.category_id !== rentCat.id)) {
+            await supabase.from('finance_transactions').update({
+              is_fixed: true,
+              category_id: rentCat?.id || t.category_id,
+              is_transfer: false,
+            }).eq('id', t.id);
+          }
+        }
+      }
+
+      await fetchAll();
     } catch (err) {
       console.error('Categorize error:', err);
       toast.error('Network error during categorisation');
