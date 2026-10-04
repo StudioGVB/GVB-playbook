@@ -269,9 +269,9 @@ serve(async (req) => {
         merchant,
         amount: rawAmount,
         currency: tx.amount?.currency || currency || 'GBP',
-        is_transfer: isSalary,
-        transfer_side: isSalary ? 'in' : undefined,
-        transfer_status: isSalary ? 'auto_confirmed' : undefined,
+        is_transfer: false,
+        transfer_side: undefined,
+        transfer_status: undefined,
         transaction_fingerprint: fingerprint,
         raw: {
           reference: tx.reference || null,
@@ -280,45 +280,14 @@ serve(async (req) => {
       }
     }))
 
-    // 7. Dedup against existing records
-    const dbAccountIds = Object.values(extToDbId)
-    const { data: existingTransactions, error: existingTxError } = dbAccountIds.length > 0
-      ? await supabase
-          .from('finance_transactions')
-          .select('account_id, external_transaction_id, transaction_fingerprint')
-          .eq('user_id', userId)
-          .in('account_id', dbAccountIds)
-      : { data: [], error: null }
-
-    if (existingTxError) {
-      console.error('Existing transaction preload failed:', existingTxError.message)
-    }
-
-    const existingExternalIds = new Set(
-      (existingTransactions || [])
-        .filter((row: any) => row.external_transaction_id)
-        .map((row: any) => `${row.account_id}:${row.external_transaction_id}`)
-    )
-    const existingFingerprints = new Set(
-      (existingTransactions || [])
-        .map((row: any) => row.transaction_fingerprint)
-        .filter(Boolean)
-    )
-
-    const dedupedNewTransactions = new Map<string, typeof txBatch[number]>()
+    // 7. Dedup batch and upsert transactions
+    const seenExternalIds = new Set<string>()
     const rowsToUpsert: typeof txBatch = []
 
     for (const row of txBatch) {
       const externalKey = `${row.account_id}:${row.external_transaction_id}`
-
-      if (existingExternalIds.has(externalKey)) {
-        rowsToUpsert.push(row)
-      } else if (existingFingerprints.has(row.transaction_fingerprint)) {
-        // Skip duplicate fingerprint
-      } else if (dedupedNewTransactions.has(row.transaction_fingerprint)) {
-        // Skip duplicate in current batch
-      } else {
-        dedupedNewTransactions.set(row.transaction_fingerprint, row)
+      if (!seenExternalIds.has(externalKey)) {
+        seenExternalIds.add(externalKey)
         rowsToUpsert.push(row)
       }
     }

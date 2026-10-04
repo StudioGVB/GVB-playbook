@@ -23,13 +23,22 @@ export default function FinanceTransactionsPage() {
   const handleRefresh = async () => {
     setRefreshing(true);
     try {
-      // Check if Up is connected, then sync
-      const hasUpAccounts = finance.accounts.some(a => a.provider === 'up' || a.source_type === 'up');
-      if (hasUpAccounts) {
-        await finance.syncUpTransactions();
-      } else {
-        await finance.refetch();
+      const syncTasks: Promise<any>[] = [];
+      if (finance.syncUpTransactions && (finance.accounts.some(a => a.provider === 'up') || true)) {
+        syncTasks.push(finance.syncUpTransactions());
       }
+      if (finance.syncWiseTransactions) {
+        syncTasks.push(finance.syncWiseTransactions());
+      }
+      if (finance.syncMonzoTransactions && finance.accounts.some(a => a.provider === 'monzo')) {
+        syncTasks.push(finance.syncMonzoTransactions());
+      }
+
+      if (syncTasks.length > 0) {
+        await Promise.allSettled(syncTasks);
+      }
+      await finance.categorizeTransactions();
+      await finance.refetch();
     } catch {
       await finance.refetch();
     } finally {
