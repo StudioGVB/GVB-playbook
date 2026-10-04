@@ -36,7 +36,13 @@ serve(async (req) => {
     }
 
     const userId = userData.user.id
-    const body = await req.json()
+    let body: any = {}
+    try {
+      body = await req.json()
+    } catch {
+      body = {}
+    }
+
     let token = body.token || Deno.env.get('WISE_API_KEY')
 
     if (!token || typeof token !== 'string') {
@@ -115,6 +121,7 @@ serve(async (req) => {
       external_account_id: String(bal.id),
       last_synced_at: new Date().toISOString(),
       source_type: 'bank',
+      exclude_from_totals: false,
     }))
 
     if (accountRows.length > 0) {
@@ -129,95 +136,80 @@ serve(async (req) => {
     // 4. Get DB account IDs mapped to external IDs (scoped to this user)
     const { data: dbAccounts } = await supabase
       .from('finance_accounts')
-      .select('id, external_account_id')
+      .select('id, external_account_id, currency')
       .eq('provider', 'wise')
       .eq('user_id', userId)
 
     const extToDbId: Record<string, string> = {}
+    const currencyToDbId: Record<string, string> = {}
     for (const a of (dbAccounts || [])) {
       if (a.external_account_id) extToDbId[a.external_account_id] = a.id
+      if (a.currency) currencyToDbId[a.currency] = a.id
+    }
+    const defaultDbAccountId = dbAccounts?.[0]?.id || ''
+
+    // 5. Gather raw items from all 3 Wise sources (Activities, Transfers, and Statements)
+    let rawItems: Array<{ item: any; sourceCurrency?: string; forcedDbAccountId?: string }> = []
+
+    // Source A: Profile Activities API (Live transfers, card spend, deposits, pay-ins)
+    for (const prof of profiles) {
+      try {
+        const actRes = await fetch(`https://api.wise.com/v1/profiles/${prof.id}/activities?limit=100`, {
+          headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
+        })
+        if (actRes.ok) {
+          const actData = await actRes.json()
+          const activities = actData.activities || (Array.isArray(actData) ? actData : [])
+          activities.forEach((act: any) => rawItems.push({ item: act }))
+        }
+      } catch (err) {
+        console.error(`Wise activities fetch error profile ${prof.id}:`, err)
+      }
+
+      // Source B: Transfers API (Outgoing & incoming transfers to people/banks)
+      try {
+        const trRes = await fetch(`https://api.wise.com/v1/profiles/${prof.id}/transfers?limit=100`, {
+          headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
+        })
+        if (trRes.ok) {
+          const transfers = await trRes.json()
+          if (Array.isArray(transfers)) {
+            transfers.forEach((tr: any) => rawItems.push({ item: tr, sourceCurrency: tr.sourceCurrency }))
+          }
+        }
+      } catch (err) {
+        console.error(`Wise transfers fetch error profile ${prof.id}:`, err)
+      }
     }
 
-    // 5. Fetch statements for each currency account (last 180 days)
+    // Source C: Statements API
     const since = new Date()
     since.setDate(since.getDate() - 180)
     const intervalStart = since.toISOString().slice(0, 19) + 'Z'
     const intervalEnd = new Date().toISOString().slice(0, 19) + 'Z'
-    
-    let allTransactions: Array<{ tx: any; dbAccountId: string; currency: string }> = []
 
     for (const bal of allBalances) {
       const dbAccountId = extToDbId[String(bal.id)]
       if (!dbAccountId) continue
 
-      // Endpoint A: v3 statement COMPACT
-      const stmtUrl = `https://api.wise.com/v3/profiles/${bal.profileId}/balance-statements/${bal.id}/statement.json?intervalStart=${intervalStart}&intervalEnd=${intervalEnd}&type=COMPACT`
-      
-      let stmtRes = await fetch(stmtUrl, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Accept': 'application/json',
-        },
-      })
-
-      // Endpoint B: v3 statement FULL
-      if (!stmtRes.ok) {
-        const fallbackUrl = `https://api.wise.com/v3/profiles/${bal.profileId}/balance-statements/${bal.id}/statement.json?intervalStart=${intervalStart}&intervalEnd=${intervalEnd}`
-        stmtRes = await fetch(fallbackUrl, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Accept': 'application/json',
-          },
+      try {
+        const stmtUrl = `https://api.wise.com/v3/profiles/${bal.profileId}/balance-statements/${bal.id}/statement.json?intervalStart=${intervalStart}&intervalEnd=${intervalEnd}&type=COMPACT`
+        let stmtRes = await fetch(stmtUrl, {
+          headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
         })
-      }
-
-      // Endpoint C: v1 statement
-      if (!stmtRes.ok) {
-        const v1Url = `https://api.wise.com/v1/profiles/${bal.profileId}/balance-statements/${bal.id}/statement.json?intervalStart=${intervalStart}&intervalEnd=${intervalEnd}`
-        stmtRes = await fetch(v1Url, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Accept': 'application/json',
-          },
-        })
-      }
-
-      if (stmtRes.ok) {
-        const stmtData = await stmtRes.json()
-        const txs = stmtData.transactions || stmtData.bankTransactions || stmtData.compactTransactions || []
-        for (const tx of txs) {
-          allTransactions.push({ tx, dbAccountId, currency: bal.currency })
+        if (!stmtRes.ok) {
+          const fallbackUrl = `https://api.wise.com/v3/profiles/${bal.profileId}/balance-statements/${bal.id}/statement.json?intervalStart=${intervalStart}&intervalEnd=${intervalEnd}`
+          stmtRes = await fetch(fallbackUrl, {
+            headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
+          })
         }
-      } else {
-        console.error(`Wise statement fetch failed for ${bal.currency} (profile ${bal.profileId}): ${stmtRes.status}`)
-      }
-    }
-
-    // Endpoint D: Fallback to Profile Activities endpoint if statement endpoint returned 0 transactions
-    if (allTransactions.length === 0) {
-      console.log('Statement endpoints returned 0 txs; trying Profile Activities fallback...')
-      for (const prof of profiles) {
-        const actUrl = `https://api.wise.com/v1/profiles/${prof.id}/activities?limit=100`
-        const actRes = await fetch(actUrl, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Accept': 'application/json',
-          },
-        })
-
-        if (actRes.ok) {
-          const actData = await actRes.json()
-          const activities = actData.activities || (Array.isArray(actData) ? actData : [])
-          for (const act of activities) {
-            // Match to DB account by currency or primary balance
-            const actCurrency = act.primaryAmount?.split(' ')[1] || act.currency || 'GBP'
-            const matchedBal = allBalances.find(b => b.currency === actCurrency && b.profileId === prof.id) || allBalances[0]
-            const dbAccountId = matchedBal ? extToDbId[String(matchedBal.id)] : Object.values(extToDbId)[0]
-            if (dbAccountId) {
-              allTransactions.push({ tx: act, dbAccountId, currency: actCurrency })
-            }
-          }
+        if (stmtRes.ok) {
+          const stmtData = await stmtRes.json()
+          const txs = stmtData.transactions || stmtData.bankTransactions || stmtData.compactTransactions || []
+          txs.forEach((tx: any) => rawItems.push({ item: tx, sourceCurrency: bal.currency, forcedDbAccountId: dbAccountId }))
         }
+      } catch (err) {
+        console.error(`Wise statement fetch error balance ${bal.id}:`, err)
       }
     }
 
@@ -231,36 +223,78 @@ serve(async (req) => {
       return [...new Uint8Array(hash)].map(b => b.toString(16).padStart(2, '0')).join('')
     }
 
-    // 6. Transform transactions
-    const txBatch = await Promise.all(allTransactions.map(async ({ tx, dbAccountId, currency }) => {
-      let numVal = 0
-      if (typeof tx.amount === 'number') {
-        numVal = tx.amount
-      } else if (tx.amount?.value !== undefined) {
-        numVal = parseFloat(tx.amount.value) || 0
-      } else if (typeof tx.amount === 'string') {
-        numVal = parseFloat(tx.amount) || 0
-      } else if (typeof tx.primaryAmount === 'string') {
-        const match = tx.primaryAmount.match(/([0-9.,]+)/)
-        if (match) numVal = parseFloat(match[1].replace(/,/g, '')) || 0
+    // 6. Transform and parse items
+    const txBatch: any[] = []
+
+    for (const { item, sourceCurrency, forcedDbAccountId } of rawItems) {
+      const statusStr = (item.status || '').toLowerCase()
+      if (statusStr === 'cancelled' || statusStr === 'rejected' || statusStr === 'failed') {
+        continue
       }
 
-      const typeStr = (tx.type || tx.details?.type || '').toUpperCase()
-      const isDebit = typeStr === 'DEBIT' || typeStr === 'MONEY_OUT' || typeStr === 'CARD_PAYMENT' || (typeStr === 'TRANSFER' && numVal > 0 && !tx.type?.includes('CREDIT'))
-      const absAmount = Math.abs(numVal)
-      const rawAmount = isDebit ? -absAmount : (typeStr === 'CREDIT' || typeStr === 'MONEY_IN' || typeStr === 'DEPOSIT' ? absAmount : numVal)
-      
-      const postedAt = tx.date || tx.postedAt || tx.createdOn || new Date().toISOString()
-      const description = tx.details?.description || tx.details?.title || tx.details?.paymentReference || tx.title || tx.description || tx.reference || 'Wise transaction'
-      const merchant = tx.details?.merchant?.name || tx.details?.senderName || tx.details?.recipientName || tx.merchant || null
-      
+      const postedAt = item.date || item.postedAt || item.createdOn || item.created || new Date().toISOString()
+      const typeStr = (item.type || item.details?.type || item.resource?.type || '').toUpperCase()
+
+      let numVal = 0
+      if (typeof item.amount === 'number') {
+        numVal = Math.abs(item.amount)
+      } else if (item.amount?.value !== undefined) {
+        numVal = Math.abs(parseFloat(item.amount.value) || 0)
+      } else if (typeof item.sourceValue === 'number') {
+        numVal = Math.abs(item.sourceValue)
+      } else if (typeof item.targetValue === 'number' && !numVal) {
+        numVal = Math.abs(item.targetValue)
+      } else if (typeof item.amount === 'string') {
+        numVal = Math.abs(parseFloat(item.amount) || 0)
+      } else if (typeof item.primaryAmount === 'string') {
+        const cleanStr = item.primaryAmount.replace(/,/g, '')
+        const match = cleanStr.match(/([0-9.]+)/)
+        if (match) numVal = Math.abs(parseFloat(match[1]) || 0)
+      }
+
+      if (numVal === 0 && typeof item.secondaryAmount === 'string') {
+        const cleanStr = item.secondaryAmount.replace(/,/g, '')
+        const match = cleanStr.match(/([0-9.]+)/)
+        if (match) numVal = Math.abs(parseFloat(match[1]) || 0)
+      }
+
+      if (numVal === 0) continue // Skip zero-amount placeholder logs
+
+      const titleStr = (item.title || item.description || '').toUpperCase()
+      const rawPrimary = (item.primaryAmount || '').trim()
+
+      let isDebit = false
+      let isCredit = false
+
+      if (rawPrimary.startsWith('-') || titleStr.includes('SENT ') || titleStr.includes('PAID ')) {
+        isDebit = true
+      } else if (rawPrimary.startsWith('+') || titleStr.includes('RECEIVED ') || titleStr.includes('ADDED ')) {
+        isCredit = true
+      } else if (typeStr.includes('DEBIT') || typeStr.includes('MONEY_OUT') || typeStr.includes('CARD_PAYMENT') || typeStr.includes('SENT') || typeStr.includes('OUTGOING') || typeStr.includes('PAYMENT') || statusStr.includes('outgoing')) {
+        isDebit = true
+      } else if (typeStr.includes('CREDIT') || typeStr.includes('MONEY_IN') || typeStr.includes('DEPOSIT') || typeStr.includes('RECEIVED') || typeStr.includes('INCOMING') || typeStr.includes('PAYIN')) {
+        isCredit = true
+      } else if (typeof item.amount === 'number' && item.amount < 0) {
+        isDebit = true
+      } else if (typeof item.amount === 'number' && item.amount > 0) {
+        isCredit = true
+      } else {
+        isDebit = true
+      }
+
+      const rawAmount = isDebit ? -numVal : numVal
+      const currency = item.amount?.currency || item.sourceCurrency || sourceCurrency || item.currency || 'GBP'
+
+      const dbAccountId = forcedDbAccountId || currencyToDbId[currency] || defaultDbAccountId
+      if (!dbAccountId) continue
+
+      const description = item.details?.description || item.details?.title || item.title || item.description || item.reference || item.details?.paymentReference || 'Wise transaction'
+      const merchant = item.details?.merchant?.name || item.details?.senderName || item.details?.recipientName || item.recipientName || item.merchant || null
+
       const fingerprint = await computeFingerprint(userId, dbAccountId, postedAt, rawAmount, description)
-      const externalTxId = tx.id ? String(tx.id) : fingerprint
+      const externalTxId = item.id ? String(item.id) : fingerprint
 
-      // Auto-flag GAMMA salary as income/transfers
-      const isSalary = description.toUpperCase().includes('GAMMA') && rawAmount > 0
-
-      return {
+      txBatch.push({
         user_id: userId,
         account_id: dbAccountId,
         external_transaction_id: externalTxId,
@@ -268,17 +302,17 @@ serve(async (req) => {
         description,
         merchant,
         amount: rawAmount,
-        currency: tx.amount?.currency || currency || 'GBP',
+        currency,
         is_transfer: false,
         transfer_side: undefined,
         transfer_status: undefined,
         transaction_fingerprint: fingerprint,
         raw: {
-          reference: tx.reference || null,
-          detailsType: tx.details?.type || null,
+          reference: item.reference || null,
+          detailsType: item.details?.type || item.type || null,
         },
-      }
-    }))
+      })
+    }
 
     // 7. Dedup batch and upsert transactions
     const seenExternalIds = new Set<string>()
@@ -308,7 +342,7 @@ serve(async (req) => {
 
     const message = transactionsImported > 0
       ? `Synced ${accountRows.length} Wise account(s), imported ${transactionsImported} transaction(s)`
-      : `Verified ${accountRows.length} Wise account balance(s) (${allTransactions.length} transaction(s) scanned, 0 new)`
+      : `Verified ${accountRows.length} Wise account balance(s) (${rawItems.length} transaction(s) scanned, 0 new)`
 
     return new Response(JSON.stringify({
       success: true,
