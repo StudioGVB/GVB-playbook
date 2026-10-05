@@ -246,9 +246,11 @@ export default function FinanceSettingsPanel({ finance }: Props) {
       return;
     }
     setWiseChecking(true);
-    const success = await connectWise(wiseToken.trim());
+    const tokenToSync = wiseToken.trim();
+    const success = await connectWise(tokenToSync);
     if (success) {
       setWiseStatus({ connected: true });
+      await syncWiseTransactions(tokenToSync);
       setWiseToken('');
     }
     setWiseChecking(false);

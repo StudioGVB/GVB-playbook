@@ -34,12 +34,23 @@ serve(async (req) => {
 
     const userId = userData.user.id
 
-    const token = Deno.env.get('WISE_API_KEY')
+    let token = Deno.env.get('WISE_API_KEY')
+    if (!token) {
+      const { data: settings } = await supabase
+        .from('finance_settings')
+        .select('wise_api_token')
+        .eq('user_id', userId)
+        .maybeSingle()
+      if (settings?.wise_api_token) {
+        token = settings.wise_api_token
+      }
+    }
+
     if (!token) {
       return new Response(JSON.stringify({
         connected: false,
         error: 'missing_secret',
-        message: 'WISE_API_KEY not configured in Cloud Secrets.',
+        message: 'Wise API key not configured. Please connect your API key in Settings.',
       }), {
         status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })

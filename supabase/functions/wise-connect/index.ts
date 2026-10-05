@@ -92,6 +92,17 @@ serve(async (req) => {
 
     const balances = await balancesRes.json()
 
+    // Save token to finance_settings if provided
+    if (body.token && typeof body.token === 'string') {
+      try {
+        await supabase
+          .from('finance_settings')
+          .upsert({ user_id: userId, wise_api_token: body.token }, { onConflict: 'user_id' })
+      } catch (e) {
+        console.error('Failed to save wise_api_token in finance_settings:', e)
+      }
+    }
+
     // 3. Upsert balances as accounts in the database
     const accountRows = balances.map((bal: any) => ({
       user_id: userId,
@@ -102,6 +113,7 @@ serve(async (req) => {
       external_account_id: String(bal.id),
       last_synced_at: new Date().toISOString(),
       source_type: 'bank',
+      exclude_from_totals: false,
     }))
 
     if (accountRows.length > 0) {
