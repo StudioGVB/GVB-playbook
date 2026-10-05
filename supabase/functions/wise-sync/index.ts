@@ -20,11 +20,20 @@ serve(async (req) => {
       })
     }
 
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!
+    const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!
+    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+
     const supabase = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_ANON_KEY')!,
+      supabaseUrl,
+      anonKey,
       { global: { headers: { Authorization: authHeader } } }
     )
+
+    // Admin client for bypassing RLS during DB sync writes
+    const supabaseAdmin = serviceRoleKey
+      ? createClient(supabaseUrl, serviceRoleKey)
+      : supabase
 
     // Validate JWT and get user
     const { data: userData, error: authError } = await supabase.auth.getUser()
@@ -46,7 +55,7 @@ serve(async (req) => {
     let token = body.token || Deno.env.get('WISE_API_KEY')
 
     if (!token || typeof token !== 'string') {
-      const { data: settings } = await supabase
+      const { data: settings } = await supabaseAdmin
         .from('finance_settings')
         .select('wise_api_token')
         .eq('user_id', userId)
@@ -62,6 +71,8 @@ serve(async (req) => {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })
     }
+
+    token = token.trim().replace(/^Bearer\s+/i, '')
 
     // 1. Fetch profiles
     const profilesRes = await fetch('https://api.wise.com/v1/profiles', {
@@ -111,7 +122,7 @@ serve(async (req) => {
       })
     }
 
-    // 3. Upsert balances as accounts in database
+    // 3. Upsert balances as accounts in database using admin client
     const accountRows = allBalances.map((bal: any) => ({
       user_id: userId,
       provider: 'wise',
@@ -125,7 +136,7 @@ serve(async (req) => {
     }))
 
     if (accountRows.length > 0) {
-      const { error: accError } = await supabase
+      const { error: accError } = await supabaseAdmin
         .from('finance_accounts')
         .upsert(accountRows, { onConflict: 'user_id,external_account_id', ignoreDuplicates: false })
       if (accError) {
@@ -133,8 +144,8 @@ serve(async (req) => {
       }
     }
 
-    // 4. Get DB account IDs mapped to external IDs and currencies (scoped to this user)
-    const { data: dbAccounts } = await supabase
+    // 4. Get DB account IDs mapped to external IDs and currencies
+    const { data: dbAccounts } = await supabaseAdmin
       .from('finance_accounts')
       .select('id, external_account_id, currency, provider')
       .eq('user_id', userId)
@@ -158,6 +169,9 @@ serve(async (req) => {
 
     // 5. Gather raw items from Wise endpoints (Activities, Transfers, Statements)
     let rawItems: Array<{ item: any; sourceCurrency?: string; forcedDbAccountId?: string }> = []
+    let activitiesCount = 0
+    let transfersCount = 0
+    let statementsCount = 0
 
     for (const prof of profiles) {
       try {
@@ -167,7 +181,10 @@ serve(async (req) => {
         if (actRes.ok) {
           const actData = await actRes.json()
           const activities = actData.activities || (Array.isArray(actData) ? actData : [])
-          activities.forEach((act: any) => rawItems.push({ item: act }))
+          activities.forEach((act: any) => {
+            rawItems.push({ item: act })
+            activitiesCount++
+          })
         }
       } catch (err) {
         console.error(`Wise activities fetch error profile ${prof.id}:`, err)
@@ -180,7 +197,10 @@ serve(async (req) => {
         if (trRes.ok) {
           const transfers = await trRes.json()
           if (Array.isArray(transfers)) {
-            transfers.forEach((tr: any) => rawItems.push({ item: tr, sourceCurrency: tr.sourceCurrency }))
+            transfers.forEach((tr: any) => {
+              rawItems.push({ item: tr, sourceCurrency: tr.sourceCurrency })
+              transfersCount++
+            })
           }
         }
       } catch (err) {
@@ -211,7 +231,10 @@ serve(async (req) => {
         if (stmtRes.ok) {
           const stmtData = await stmtRes.json()
           const txs = stmtData.transactions || stmtData.bankTransactions || stmtData.compactTransactions || []
-          txs.forEach((tx: any) => rawItems.push({ item: tx, sourceCurrency: bal.currency, forcedDbAccountId: dbAccountId }))
+          txs.forEach((tx: any) => {
+            rawItems.push({ item: tx, sourceCurrency: bal.currency, forcedDbAccountId: dbAccountId })
+            statementsCount++
+          })
         }
       } catch (err) {
         console.error(`Wise statement fetch error balance ${bal.id}:`, err)
@@ -329,20 +352,23 @@ serve(async (req) => {
     }
     const rowsToUpsert = Array.from(batchMap.values())
 
-    // 8. Chunked Upserts with Fallback
+    // 8. Chunked Upserts with Fallback using supabaseAdmin
     let transactionsImported = 0
+    let lastUpsertError: string | null = null
+
     if (rowsToUpsert.length > 0) {
       for (let i = 0; i < rowsToUpsert.length; i += 100) {
         const chunk = rowsToUpsert.slice(i, i + 100)
-        const { data: upsertedTx, error: txError } = await supabase
+        const { data: upsertedTx, error: txError } = await supabaseAdmin
           .from('finance_transactions')
           .upsert(chunk, { onConflict: 'account_id,external_transaction_id', ignoreDuplicates: false })
           .select('id')
 
         if (txError) {
           console.error('Wise chunk upsert error:', txError.message)
+          lastUpsertError = txError.message
           for (const row of chunk) {
-            const { data: singleTx, error: singleErr } = await supabase
+            const { data: singleTx, error: singleErr } = await supabaseAdmin
               .from('finance_transactions')
               .upsert([row], { onConflict: 'account_id,external_transaction_id', ignoreDuplicates: false })
               .select('id')
@@ -360,12 +386,18 @@ serve(async (req) => {
 
     const message = transactionsImported > 0
       ? `Synced ${accountRows.length} Wise account(s), imported ${transactionsImported} transaction(s)`
-      : `Verified ${accountRows.length} Wise account balance(s) (${rawItems.length} transaction(s) scanned, ${rowsToUpsert.length} prepared)`
+      : `Verified ${accountRows.length} Wise account balance(s) (${rawItems.length} scanned: ${activitiesCount} act, ${transfersCount} tr, ${statementsCount} stmt; ${rowsToUpsert.length} prepared, ${transactionsImported} saved)`
 
     return new Response(JSON.stringify({
       success: true,
       accountsSynced: accountRows.length,
       transactionsImported,
+      activitiesCount,
+      transfersCount,
+      statementsCount,
+      rawItemsTotal: rawItems.length,
+      rowsToUpsertCount: rowsToUpsert.length,
+      lastUpsertError,
       message,
     }), {
       status: 200,

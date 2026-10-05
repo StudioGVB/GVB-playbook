@@ -10,13 +10,13 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: 'WISE_API_KEY not configured' }), { status: 400 })
     }
 
-    const supabase = createClient(
+    const supabaseAdmin = createClient(
       Deno.env.get('SUPABASE_URL')!,
       serviceRoleKey,
     )
 
     // Find all users who have Wise accounts
-    const { data: wiseAccounts, error: accFetchErr } = await supabase
+    const { data: wiseAccounts, error: accFetchErr } = await supabaseAdmin
       .from('finance_accounts')
       .select('user_id')
       .eq('provider', 'wise')
@@ -84,14 +84,14 @@ serve(async (req) => {
         }))
 
         if (accountRows.length > 0) {
-          const { error: accError } = await supabase
+          const { error: accError } = await supabaseAdmin
             .from('finance_accounts')
             .upsert(accountRows, { onConflict: 'user_id,external_account_id', ignoreDuplicates: false })
           if (accError) console.error(`Account upsert failed for ${userId}:`, accError.message)
         }
 
         // 4. Get DB IDs for accounts
-        const { data: dbAccounts } = await supabase
+        const { data: dbAccounts } = await supabaseAdmin
           .from('finance_accounts')
           .select('id, external_account_id, currency, provider')
           .eq('user_id', userId)
@@ -281,12 +281,12 @@ serve(async (req) => {
         }
         const rowsToUpsert = Array.from(batchMap.values())
 
-        // 8. Chunked Upserts with Fallback
+        // 8. Chunked Upserts with Fallback using supabaseAdmin
         let importedCount = 0
         if (rowsToUpsert.length > 0) {
           for (let i = 0; i < rowsToUpsert.length; i += 100) {
             const chunk = rowsToUpsert.slice(i, i + 100)
-            const { data: upsertedTx, error: txError } = await supabase
+            const { data: upsertedTx, error: txError } = await supabaseAdmin
               .from('finance_transactions')
               .upsert(chunk, { onConflict: 'account_id,external_transaction_id', ignoreDuplicates: false })
               .select('id')
@@ -294,7 +294,7 @@ serve(async (req) => {
             if (txError) {
               console.error(`Tx chunk upsert failed for user ${userId}:`, txError.message)
               for (const row of chunk) {
-                const { data: singleTx, error: singleErr } = await supabase
+                const { data: singleTx, error: singleErr } = await supabaseAdmin
                   .from('finance_transactions')
                   .upsert([row], { onConflict: 'account_id,external_transaction_id', ignoreDuplicates: false })
                   .select('id')
