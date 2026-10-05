@@ -30,7 +30,6 @@ serve(async (req) => {
       { global: { headers: { Authorization: authHeader } } }
     )
 
-    // Admin client for bypassing RLS during DB sync writes
     const supabaseAdmin = serviceRoleKey
       ? createClient(supabaseUrl, serviceRoleKey)
       : supabase
@@ -122,7 +121,7 @@ serve(async (req) => {
       })
     }
 
-    // 3. Upsert balances as accounts in database using admin client
+    // 3. Upsert balances as accounts in database
     const accountRows = allBalances.map((bal: any) => ({
       user_id: userId,
       provider: 'wise',
@@ -156,7 +155,7 @@ serve(async (req) => {
 
     for (const a of wiseDbAccounts) {
       if (a.external_account_id) extToDbId[a.external_account_id] = a.id
-      if (a.currency) currencyToDbId[a.currency] = a.id
+      if (a.currency) currencyToDbId[a.currency.toUpperCase()] = a.id
     }
     const defaultDbAccountId = wiseDbAccounts[0]?.id || dbAccounts?.[0]?.id || ''
 
@@ -173,71 +172,90 @@ serve(async (req) => {
     let transfersCount = 0
     let statementsCount = 0
 
+    // Source A: Profile Activities & Global Activities
     for (const prof of profiles) {
-      try {
-        const actRes = await fetch(`https://api.wise.com/v1/profiles/${prof.id}/activities?limit=100`, {
-          headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
-        })
-        if (actRes.ok) {
-          const actData = await actRes.json()
-          const activities = actData.activities || (Array.isArray(actData) ? actData : [])
-          activities.forEach((act: any) => {
-            rawItems.push({ item: act })
-            activitiesCount++
+      const actUrls = [
+        `https://api.wise.com/v1/profiles/${prof.id}/activities?limit=200`,
+        `https://api.wise.com/v1/activities?limit=200`,
+      ]
+      for (const actUrl of actUrls) {
+        try {
+          const actRes = await fetch(actUrl, {
+            headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
           })
-        }
-      } catch (err) {
-        console.error(`Wise activities fetch error profile ${prof.id}:`, err)
-      }
-
-      try {
-        const trRes = await fetch(`https://api.wise.com/v1/profiles/${prof.id}/transfers?limit=100`, {
-          headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
-        })
-        if (trRes.ok) {
-          const transfers = await trRes.json()
-          if (Array.isArray(transfers)) {
-            transfers.forEach((tr: any) => {
-              rawItems.push({ item: tr, sourceCurrency: tr.sourceCurrency })
-              transfersCount++
+          if (actRes.ok) {
+            const actData = await actRes.json()
+            const activities = actData.activities || (Array.isArray(actData) ? actData : [])
+            activities.forEach((act: any) => {
+              rawItems.push({ item: act })
+              activitiesCount++
             })
           }
+        } catch (err) {
+          console.error(`Wise activities fetch error ${actUrl}:`, err)
         }
-      } catch (err) {
-        console.error(`Wise transfers fetch error profile ${prof.id}:`, err)
+      }
+
+      // Source B: Profile Transfers & Global Transfers
+      const trUrls = [
+        `https://api.wise.com/v1/profiles/${prof.id}/transfers?limit=200`,
+        `https://api.wise.com/v1/transfers?limit=200`,
+      ]
+      for (const trUrl of trUrls) {
+        try {
+          const trRes = await fetch(trUrl, {
+            headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
+          })
+          if (trRes.ok) {
+            const transfers = await trRes.json()
+            if (Array.isArray(transfers)) {
+              transfers.forEach((tr: any) => {
+                rawItems.push({ item: tr, sourceCurrency: tr.sourceCurrency })
+                transfersCount++
+              })
+            }
+          }
+        } catch (err) {
+          console.error(`Wise transfers fetch error ${trUrl}:`, err)
+        }
       }
     }
 
+    // Source C: Balance Statements (with currency parameter and full ISO range!)
     const since = new Date()
-    since.setDate(since.getDate() - 180)
-    const intervalStart = since.toISOString().slice(0, 19) + 'Z'
-    const intervalEnd = new Date().toISOString().slice(0, 19) + 'Z'
+    since.setDate(since.getDate() - 365) // 1 year back
+    const intervalStart = since.toISOString()
+    const intervalEnd = new Date().toISOString()
 
     for (const bal of allBalances) {
-      const dbAccountId = extToDbId[String(bal.id)]
+      const dbAccountId = extToDbId[String(bal.id)] || currencyToDbId[bal.currency.toUpperCase()]
       if (!dbAccountId) continue
 
-      try {
-        const stmtUrl = `https://api.wise.com/v3/profiles/${bal.profileId}/balance-statements/${bal.id}/statement.json?intervalStart=${intervalStart}&intervalEnd=${intervalEnd}&type=COMPACT`
-        let stmtRes = await fetch(stmtUrl, {
-          headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
-        })
-        if (!stmtRes.ok) {
-          const fallbackUrl = `https://api.wise.com/v3/profiles/${bal.profileId}/balance-statements/${bal.id}/statement.json?intervalStart=${intervalStart}&intervalEnd=${intervalEnd}`
-          stmtRes = await fetch(fallbackUrl, {
+      const stmtUrls = [
+        `https://api.wise.com/v3/profiles/${bal.profileId}/balance-statements/${bal.id}/statement.json?currency=${bal.currency}&intervalStart=${intervalStart}&intervalEnd=${intervalEnd}&type=COMPACT`,
+        `https://api.wise.com/v3/profiles/${bal.profileId}/balance-statements/${bal.id}/statement.json?currency=${bal.currency}&intervalStart=${intervalStart}&intervalEnd=${intervalEnd}`,
+        `https://api.wise.com/v1/profiles/${bal.profileId}/balance-statements/${bal.id}/statement.json?currency=${bal.currency}&intervalStart=${intervalStart}&intervalEnd=${intervalEnd}`,
+      ]
+
+      for (const stmtUrl of stmtUrls) {
+        try {
+          const stmtRes = await fetch(stmtUrl, {
             headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
           })
+          if (stmtRes.ok) {
+            const stmtData = await stmtRes.json()
+            const txs = stmtData.transactions || stmtData.bankTransactions || stmtData.compactTransactions || []
+            if (txs.length > 0) {
+              txs.forEach((tx: any) => {
+                rawItems.push({ item: tx, sourceCurrency: bal.currency, forcedDbAccountId: dbAccountId })
+                statementsCount++
+              })
+              break
+            }
+          }
+        } catch (err) {
+          console.error(`Wise statement fetch error ${stmtUrl}:`, err)
         }
-        if (stmtRes.ok) {
-          const stmtData = await stmtRes.json()
-          const txs = stmtData.transactions || stmtData.bankTransactions || stmtData.compactTransactions || []
-          txs.forEach((tx: any) => {
-            rawItems.push({ item: tx, sourceCurrency: bal.currency, forcedDbAccountId: dbAccountId })
-            statementsCount++
-          })
-        }
-      } catch (err) {
-        console.error(`Wise statement fetch error balance ${bal.id}:`, err)
       }
     }
 
@@ -311,7 +329,7 @@ serve(async (req) => {
       }
 
       const rawAmount = isDebit ? -numVal : numVal
-      const currency = item.amount?.currency || item.sourceCurrency || sourceCurrency || item.currency || 'GBP'
+      const currency = (item.amount?.currency || item.sourceCurrency || sourceCurrency || item.currency || 'GBP').toUpperCase()
 
       const dbAccountId = forcedDbAccountId || currencyToDbId[currency] || defaultDbAccountId
       if (!dbAccountId) continue
