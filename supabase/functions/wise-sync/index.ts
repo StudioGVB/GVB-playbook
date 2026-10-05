@@ -136,7 +136,7 @@ serve(async (req) => {
     // 4. Get DB account IDs mapped to external IDs and currencies (scoped to this user)
     const { data: dbAccounts } = await supabase
       .from('finance_accounts')
-      .select('id, external_account_id, currency')
+      .select('id, external_account_id, currency, provider')
       .eq('user_id', userId)
 
     const wiseDbAccounts = (dbAccounts || []).filter((a: any) => a.provider === 'wise' || (a.external_account_id && allBalances.some(b => String(b.id) === a.external_account_id)))
@@ -156,28 +156,7 @@ serve(async (req) => {
       })
     }
 
-    // 5. Pre-load existing transactions for deduplication
-    const dbAccountIds = Object.values(extToDbId)
-    const { data: existingTransactions } = dbAccountIds.length > 0
-      ? await supabase
-          .from('finance_transactions')
-          .select('account_id, external_transaction_id, transaction_fingerprint')
-          .eq('user_id', userId)
-          .in('account_id', dbAccountIds)
-      : { data: [] }
-
-    const existingExternalIds = new Set(
-      (existingTransactions || [])
-        .filter((row: any) => row.external_transaction_id)
-        .map((row: any) => `${row.account_id}:${row.external_transaction_id}`)
-    )
-    const existingFingerprints = new Set(
-      (existingTransactions || [])
-        .map((row: any) => row.transaction_fingerprint)
-        .filter(Boolean)
-    )
-
-    // 6. Gather raw items from Wise endpoints (Activities, Transfers, Statements)
+    // 5. Gather raw items from Wise endpoints (Activities, Transfers, Statements)
     let rawItems: Array<{ item: any; sourceCurrency?: string; forcedDbAccountId?: string }> = []
 
     for (const prof of profiles) {
@@ -249,7 +228,7 @@ serve(async (req) => {
       return [...new Uint8Array(hash)].map(b => b.toString(16).padStart(2, '0')).join('')
     }
 
-    // 7. Transform and parse items
+    // 6. Transform and parse items
     const txBatch: any[] = []
 
     for (const { item, sourceCurrency, forcedDbAccountId } of rawItems) {
@@ -330,8 +309,8 @@ serve(async (req) => {
         amount: rawAmount,
         currency,
         is_transfer: false,
-        transfer_side: undefined,
-        transfer_status: undefined,
+        transfer_side: null,
+        transfer_status: null,
         transaction_fingerprint: fingerprint,
         raw: {
           reference: item.reference || null,
@@ -340,33 +319,17 @@ serve(async (req) => {
       })
     }
 
-    // 8. Robust Deduplication
-    const dedupedNewTransactions = new Map<string, typeof txBatch[number]>()
-    const rowsToUpsert: typeof txBatch = []
-
+    // 7. Deduplicate in-memory by account_id + external_transaction_id
+    const batchMap = new Map<string, typeof txBatch[number]>()
     for (const row of txBatch) {
-      const externalKey = `${row.account_id}:${row.external_transaction_id}`
-
-      // Allow existing external ID to upsert so transaction updates
-      if (existingExternalIds.has(externalKey)) {
-        rowsToUpsert.push(row)
-        continue
-      }
-
-      // Avoid fingerprint collisions with existing records in DB
-      if (row.transaction_fingerprint && existingFingerprints.has(row.transaction_fingerprint)) {
-        continue
-      }
-
-      const dedupeKey = row.transaction_fingerprint || externalKey
-      if (!dedupedNewTransactions.has(dedupeKey)) {
-        dedupedNewTransactions.set(dedupeKey, row)
+      const key = `${row.account_id}:${row.external_transaction_id}`
+      if (!batchMap.has(key)) {
+        batchMap.set(key, row)
       }
     }
+    const rowsToUpsert = Array.from(batchMap.values())
 
-    rowsToUpsert.push(...dedupedNewTransactions.values())
-
-    // 9. Chunked Upserts with Fallback
+    // 8. Chunked Upserts with Fallback
     let transactionsImported = 0
     if (rowsToUpsert.length > 0) {
       for (let i = 0; i < rowsToUpsert.length; i += 100) {
@@ -378,14 +341,15 @@ serve(async (req) => {
 
         if (txError) {
           console.error('Wise chunk upsert error:', txError.message)
-          // Fallback row-by-row
           for (const row of chunk) {
             const { data: singleTx, error: singleErr } = await supabase
               .from('finance_transactions')
-              .upsert([row], { onConflict: 'account_id,external_transaction_id', ignoreDuplicates: true })
+              .upsert([row], { onConflict: 'account_id,external_transaction_id', ignoreDuplicates: false })
               .select('id')
             if (!singleErr && singleTx) {
               transactionsImported += singleTx.length
+            } else if (singleErr) {
+              console.error(`Single tx upsert failed: ${singleErr.message}`, row)
             }
           }
         } else {
@@ -396,7 +360,7 @@ serve(async (req) => {
 
     const message = transactionsImported > 0
       ? `Synced ${accountRows.length} Wise account(s), imported ${transactionsImported} transaction(s)`
-      : `Verified ${accountRows.length} Wise account balance(s) (${rawItems.length} transaction(s) scanned, 0 new)`
+      : `Verified ${accountRows.length} Wise account balance(s) (${rawItems.length} transaction(s) scanned, ${rowsToUpsert.length} prepared)`
 
     return new Response(JSON.stringify({
       success: true,

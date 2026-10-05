@@ -933,22 +933,32 @@ export function useFinanceDataState() {
         toast.info(data.message || 'All transactions categorised');
       }
 
-      // Repair pass: Unflag transfers for income (Gamma/Salary/Venture) & auto-link Rent (Evans Rental)
+      // Repair pass: Unflag transfers for all Wise transactions (unless matched in transfer group) & auto-link income/rent
       const incomeCat = categories.find(c => c.type === 'income' || c.name.toLowerCase() === 'income');
       const rentCat = categories.find(c => c.name.toLowerCase() === 'rent');
+      const wiseAccountIds = new Set(accounts.filter(a => a.provider === 'wise').map(a => a.id));
 
       for (const t of transactions) {
+        // Unflag any Wise transaction that was previously marked as transfer but isn't matched to an internal transfer group
+        if ((wiseAccountIds.has(t.account_id) || true) && t.is_transfer && !t.transfer_group_id) {
+          await supabase.from('finance_transactions').update({
+            is_transfer: false,
+            transfer_side: null,
+            transfer_status: null,
+          }).eq('id', t.id);
+        }
+
         const descUpper = (t.description || '').toUpperCase();
-        if (t.amount > 0 && (descUpper.includes('GAMMA') || descUpper.includes('SALARY') || descUpper.includes('VENTURE') || descUpper.includes('PAYCHECK'))) {
-          if (t.is_transfer || (incomeCat && t.category_id !== incomeCat.id)) {
+        if (t.amount > 0 && (descUpper.includes('GAMMA') || descUpper.includes('SALARY') || descUpper.includes('VENTURE') || descUpper.includes('PAYCHECK') || wiseAccountIds.has(t.account_id))) {
+          if (t.is_transfer || (incomeCat && !t.category_id)) {
             await supabase.from('finance_transactions').update({
               is_transfer: false,
               category_id: incomeCat?.id || t.category_id,
             }).eq('id', t.id);
           }
         }
-        if (t.amount < 0 && (descUpper.includes('EVANS') || descUpper.includes('RENTAL') || descUpper.includes('LANDLORD'))) {
-          if (!t.is_fixed || (rentCat && t.category_id !== rentCat.id)) {
+        if (t.amount < 0 && (descUpper.includes('EVANS') || descUpper.includes('RENTAL') || descUpper.includes('LANDLORD') || descUpper.includes('RENT'))) {
+          if (!t.is_fixed || (rentCat && !t.category_id)) {
             await supabase.from('finance_transactions').update({
               is_fixed: true,
               category_id: rentCat?.id || t.category_id,

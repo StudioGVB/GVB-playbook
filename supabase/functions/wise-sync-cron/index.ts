@@ -93,7 +93,7 @@ serve(async (req) => {
         // 4. Get DB IDs for accounts
         const { data: dbAccounts } = await supabase
           .from('finance_accounts')
-          .select('id, external_account_id, currency')
+          .select('id, external_account_id, currency, provider')
           .eq('user_id', userId)
 
         const wiseDbAccounts = (dbAccounts || []).filter((a: any) => a.provider === 'wise' || (a.external_account_id && balances.some(b => String(b.id) === a.external_account_id)))
@@ -108,28 +108,7 @@ serve(async (req) => {
 
         if (!defaultDbAccountId) continue
 
-        // 5. Pre-load existing transactions for deduplication
-        const dbAccountIds = Object.values(extToDbId)
-        const { data: existingTransactions } = dbAccountIds.length > 0
-          ? await supabase
-              .from('finance_transactions')
-              .select('account_id, external_transaction_id, transaction_fingerprint')
-              .eq('user_id', userId)
-              .in('account_id', dbAccountIds)
-          : { data: [] }
-
-        const existingExternalIds = new Set(
-          (existingTransactions || [])
-            .filter((row: any) => row.external_transaction_id)
-            .map((row: any) => `${row.account_id}:${row.external_transaction_id}`)
-        )
-        const existingFingerprints = new Set(
-          (existingTransactions || [])
-            .map((row: any) => row.transaction_fingerprint)
-            .filter(Boolean)
-        )
-
-        // 6. Gather raw items from all Wise endpoints
+        // 5. Gather raw items from all Wise endpoints
         let rawItems: Array<{ item: any; sourceCurrency?: string; forcedDbAccountId?: string }> = []
 
         for (const prof of profiles) {
@@ -201,7 +180,7 @@ serve(async (req) => {
           return [...new Uint8Array(hash)].map(b => b.toString(16).padStart(2, '0')).join('')
         }
 
-        // 7. Transform transactions
+        // 6. Transform transactions
         const txBatch: any[] = []
 
         for (const { item, sourceCurrency, forcedDbAccountId } of rawItems) {
@@ -282,8 +261,8 @@ serve(async (req) => {
             amount: rawAmount,
             currency,
             is_transfer: false,
-            transfer_side: undefined,
-            transfer_status: undefined,
+            transfer_side: null,
+            transfer_status: null,
             transaction_fingerprint: fingerprint,
             raw: {
               reference: item.reference || null,
@@ -292,31 +271,17 @@ serve(async (req) => {
           })
         }
 
-        // 8. Robust Deduplication
-        const dedupedNewTransactions = new Map<string, typeof txBatch[number]>()
-        const rowsToUpsert: typeof txBatch = []
-
+        // 7. Deduplicate in-memory by account_id + external_transaction_id
+        const batchMap = new Map<string, typeof txBatch[number]>()
         for (const row of txBatch) {
-          const externalKey = `${row.account_id}:${row.external_transaction_id}`
-
-          if (existingExternalIds.has(externalKey)) {
-            rowsToUpsert.push(row)
-            continue
-          }
-
-          if (row.transaction_fingerprint && existingFingerprints.has(row.transaction_fingerprint)) {
-            continue
-          }
-
-          const dedupeKey = row.transaction_fingerprint || externalKey
-          if (!dedupedNewTransactions.has(dedupeKey)) {
-            dedupedNewTransactions.set(dedupeKey, row)
+          const key = `${row.account_id}:${row.external_transaction_id}`
+          if (!batchMap.has(key)) {
+            batchMap.set(key, row)
           }
         }
+        const rowsToUpsert = Array.from(batchMap.values())
 
-        rowsToUpsert.push(...dedupedNewTransactions.values())
-
-        // 9. Chunked Upserts with Fallback
+        // 8. Chunked Upserts with Fallback
         let importedCount = 0
         if (rowsToUpsert.length > 0) {
           for (let i = 0; i < rowsToUpsert.length; i += 100) {
@@ -331,7 +296,7 @@ serve(async (req) => {
               for (const row of chunk) {
                 const { data: singleTx, error: singleErr } = await supabase
                   .from('finance_transactions')
-                  .upsert([row], { onConflict: 'account_id,external_transaction_id', ignoreDuplicates: true })
+                  .upsert([row], { onConflict: 'account_id,external_transaction_id', ignoreDuplicates: false })
                   .select('id')
                 if (!singleErr && singleTx) {
                   importedCount += singleTx.length
@@ -343,7 +308,7 @@ serve(async (req) => {
           }
         }
 
-        // 10. Auto-categorise
+        // 9. Auto-categorise
         try {
           await fetch(
             `${Deno.env.get('SUPABASE_URL')}/functions/v1/finance-categorize`,
