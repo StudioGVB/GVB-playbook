@@ -102,7 +102,7 @@ serve(async (req) => {
 
         for (const a of wiseDbAccounts) {
           if (a.external_account_id) extToDbId[a.external_account_id] = a.id
-          if (a.currency) currencyToDbId[a.currency] = a.id
+          if (a.currency) currencyToDbId[a.currency.toUpperCase()] = a.id
         }
         const defaultDbAccountId = wiseDbAccounts[0]?.id || dbAccounts?.[0]?.id || ''
 
@@ -112,61 +112,83 @@ serve(async (req) => {
         let rawItems: Array<{ item: any; sourceCurrency?: string; forcedDbAccountId?: string }> = []
 
         for (const prof of profiles) {
-          try {
-            const actRes = await fetch(`https://api.wise.com/v1/profiles/${prof.id}/activities?limit=100`, {
-              headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
-            })
-            if (actRes.ok) {
-              const actData = await actRes.json()
-              const activities = actData.activities || (Array.isArray(actData) ? actData : [])
-              activities.forEach((act: any) => rawItems.push({ item: act }))
+          const actUrls = [
+            `https://api.wise.com/profiles/${prof.id}/activities?size=100`,
+            `https://api.wise.com/v1/profiles/${prof.id}/activities?size=100`,
+            `https://api.wise.com/v1/activities?size=100`,
+          ]
+          for (const actUrl of actUrls) {
+            try {
+              const actRes = await fetch(actUrl, {
+                headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
+              })
+              if (actRes.ok) {
+                const actData = await actRes.json()
+                const activities = actData.activities || (Array.isArray(actData) ? actData : [])
+                if (activities.length > 0) {
+                  activities.forEach((act: any) => rawItems.push({ item: act }))
+                  break
+                }
+              }
+            } catch (err) {
+              console.error(`Wise cron activities fetch error profile ${prof.id}:`, err)
             }
-          } catch (err) {
-            console.error(`Wise cron activities fetch error profile ${prof.id}:`, err)
           }
 
-          try {
-            const trRes = await fetch(`https://api.wise.com/v1/profiles/${prof.id}/transfers?limit=100`, {
-              headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
-            })
-            if (trRes.ok) {
-              const transfers = await trRes.json()
-              if (Array.isArray(transfers)) {
-                transfers.forEach((tr: any) => rawItems.push({ item: tr, sourceCurrency: tr.sourceCurrency }))
+          const trUrls = [
+            `https://api.wise.com/v3/profiles/${prof.id}/transfers?limit=100`,
+            `https://api.wise.com/v1/profiles/${prof.id}/transfers?limit=100`,
+            `https://api.wise.com/v1/transfers?limit=100`,
+          ]
+          for (const trUrl of trUrls) {
+            try {
+              const trRes = await fetch(trUrl, {
+                headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
+              })
+              if (trRes.ok) {
+                const transfers = await trRes.json()
+                const trList = Array.isArray(transfers) ? transfers : (transfers.transfers || [])
+                if (trList.length > 0) {
+                  trList.forEach((tr: any) => rawItems.push({ item: tr, sourceCurrency: tr.sourceCurrency }))
+                  break
+                }
               }
+            } catch (err) {
+              console.error(`Wise cron transfers fetch error profile ${prof.id}:`, err)
             }
-          } catch (err) {
-            console.error(`Wise cron transfers fetch error profile ${prof.id}:`, err)
           }
         }
 
         const since = new Date()
-        since.setDate(since.getDate() - 180)
-        const intervalStart = since.toISOString().slice(0, 19) + 'Z'
-        const intervalEnd = new Date().toISOString().slice(0, 19) + 'Z'
+        since.setDate(since.getDate() - 365)
+        const intervalStart = since.toISOString()
+        const intervalEnd = new Date().toISOString()
 
         for (const bal of balances) {
-          const dbAccountId = extToDbId[String(bal.id)]
+          const dbAccountId = extToDbId[String(bal.id)] || currencyToDbId[bal.currency.toUpperCase()]
           if (!dbAccountId) continue
 
-          try {
-            const stmtUrl = `https://api.wise.com/v3/profiles/${bal.profileId}/balance-statements/${bal.id}/statement.json?intervalStart=${intervalStart}&intervalEnd=${intervalEnd}&type=COMPACT`
-            let stmtRes = await fetch(stmtUrl, {
-              headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
-            })
-            if (!stmtRes.ok) {
-              const fallbackUrl = `https://api.wise.com/v3/profiles/${bal.profileId}/balance-statements/${bal.id}/statement.json?intervalStart=${intervalStart}&intervalEnd=${intervalEnd}`
-              stmtRes = await fetch(fallbackUrl, {
+          const stmtUrls = [
+            `https://api.wise.com/v3/profiles/${bal.profileId}/balance-statements/${bal.id}/statement.json?currency=${bal.currency}&intervalStart=${intervalStart}&intervalEnd=${intervalEnd}&type=COMPACT`,
+            `https://api.wise.com/v3/profiles/${bal.profileId}/balance-statements/${bal.id}/statement.json?currency=${bal.currency}&intervalStart=${intervalStart}&intervalEnd=${intervalEnd}`,
+          ]
+
+          for (const stmtUrl of stmtUrls) {
+            try {
+              const stmtRes = await fetch(stmtUrl, {
                 headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
               })
+              if (stmtRes.ok) {
+                const stmtData = await stmtRes.json()
+                const txs = stmtData.transactions || stmtData.bankTransactions || stmtData.compactTransactions || []
+                if (txs.length > 0) {
+                  txs.forEach((tx: any) => rawItems.push({ item: tx, sourceCurrency: bal.currency, forcedDbAccountId: dbAccountId }))
+                  break
+                }
+              }
+            } catch (err) {
+              console.error(`Wise cron statement fetch error balance ${bal.id}:`, err)
             }
-            if (stmtRes.ok) {
-              const stmtData = await stmtRes.json()
-              const txs = stmtData.transactions || stmtData.bankTransactions || stmtData.compactTransactions || []
-              txs.forEach((tx: any) => rawItems.push({ item: tx, sourceCurrency: bal.currency, forcedDbAccountId: dbAccountId }))
-            }
-          } catch (err) {
-            console.error(`Wise cron statement fetch error balance ${bal.id}:`, err)
           }
         }
 
@@ -240,9 +262,19 @@ serve(async (req) => {
           }
 
           const rawAmount = isDebit ? -numVal : numVal
-          const currency = item.amount?.currency || item.sourceCurrency || sourceCurrency || item.currency || 'GBP'
 
-          const dbAccountId = forcedDbAccountId || currencyToDbId[currency] || defaultDbAccountId
+          let currency = (item.amount?.currency || item.sourceCurrency || sourceCurrency || item.currency || '').toUpperCase()
+          if (!currency && typeof item.primaryAmount === 'string') {
+            const match = item.primaryAmount.match(/([A-Z]{3})/)
+            if (match) currency = match[1]
+          }
+          if (!currency && typeof item.secondaryAmount === 'string') {
+            const match = item.secondaryAmount.match(/([A-Z]{3})/)
+            if (match) currency = match[1]
+          }
+          if (!currency) currency = 'GBP'
+
+          const dbAccountId = forcedDbAccountId || extToDbId[String(item.balanceId || item.account_id)] || currencyToDbId[currency] || defaultDbAccountId
           if (!dbAccountId) continue
 
           const description = item.details?.description || item.details?.title || item.title || item.description || item.reference || item.details?.paymentReference || 'Wise transaction'

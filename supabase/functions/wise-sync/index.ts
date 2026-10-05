@@ -171,12 +171,15 @@ serve(async (req) => {
     let activitiesCount = 0
     let transfersCount = 0
     let statementsCount = 0
+    const endpointLogs: string[] = []
 
-    // Source A: Profile Activities & Global Activities
+    // Source A: Profile Activities (Try official Wise endpoints)
     for (const prof of profiles) {
       const actUrls = [
-        `https://api.wise.com/v1/profiles/${prof.id}/activities?limit=200`,
-        `https://api.wise.com/v1/activities?limit=200`,
+        `https://api.wise.com/profiles/${prof.id}/activities?size=100`,
+        `https://api.wise.com/v1/profiles/${prof.id}/activities?size=100`,
+        `https://api.wise.com/v1/activities?size=100`,
+        `https://api.wise.com/v2/profiles/${prof.id}/activities?size=100`,
       ]
       for (const actUrl of actUrls) {
         try {
@@ -186,20 +189,27 @@ serve(async (req) => {
           if (actRes.ok) {
             const actData = await actRes.json()
             const activities = actData.activities || (Array.isArray(actData) ? actData : [])
-            activities.forEach((act: any) => {
-              rawItems.push({ item: act })
-              activitiesCount++
-            })
+            endpointLogs.push(`Act SUCCESS ${actUrl}: ${activities.length} items`)
+            if (activities.length > 0) {
+              activities.forEach((act: any) => {
+                rawItems.push({ item: act })
+                activitiesCount++
+              })
+              break
+            }
+          } else {
+            endpointLogs.push(`Act FAIL ${actUrl}: ${actRes.status}`)
           }
         } catch (err) {
-          console.error(`Wise activities fetch error ${actUrl}:`, err)
+          endpointLogs.push(`Act ERR ${actUrl}: ${String(err)}`)
         }
       }
 
-      // Source B: Profile Transfers & Global Transfers
+      // Source B: Profile Transfers
       const trUrls = [
-        `https://api.wise.com/v1/profiles/${prof.id}/transfers?limit=200`,
-        `https://api.wise.com/v1/transfers?limit=200`,
+        `https://api.wise.com/v3/profiles/${prof.id}/transfers?limit=100`,
+        `https://api.wise.com/v1/profiles/${prof.id}/transfers?limit=100`,
+        `https://api.wise.com/v1/transfers?limit=100`,
       ]
       for (const trUrl of trUrls) {
         try {
@@ -208,20 +218,25 @@ serve(async (req) => {
           })
           if (trRes.ok) {
             const transfers = await trRes.json()
-            if (Array.isArray(transfers)) {
-              transfers.forEach((tr: any) => {
+            const trList = Array.isArray(transfers) ? transfers : (transfers.transfers || [])
+            endpointLogs.push(`Tr SUCCESS ${trUrl}: ${trList.length} items`)
+            if (trList.length > 0) {
+              trList.forEach((tr: any) => {
                 rawItems.push({ item: tr, sourceCurrency: tr.sourceCurrency })
                 transfersCount++
               })
+              break
             }
+          } else {
+            endpointLogs.push(`Tr FAIL ${trUrl}: ${trRes.status}`)
           }
         } catch (err) {
-          console.error(`Wise transfers fetch error ${trUrl}:`, err)
+          endpointLogs.push(`Tr ERR ${trUrl}: ${String(err)}`)
         }
       }
     }
 
-    // Source C: Balance Statements (with currency parameter and full ISO range!)
+    // Source C: Balance Statements
     const since = new Date()
     since.setDate(since.getDate() - 365) // 1 year back
     const intervalStart = since.toISOString()
@@ -234,7 +249,6 @@ serve(async (req) => {
       const stmtUrls = [
         `https://api.wise.com/v3/profiles/${bal.profileId}/balance-statements/${bal.id}/statement.json?currency=${bal.currency}&intervalStart=${intervalStart}&intervalEnd=${intervalEnd}&type=COMPACT`,
         `https://api.wise.com/v3/profiles/${bal.profileId}/balance-statements/${bal.id}/statement.json?currency=${bal.currency}&intervalStart=${intervalStart}&intervalEnd=${intervalEnd}`,
-        `https://api.wise.com/v1/profiles/${bal.profileId}/balance-statements/${bal.id}/statement.json?currency=${bal.currency}&intervalStart=${intervalStart}&intervalEnd=${intervalEnd}`,
       ]
 
       for (const stmtUrl of stmtUrls) {
@@ -245,6 +259,7 @@ serve(async (req) => {
           if (stmtRes.ok) {
             const stmtData = await stmtRes.json()
             const txs = stmtData.transactions || stmtData.bankTransactions || stmtData.compactTransactions || []
+            endpointLogs.push(`Stmt SUCCESS ${stmtUrl}: ${txs.length} items`)
             if (txs.length > 0) {
               txs.forEach((tx: any) => {
                 rawItems.push({ item: tx, sourceCurrency: bal.currency, forcedDbAccountId: dbAccountId })
@@ -252,9 +267,11 @@ serve(async (req) => {
               })
               break
             }
+          } else {
+            endpointLogs.push(`Stmt FAIL ${stmtUrl}: ${stmtRes.status}`)
           }
         } catch (err) {
-          console.error(`Wise statement fetch error ${stmtUrl}:`, err)
+          endpointLogs.push(`Stmt ERR ${stmtUrl}: ${String(err)}`)
         }
       }
     }
@@ -329,9 +346,19 @@ serve(async (req) => {
       }
 
       const rawAmount = isDebit ? -numVal : numVal
-      const currency = (item.amount?.currency || item.sourceCurrency || sourceCurrency || item.currency || 'GBP').toUpperCase()
 
-      const dbAccountId = forcedDbAccountId || currencyToDbId[currency] || defaultDbAccountId
+      let currency = (item.amount?.currency || item.sourceCurrency || sourceCurrency || item.currency || '').toUpperCase()
+      if (!currency && typeof item.primaryAmount === 'string') {
+        const match = item.primaryAmount.match(/([A-Z]{3})/)
+        if (match) currency = match[1]
+      }
+      if (!currency && typeof item.secondaryAmount === 'string') {
+        const match = item.secondaryAmount.match(/([A-Z]{3})/)
+        if (match) currency = match[1]
+      }
+      if (!currency) currency = 'GBP'
+
+      const dbAccountId = forcedDbAccountId || extToDbId[String(item.balanceId || item.account_id)] || currencyToDbId[currency] || defaultDbAccountId
       if (!dbAccountId) continue
 
       const description = item.details?.description || item.details?.title || item.title || item.description || item.reference || item.details?.paymentReference || 'Wise transaction'
@@ -416,6 +443,7 @@ serve(async (req) => {
       rawItemsTotal: rawItems.length,
       rowsToUpsertCount: rowsToUpsert.length,
       lastUpsertError,
+      endpointLogs,
       message,
     }), {
       status: 200,

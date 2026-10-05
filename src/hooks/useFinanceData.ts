@@ -775,19 +775,28 @@ export function useFinanceDataState() {
         return;
       }
 
+      const activeToken = token || localStorage.getItem('gvb_wise_api_token') || undefined;
+
       const response = await fetch(`${SUPABASE_URL}/functions/v1/wise-sync`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${session.data.session.access_token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ token }),
+        body: JSON.stringify({ token: activeToken }),
       });
 
       const data = await response.json();
       if (!response.ok) {
         toast.error(data.error || 'Sync failed');
+        if (data.error && (data.error.includes('Missing') || data.error.includes('invalid') || data.error.includes('token'))) {
+          window.dispatchEvent(new CustomEvent('open-wise-token-modal'));
+        }
         return;
+      }
+
+      if (activeToken) {
+        localStorage.setItem('gvb_wise_api_token', activeToken);
       }
 
       toast.success(data.message || `Synced Wise accounts: imported ${data.transactionsImported} transactions`);
