@@ -942,12 +942,29 @@ export function useFinanceDataState() {
         toast.info(data.message || 'All transactions categorised');
       }
 
-      // Repair pass: Unflag transfers for all Wise transactions (unless matched in transfer group) & auto-link income/rent
+      // Repair pass: Unflag transfers for Wise txs, strip HTML tags, fix £3k deposit sign, & auto-link income/rent
       const incomeCat = categories.find(c => c.type === 'income' || c.name.toLowerCase() === 'income');
       const rentCat = categories.find(c => c.name.toLowerCase() === 'rent');
       const wiseAccountIds = new Set(accounts.filter(a => a.provider === 'wise').map(a => a.id));
 
       for (const t of transactions) {
+        const cleanDesc = (t.description || '').replace(/<[^>]*>/g, '').trim();
+        const cleanMerch = (t.merchant || '').replace(/<[^>]*>/g, '').trim() || null;
+        let targetAmount = t.amount;
+
+        // Fix £3k Gabriella Blyth deposit if negative
+        if (Math.abs(t.amount) === 3000 && (cleanDesc.toUpperCase().includes('GABRIELLA') || cleanDesc.toUpperCase().includes('NOREF'))) {
+          targetAmount = 3000.00;
+        }
+
+        if (cleanDesc !== t.description || cleanMerch !== t.merchant || targetAmount !== t.amount) {
+          await supabase.from('finance_transactions').update({
+            amount: targetAmount,
+            description: cleanDesc,
+            merchant: cleanMerch,
+          }).eq('id', t.id);
+        }
+
         // Unflag any Wise transaction that was previously marked as transfer but isn't matched to an internal transfer group
         if ((wiseAccountIds.has(t.account_id) || true) && t.is_transfer && !t.transfer_group_id) {
           await supabase.from('finance_transactions').update({
@@ -957,8 +974,8 @@ export function useFinanceDataState() {
           }).eq('id', t.id);
         }
 
-        const descUpper = (t.description || '').toUpperCase();
-        if (t.amount > 0 && (descUpper.includes('GAMMA') || descUpper.includes('SALARY') || descUpper.includes('VENTURE') || descUpper.includes('PAYCHECK') || wiseAccountIds.has(t.account_id))) {
+        const descUpper = cleanDesc.toUpperCase();
+        if (targetAmount > 0 && (descUpper.includes('GAMMA') || descUpper.includes('SALARY') || descUpper.includes('VENTURE') || descUpper.includes('PAYCHECK') || descUpper.includes('GABRIELLA') || wiseAccountIds.has(t.account_id))) {
           if (t.is_transfer || (incomeCat && !t.category_id)) {
             await supabase.from('finance_transactions').update({
               is_transfer: false,
@@ -966,7 +983,7 @@ export function useFinanceDataState() {
             }).eq('id', t.id);
           }
         }
-        if (t.amount < 0 && (descUpper.includes('EVANS') || descUpper.includes('RENTAL') || descUpper.includes('LANDLORD') || descUpper.includes('RENT'))) {
+        if (targetAmount < 0 && (descUpper.includes('EVANS') || descUpper.includes('RENTAL') || descUpper.includes('LANDLORD') || descUpper.includes('RENT'))) {
           if (!t.is_fixed || (rentCat && !t.category_id)) {
             await supabase.from('finance_transactions').update({
               is_fixed: true,

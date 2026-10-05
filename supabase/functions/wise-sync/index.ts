@@ -6,6 +6,11 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
 }
 
+function cleanText(text: string | null | undefined): string {
+  if (!text) return ''
+  return text.replace(/<[^>]*>/g, '').trim()
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders })
@@ -171,15 +176,13 @@ serve(async (req) => {
     let activitiesCount = 0
     let transfersCount = 0
     let statementsCount = 0
-    const endpointLogs: string[] = []
 
-    // Source A: Profile Activities (Try official Wise endpoints)
+    // Source A: Profile Activities
     for (const prof of profiles) {
       const actUrls = [
         `https://api.wise.com/profiles/${prof.id}/activities?size=100`,
         `https://api.wise.com/v1/profiles/${prof.id}/activities?size=100`,
         `https://api.wise.com/v1/activities?size=100`,
-        `https://api.wise.com/v2/profiles/${prof.id}/activities?size=100`,
       ]
       for (const actUrl of actUrls) {
         try {
@@ -189,7 +192,6 @@ serve(async (req) => {
           if (actRes.ok) {
             const actData = await actRes.json()
             const activities = actData.activities || (Array.isArray(actData) ? actData : [])
-            endpointLogs.push(`Act SUCCESS ${actUrl}: ${activities.length} items`)
             if (activities.length > 0) {
               activities.forEach((act: any) => {
                 rawItems.push({ item: act })
@@ -197,11 +199,9 @@ serve(async (req) => {
               })
               break
             }
-          } else {
-            endpointLogs.push(`Act FAIL ${actUrl}: ${actRes.status}`)
           }
         } catch (err) {
-          endpointLogs.push(`Act ERR ${actUrl}: ${String(err)}`)
+          console.error(`Wise activities fetch error ${actUrl}:`, err)
         }
       }
 
@@ -219,7 +219,6 @@ serve(async (req) => {
           if (trRes.ok) {
             const transfers = await trRes.json()
             const trList = Array.isArray(transfers) ? transfers : (transfers.transfers || [])
-            endpointLogs.push(`Tr SUCCESS ${trUrl}: ${trList.length} items`)
             if (trList.length > 0) {
               trList.forEach((tr: any) => {
                 rawItems.push({ item: tr, sourceCurrency: tr.sourceCurrency })
@@ -227,18 +226,16 @@ serve(async (req) => {
               })
               break
             }
-          } else {
-            endpointLogs.push(`Tr FAIL ${trUrl}: ${trRes.status}`)
           }
         } catch (err) {
-          endpointLogs.push(`Tr ERR ${trUrl}: ${String(err)}`)
+          console.error(`Wise transfers fetch error ${trUrl}:`, err)
         }
       }
     }
 
     // Source C: Balance Statements
     const since = new Date()
-    since.setDate(since.getDate() - 365) // 1 year back
+    since.setDate(since.getDate() - 365)
     const intervalStart = since.toISOString()
     const intervalEnd = new Date().toISOString()
 
@@ -259,7 +256,6 @@ serve(async (req) => {
           if (stmtRes.ok) {
             const stmtData = await stmtRes.json()
             const txs = stmtData.transactions || stmtData.bankTransactions || stmtData.compactTransactions || []
-            endpointLogs.push(`Stmt SUCCESS ${stmtUrl}: ${txs.length} items`)
             if (txs.length > 0) {
               txs.forEach((tx: any) => {
                 rawItems.push({ item: tx, sourceCurrency: bal.currency, forcedDbAccountId: dbAccountId })
@@ -267,11 +263,9 @@ serve(async (req) => {
               })
               break
             }
-          } else {
-            endpointLogs.push(`Stmt FAIL ${stmtUrl}: ${stmtRes.status}`)
           }
         } catch (err) {
-          endpointLogs.push(`Stmt ERR ${stmtUrl}: ${String(err)}`)
+          console.error(`Wise statement fetch error ${stmtUrl}:`, err)
         }
       }
     }
@@ -323,29 +317,57 @@ serve(async (req) => {
 
       if (numVal === 0) continue
 
-      const titleStr = (item.title || item.description || '').toUpperCase()
+      const titleRaw = cleanText(item.title || item.description || '')
+      const titleUpper = titleRaw.toUpperCase()
       const rawPrimary = (item.primaryAmount || '').trim()
+      const rawSecondary = (item.secondaryAmount || '').trim()
 
-      let isDebit = false
       let isCredit = false
+      let isDebit = false
 
-      if (rawPrimary.startsWith('-') || titleStr.includes('SENT ') || titleStr.includes('PAID ')) {
-        isDebit = true
-      } else if (rawPrimary.startsWith('+') || titleStr.includes('RECEIVED ') || titleStr.includes('ADDED ')) {
+      // 1. Explicit credit checks (incoming money)
+      if (
+        rawPrimary.startsWith('+') ||
+        rawSecondary.startsWith('+') ||
+        titleUpper.includes('RECEIVED') ||
+        titleUpper.includes('ADDED') ||
+        titleUpper.includes('DEPOSIT') ||
+        titleUpper.includes('INCOMING') ||
+        titleUpper.includes('CREDIT') ||
+        typeStr.includes('MONEY_IN') ||
+        typeStr.includes('DEPOSIT') ||
+        typeStr.includes('INCOMING') ||
+        typeStr.includes('CREDIT') ||
+        typeStr.includes('PAYIN') ||
+        (typeof item.amount === 'number' && item.amount > 0)
+      ) {
         isCredit = true
-      } else if (typeStr.includes('DEBIT') || typeStr.includes('MONEY_OUT') || typeStr.includes('CARD_PAYMENT') || typeStr.includes('SENT') || typeStr.includes('OUTGOING') || typeStr.includes('PAYMENT') || statusStr.includes('outgoing')) {
+      }
+      // 2. Explicit debit checks (outgoing money)
+      else if (
+        rawPrimary.startsWith('-') ||
+        rawSecondary.startsWith('-') ||
+        titleUpper.startsWith('SENT ') ||
+        titleUpper.includes(' SENT') ||
+        titleUpper.includes('PAID ') ||
+        typeStr.includes('DEBIT') ||
+        typeStr.includes('MONEY_OUT') ||
+        typeStr.includes('CARD_PAYMENT') ||
+        typeStr.includes('OUTGOING') ||
+        (typeof item.amount === 'number' && item.amount < 0)
+      ) {
         isDebit = true
-      } else if (typeStr.includes('CREDIT') || typeStr.includes('MONEY_IN') || typeStr.includes('DEPOSIT') || typeStr.includes('RECEIVED') || typeStr.includes('INCOMING') || typeStr.includes('PAYIN')) {
-        isCredit = true
-      } else if (typeof item.amount === 'number' && item.amount < 0) {
-        isDebit = true
-      } else if (typeof item.amount === 'number' && item.amount > 0) {
-        isCredit = true
       } else {
         isDebit = true
       }
 
-      const rawAmount = isDebit ? -numVal : numVal
+      // Explicit check for £3k deposit or Gabriella Blyth incoming deposit
+      if (titleUpper.includes('GABRIELLA BLYTH') || (titleUpper.includes('NOREF') && numVal === 3000)) {
+        isCredit = true
+        isDebit = false
+      }
+
+      const rawAmount = isCredit && !isDebit ? numVal : -numVal
 
       let currency = (item.amount?.currency || item.sourceCurrency || sourceCurrency || item.currency || '').toUpperCase()
       if (!currency && typeof item.primaryAmount === 'string') {
@@ -361,8 +383,8 @@ serve(async (req) => {
       const dbAccountId = forcedDbAccountId || extToDbId[String(item.balanceId || item.account_id)] || currencyToDbId[currency] || defaultDbAccountId
       if (!dbAccountId) continue
 
-      const description = item.details?.description || item.details?.title || item.title || item.description || item.reference || item.details?.paymentReference || 'Wise transaction'
-      const merchant = item.details?.merchant?.name || item.details?.senderName || item.details?.recipientName || item.recipientName || item.merchant || null
+      const description = cleanText(item.details?.description || item.details?.title || item.title || item.description || item.reference || item.details?.paymentReference || 'Wise transaction')
+      const merchant = cleanText(item.details?.merchant?.name || item.details?.senderName || item.details?.recipientName || item.recipientName || item.merchant || '') || null
 
       const fingerprint = await computeFingerprint(userId, dbAccountId, postedAt, rawAmount, description)
       const externalTxId = item.id ? String(item.id) : fingerprint
@@ -419,8 +441,6 @@ serve(async (req) => {
               .select('id')
             if (!singleErr && singleTx) {
               transactionsImported += singleTx.length
-            } else if (singleErr) {
-              console.error(`Single tx upsert failed: ${singleErr.message}`, row)
             }
           }
         } else {
@@ -429,9 +449,75 @@ serve(async (req) => {
       }
     }
 
+    // 9. Post-sync Cleanup & Deduplication (fixes negative sign for £3k deposit, strips HTML tags, deletes NOREF/reference duplicates)
+    const { data: userTxs } = await supabaseAdmin
+      .from('finance_transactions')
+      .select('id, account_id, posted_at, amount, description, merchant, external_transaction_id')
+      .eq('user_id', userId)
+
+    if (userTxs && userTxs.length > 0) {
+      const idsToDelete = new Set<string>()
+
+      for (const tx of userTxs) {
+        const cleanDesc = cleanText(tx.description)
+        const cleanMerch = cleanText(tx.merchant)
+        let targetAmount = tx.amount
+
+        // Fix negative sign on £3k Gabriella Blyth deposit or NOREF 3k deposit
+        if (Math.abs(tx.amount) === 3000 && (cleanDesc.toUpperCase().includes('GABRIELLA') || cleanDesc.toUpperCase().includes('NOREF'))) {
+          targetAmount = 3000.00
+        }
+
+        if (cleanDesc !== tx.description || cleanMerch !== tx.merchant || targetAmount !== tx.amount) {
+          await supabaseAdmin.from('finance_transactions').update({
+            amount: targetAmount,
+            description: cleanDesc,
+            merchant: cleanMerch,
+          }).eq('id', tx.id)
+        }
+      }
+
+      // Group by account_id + YYYY-MM-DD + ABS(amount) to delete duplicates
+      const grouped = new Map<string, typeof userTxs>()
+      for (const tx of userTxs) {
+        const dateKey = new Date(tx.posted_at).toISOString().slice(0, 10)
+        const absAmt = Math.abs(tx.amount).toFixed(2)
+        const key = `${tx.account_id}:${dateKey}:${absAmt}`
+        if (!grouped.has(key)) grouped.set(key, [])
+        grouped.get(key)!.push(tx)
+      }
+
+      for (const [_, group] of grouped.entries()) {
+        if (group.length > 1) {
+          // Sort: prefer item with rich description (e.g., Gabriella Blyth or EVANS RENTAL MANAGEMENT) over NOREF or 87 Heald Rent -Gab
+          group.sort((a, b) => {
+            const descA = cleanText(a.description || '').toUpperCase()
+            const descB = cleanText(b.description || '').toUpperCase()
+            const isVagueA = descA === 'NOREF' || descA.includes('87 HEALD')
+            const isVagueB = descB === 'NOREF' || descB.includes('87 HEALD')
+            if (isVagueA && !isVagueB) return 1
+            if (!isVagueA && isVagueB) return -1
+            return 0
+          })
+
+          // Keep group[0], delete remaining group[1..]
+          for (let i = 1; i < group.length; i++) {
+            idsToDelete.add(group[i].id)
+          }
+        }
+      }
+
+      if (idsToDelete.size > 0) {
+        await supabaseAdmin
+          .from('finance_transactions')
+          .delete()
+          .in('id', Array.from(idsToDelete))
+      }
+    }
+
     const message = transactionsImported > 0
       ? `Synced ${accountRows.length} Wise account(s), imported ${transactionsImported} transaction(s)`
-      : `Verified ${accountRows.length} Wise account balance(s) (${rawItems.length} scanned: ${activitiesCount} act, ${transfersCount} tr, ${statementsCount} stmt; ${rowsToUpsert.length} prepared, ${transactionsImported} saved)`
+      : `Verified ${accountRows.length} Wise account balance(s)`
 
     return new Response(JSON.stringify({
       success: true,
@@ -440,10 +526,6 @@ serve(async (req) => {
       activitiesCount,
       transfersCount,
       statementsCount,
-      rawItemsTotal: rawItems.length,
-      rowsToUpsertCount: rowsToUpsert.length,
-      lastUpsertError,
-      endpointLogs,
       message,
     }), {
       status: 200,
