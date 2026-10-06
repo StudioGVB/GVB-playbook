@@ -246,9 +246,7 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
       .filter(Boolean) as typeof categories;
   }, [categories]);
 
-  const categoryOptions = useMemo(() => (
-    categories.filter(c => c.type !== 'income' || c.name.trim().toLowerCase() === 'income')
-  ), [categories]);
+  const categoryOptions = useMemo(() => categories, [categories]);
 
   const uncategorizedCount = transactions.filter(tx => !tx.category_id).length;
   const transferCount = transactions.filter(tx => tx.is_transfer || tx.transfer_group_id).length;
@@ -615,10 +613,7 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
             const transferStatus = (tx as any).transfer_status as string | null;
             const isConfirmedTransfer = transferStatus === 'confirmed' || transferStatus === 'auto_confirmed';
             const isIncomeTransaction = tx.amount > 0 && !isTransfer && !isConfirmedTransfer && !(tx as any).is_refund;
-            const incomeSourceCat = isIncomeTransaction && cat?.type === 'income' && isIncomeSourceName(cat.name) ? cat : null;
-            const displayCat = isIncomeTransaction && cat?.type === 'income'
-              ? (genericIncomeCategory || { name: 'Income', type: 'income', color: '#22c55e' }) as any
-              : cat;
+            const displayCat = cat;
             const catColor = displayCat ? (CATEGORY_TYPE_COLORS[displayCat.type] || CATEGORY_TYPE_COLORS.variable) : '';
 
             const assignedGoal = (tx as any).goal_id ? goals.find(g => g.id === (tx as any).goal_id) : null;

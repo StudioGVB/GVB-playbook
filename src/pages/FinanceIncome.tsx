@@ -35,10 +35,24 @@ type Bucket = {
 // Legacy matchers to keep prior data flowing into the seeded sources.
 const LEGACY_MATCHERS: Record<string, string[]> = {
   'batchbase': ['batchbase', 'batch base', 'batch'],
-  'venture advisory': ['venture advisory', 'venture'],
+  'venture advisory': ['venture advisory', 'venture', 'gamma', 'proposal'],
   'etsy': ['etsy'],
   'back pocket games': ['back pocket', 'bpg', 'back pocket games'],
 };
+
+function isInternalTransfer(tx: any): boolean {
+  if (tx.is_transfer) return true;
+  if (tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') return true;
+  const text = `${tx.merchant || ''} ${tx.description || ''}`.toLowerCase();
+  return (
+    text.includes('transfer from savings') ||
+    text.includes('transfer to savings') ||
+    text.includes('savings transfer') ||
+    text.includes('transfer from') ||
+    text.includes('transfer to') ||
+    text.includes('internal transfer')
+  );
+}
 
 // Hex → transparent-ish tile bg / border
 function tint(hex: string, alpha: number): string {
@@ -132,17 +146,11 @@ export default function FinanceIncome() {
 
   const incomeTxs = useMemo(() => transactions.filter(tx => {
     if (tx.amount <= 0) return false;
-    const cat = categories.find(c => c.id === tx.category_id);
-    const isIncomeCat = cat?.type === 'income';
-
-    if (!isIncomeCat) {
-      if (tx.is_transfer) return false;
-      if (tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') return false;
-    }
+    if (isInternalTransfer(tx)) return false;
     if (tx.is_reimbursable) return false; // Exclude employer work payback deposits from earned personal income
     const d = new Date(tx.posted_at);
     return d >= monthStart && d <= monthEnd;
-  }), [transactions, categories, monthStart, monthEnd]);
+  }), [transactions, monthStart, monthEnd]);
 
   const grandTotal = useMemo(() => incomeTxs.reduce((s, tx) => s + baseAmt(tx), 0), [incomeTxs]);
 

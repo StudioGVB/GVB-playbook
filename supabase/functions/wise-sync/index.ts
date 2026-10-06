@@ -171,6 +171,13 @@ serve(async (req) => {
       })
     }
 
+    // Find Venture Advisory income category ID if present
+    const { data: userCats } = await supabaseAdmin
+      .from('finance_categories')
+      .select('id, name, type')
+      .eq('user_id', userId)
+    const ventureCatId = userCats?.find(c => c.type === 'income' && (c.name.toLowerCase().includes('venture') || c.name.toLowerCase().includes('gamma')))?.id || null
+
     // 5. Gather raw items from Wise endpoints (Activities, Transfers, Statements)
     let rawItems: Array<{ item: any; sourceCurrency?: string; forcedDbAccountId?: string }> = []
     let activitiesCount = 0
@@ -325,7 +332,6 @@ serve(async (req) => {
       let isCredit = false
       let isDebit = false
 
-      // 1. Explicit credit checks (incoming money)
       if (
         rawPrimary.startsWith('+') ||
         rawSecondary.startsWith('+') ||
@@ -342,9 +348,7 @@ serve(async (req) => {
         (typeof item.amount === 'number' && item.amount > 0)
       ) {
         isCredit = true
-      }
-      // 2. Explicit debit checks (outgoing money)
-      else if (
+      } else if (
         rawPrimary.startsWith('-') ||
         rawSecondary.startsWith('-') ||
         titleUpper.startsWith('SENT ') ||
@@ -361,7 +365,6 @@ serve(async (req) => {
         isDebit = true
       }
 
-      // Explicit check for £3k deposit or Gabriella Blyth incoming deposit
       if (titleUpper.includes('GABRIELLA BLYTH') || (titleUpper.includes('NOREF') && numVal === 3000)) {
         isCredit = true
         isDebit = false
@@ -386,6 +389,12 @@ serve(async (req) => {
       const description = cleanText(item.details?.description || item.details?.title || item.title || item.description || item.reference || item.details?.paymentReference || 'Wise transaction')
       const merchant = cleanText(item.details?.merchant?.name || item.details?.senderName || item.details?.recipientName || item.recipientName || item.merchant || '') || null
 
+      const fullText = `${description.toUpperCase()} ${(merchant || '').toUpperCase()}`
+      const isSavingsTransfer = fullText.includes('TRANSFER FROM SAVINGS') || fullText.includes('SAVINGS TRANSFER') || fullText.includes('TRANSFER FROM') || fullText.includes('TRANSFER TO SAVINGS')
+
+      const isGammaVenture = fullText.includes('GAMMA') || fullText.includes('VENTURE') || fullText.includes('ADVISORY')
+      const targetCategoryId = isGammaVenture && ventureCatId ? ventureCatId : null
+
       const fingerprint = await computeFingerprint(userId, dbAccountId, postedAt, rawAmount, description)
       const externalTxId = item.id ? String(item.id) : fingerprint
 
@@ -398,9 +407,10 @@ serve(async (req) => {
         merchant,
         amount: rawAmount,
         currency,
-        is_transfer: false,
-        transfer_side: null,
-        transfer_status: null,
+        category_id: targetCategoryId,
+        is_transfer: isSavingsTransfer,
+        transfer_side: isSavingsTransfer ? 'in' : null,
+        transfer_status: isSavingsTransfer ? 'auto_confirmed' : null,
         transaction_fingerprint: fingerprint,
         raw: {
           reference: item.reference || null,
@@ -449,10 +459,10 @@ serve(async (req) => {
       }
     }
 
-    // 9. Post-sync Cleanup & Deduplication (fixes negative sign for £3k deposit, strips HTML tags, deletes NOREF/reference duplicates)
+    // 9. Post-sync Cleanup & Deduplication (fixes negative sign for £3k deposit, flags savings transfers, links Gamma to Venture Advisory)
     const { data: userTxs } = await supabaseAdmin
       .from('finance_transactions')
-      .select('id, account_id, posted_at, amount, description, merchant, external_transaction_id')
+      .select('id, account_id, posted_at, amount, description, merchant, external_transaction_id, is_transfer, category_id')
       .eq('user_id', userId)
 
     if (userTxs && userTxs.length > 0) {
@@ -461,18 +471,36 @@ serve(async (req) => {
       for (const tx of userTxs) {
         const cleanDesc = cleanText(tx.description)
         const cleanMerch = cleanText(tx.merchant)
+        const fullText = `${cleanDesc.toUpperCase()} ${(cleanMerch || '').toUpperCase()}`
+        const isSavingsTransfer = fullText.includes('TRANSFER FROM SAVINGS') || fullText.includes('SAVINGS TRANSFER') || fullText.includes('TRANSFER FROM') || fullText.includes('TRANSFER TO SAVINGS')
+
         let targetAmount = tx.amount
+        let targetIsTransfer = tx.is_transfer
+        let targetCatId = tx.category_id
+
+        if (isSavingsTransfer) {
+          targetIsTransfer = true
+        }
+
+        // Auto-assign Gamma/Venture to Venture Advisory category
+        if ((fullText.includes('GAMMA') || fullText.includes('VENTURE') || fullText.includes('ADVISORY')) && ventureCatId) {
+          targetCatId = ventureCatId
+          targetIsTransfer = false
+        }
 
         // Fix negative sign on £3k Gabriella Blyth deposit or NOREF 3k deposit
         if (Math.abs(tx.amount) === 3000 && (cleanDesc.toUpperCase().includes('GABRIELLA') || cleanDesc.toUpperCase().includes('NOREF'))) {
           targetAmount = 3000.00
+          if (ventureCatId) targetCatId = ventureCatId
         }
 
-        if (cleanDesc !== tx.description || cleanMerch !== tx.merchant || targetAmount !== tx.amount) {
+        if (cleanDesc !== tx.description || cleanMerch !== tx.merchant || targetAmount !== tx.amount || targetIsTransfer !== tx.is_transfer || targetCatId !== tx.category_id) {
           await supabaseAdmin.from('finance_transactions').update({
             amount: targetAmount,
             description: cleanDesc,
             merchant: cleanMerch,
+            is_transfer: targetIsTransfer,
+            category_id: targetCatId,
           }).eq('id', tx.id)
         }
       }
@@ -489,7 +517,6 @@ serve(async (req) => {
 
       for (const [_, group] of grouped.entries()) {
         if (group.length > 1) {
-          // Sort: prefer item with rich description (e.g., Gabriella Blyth or EVANS RENTAL MANAGEMENT) over NOREF or 87 Heald Rent -Gab
           group.sort((a, b) => {
             const descA = cleanText(a.description || '').toUpperCase()
             const descB = cleanText(b.description || '').toUpperCase()
@@ -500,7 +527,6 @@ serve(async (req) => {
             return 0
           })
 
-          // Keep group[0], delete remaining group[1..]
           for (let i = 1; i < group.length; i++) {
             idsToDelete.add(group[i].id)
           }
