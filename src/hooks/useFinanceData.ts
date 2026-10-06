@@ -202,6 +202,7 @@ export function useFinanceDataState() {
 
   const hasLoadedOnce = useRef(false);
   const cleaningDuplicatesRef = useRef(false);
+  const visaMigrationRef = useRef(false);
 
   const cleanDuplicateCategories = useCallback(async (catData: any[]) => {
     if (catData.length === 0 || cleaningDuplicatesRef.current) return;
@@ -325,7 +326,45 @@ export function useFinanceDataState() {
 
         setTransactions(enriched as any);
       }
-      if (goalRes.data) setGoals(goalRes.data as any);
+      if (goalRes.data) {
+        setGoals(goalRes.data as any);
+
+        // Self-healing: Transfer Visa pool funds to Emergency Reserve and set Visa start_date to Jan 1st 2027
+        if (goalRes.data.length > 0 && !visaMigrationRef.current) {
+          const visaGoal = goalRes.data.find((g: any) => g.name.toLowerCase().includes('visa'));
+          const emergencyGoal = goalRes.data.find((g: any) => (g as any).is_emergency === true || g.name.toLowerCase().includes('emergency'));
+          
+          if (visaGoal) {
+            const visaAssigned = visaGoal.assigned_amount || 0;
+            const currentStartDate = (visaGoal as any).start_date ? String((visaGoal as any).start_date).split('T')[0] : '';
+            const needsStartDateUpdate = currentStartDate !== '2027-01-01';
+
+            if (visaAssigned > 0 || needsStartDateUpdate) {
+              visaMigrationRef.current = true;
+              const updates: Promise<any>[] = [];
+              if (visaAssigned > 0 && emergencyGoal) {
+                updates.push(
+                  supabase.from('finance_goals').update({
+                    assigned_amount: (emergencyGoal.assigned_amount || 0) + visaAssigned
+                  }).eq('id', emergencyGoal.id)
+                );
+              }
+              updates.push(
+                supabase.from('finance_goals').update({
+                  assigned_amount: 0,
+                  start_date: '2027-01-01'
+                }).eq('id', visaGoal.id)
+              );
+              Promise.all(updates).then(() => {
+                toast.success(`Transferred ${visaAssigned > 0 ? `Visa funds into Emergency Reserve & set ` : ''}Visa start date to 1 Jan 2027`);
+                fetchAll();
+              }).catch(err => {
+                console.error('[self-healing] Failed to update Visa pool', err);
+              });
+            }
+          }
+        }
+      }
       if (planRes.data) setGoalPlans(planRes.data as any);
       if (logRes.data) setImportLogs(logRes.data as any);
       if (tagRes.data) setIncomeSourceTags(tagRes.data as any);
@@ -586,8 +625,12 @@ export function useFinanceDataState() {
 
   const updateGoal = async (id: string, updates: Partial<FinanceGoal>) => {
     const { error } = await supabase.from('finance_goals').update(updates).eq('id', id);
-    if (error) { toast.error('Update failed'); return; }
-    fetchAll();
+    if (error) {
+      console.error('[updateGoal] Error:', error);
+      toast.error(`Update failed: ${error.message}`);
+      return;
+    }
+    await fetchAll();
   };
 
   const saveGoalPlan = async (plan: Omit<FinanceGoalPlan, 'id' | 'created_at'>) => {

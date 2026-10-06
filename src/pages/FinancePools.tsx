@@ -407,8 +407,8 @@ export default function FinancePoolsPage() {
       color: editColor,
       is_stash: editIsStash,
       percent_allocation: parseFloat(editPercentAllocation) || 0,
-      start_date: editStartDate || null,
-      deadline: editDeadline || null,
+      start_date: editStartDate && editStartDate.trim() ? editStartDate.trim().split('T')[0] : null,
+      deadline: editDeadline && editDeadline.trim() ? editDeadline.trim().split('T')[0] : null,
     } as any);
     toast.success('Pool updated');
     setEditOpen(false);
@@ -424,8 +424,10 @@ export default function FinancePoolsPage() {
     setEditColor(goal.color || POOL_COLORS[0]);
     setEditIsStash((goal as any).is_stash === true);
     setEditPercentAllocation(String(goal.percent_allocation || 0));
-    setEditStartDate((goal as any).start_date || '');
-    setEditDeadline(goal.deadline || '');
+    const rawStart = (goal as any).start_date;
+    const rawDeadline = goal.deadline;
+    setEditStartDate(rawStart ? String(rawStart).split('T')[0].split(' ')[0] : '');
+    setEditDeadline(rawDeadline ? String(rawDeadline).split('T')[0].split(' ')[0] : '');
     setEditOpen(true);
   };
 
@@ -946,15 +948,15 @@ export default function FinancePoolsPage() {
                     <div className="flex justify-between">
                       <span className="text-slate-500 font-semibold">Savings Start:</span>
                       <span className="font-bold text-indigo-600">
-                        {format(new Date(goal.start_date), 'MMM d, yyyy')}
-                        {new Date(goal.start_date) > new Date() && ' (Upcoming)'}
+                        {format(new Date(String(goal.start_date).split('T')[0] + 'T00:00:00'), 'MMM d, yyyy')}
+                        {new Date(String(goal.start_date).split('T')[0] + 'T00:00:00') > new Date() && ' (Upcoming)'}
                       </span>
                     </div>
                   )}
                   {goal.deadline ? (() => {
-                    const dl = new Date(goal.deadline);
+                    const dl = new Date(String(goal.deadline).split('T')[0] + 'T00:00:00');
                     const now = new Date();
-                    const isFutureStart = !!goal.start_date && new Date(goal.start_date) > now;
+                    const isFutureStart = !!goal.start_date && new Date(String(goal.start_date).split('T')[0] + 'T00:00:00') > now;
                     const daysRemaining = Math.ceil((dl.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
                     const isOverdue = daysRemaining < 0;
                     const daysLabel = isOverdue 
