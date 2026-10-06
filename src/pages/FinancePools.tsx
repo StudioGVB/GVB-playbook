@@ -8,14 +8,14 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Plus, ShoppingCart, Target, Wallet, Lock, ArrowRightLeft, Trash2, Palette, Plane, Car, Home, GraduationCap, Heart, Gift, Laptop, Baby, PiggyBank, Briefcase, UtensilsCrossed, Dumbbell, Music, Gamepad2, BookOpen, Sparkles, Pencil, AlertCircle, type LucideIcon } from 'lucide-react';
+import { Plus, ShoppingCart, Target, Wallet, Lock, ArrowRightLeft, Trash2, Palette, Plane, Car, Home, GraduationCap, Heart, Gift, Laptop, Baby, PiggyBank, Briefcase, UtensilsCrossed, Dumbbell, Music, Gamepad2, BookOpen, Sparkles, Pencil, AlertCircle, RotateCcw, type LucideIcon } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import PriorMonthAllocator from '@/components/finance/PriorMonthAllocator';
 import FinanceBalanceSheet from '@/pages/FinanceBalanceSheet';
 import WeeklyPoolSavingsCard from '@/components/finance/WeeklyPoolSavingsCard';
 import { format, startOfMonth, endOfMonth } from 'date-fns';
-import { detectPaycheck, calculatePaycheckWaterfall, isPaycheckProcessed, markPaycheckProcessed } from '@/lib/paycheckEngine';
+import { detectPaycheck, calculatePaycheckWaterfall, isPaycheckProcessed, markPaycheckProcessed, unmarkPaycheckProcessed, savePaycheckAllocationMeta, getPaycheckAllocationMeta } from '@/lib/paycheckEngine';
 import { baseAmt } from '@/lib/financeUtils';
 import { toast } from 'sonner';
 
@@ -238,12 +238,45 @@ export default function FinancePoolsPage() {
   const paycheckTx = detectedPaycheck?.transaction || null;
 
   const [paycheckAllocated, setPaycheckAllocated] = useState(false);
+  const [revertSecondsLeft, setRevertSecondsLeft] = useState<number>(0);
+  const [isReverting, setIsReverting] = useState(false);
 
   useEffect(() => {
-    if (paycheckTx) {
-      setPaycheckAllocated(isPaycheckProcessed(paycheckTx.id));
+    if (!paycheckTx) return;
+    const isProc = isPaycheckProcessed(paycheckTx.id);
+    setPaycheckAllocated(isProc);
+
+    if (isProc) {
+      const meta = getPaycheckAllocationMeta(paycheckTx.id);
+      if (meta) {
+        const elapsedSec = Math.floor((Date.now() - meta.allocatedAt) / 1000);
+        const remainingSec = Math.max(0, 120 - elapsedSec);
+        setRevertSecondsLeft(remainingSec);
+      } else {
+        setRevertSecondsLeft(0);
+      }
+    } else {
+      setRevertSecondsLeft(0);
     }
   }, [paycheckTx]);
+
+  // Live 1-second countdown interval when revertSecondsLeft > 0
+  useEffect(() => {
+    if (!paycheckAllocated || revertSecondsLeft <= 0 || !paycheckTx) return;
+
+    const interval = setInterval(() => {
+      const meta = getPaycheckAllocationMeta(paycheckTx.id);
+      if (meta) {
+        const elapsedSec = Math.floor((Date.now() - meta.allocatedAt) / 1000);
+        const remainingSec = Math.max(0, 120 - elapsedSec);
+        setRevertSecondsLeft(remainingSec);
+      } else {
+        setRevertSecondsLeft(0);
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [paycheckAllocated, revertSecondsLeft, paycheckTx]);
 
   const waterfallBreakdown = useMemo(() => {
     if (!paycheckTx) return null;
@@ -295,13 +328,65 @@ export default function FinancePoolsPage() {
         }
       }
 
-      // 3. Mark processed to prevent double-ups
+      // 3. Save allocation metadata (for revert) & mark processed
+      savePaycheckAllocationMeta(paycheckTx.id, waterfallBreakdown);
       markPaycheckProcessed(paycheckTx.id);
       setPaycheckAllocated(true);
-      toast.success(`Allocated ${fmt(paycheckTx.amount)} paycheck for ${detectedPaycheck?.targetMonthName || 'pools'}! 🚀`);
+      setRevertSecondsLeft(120);
+
+      toast.success(`Allocated ${fmt(paycheckTx.amount)} paycheck for ${detectedPaycheck?.targetMonthName || 'pools'}! 🚀 (Revert available for 2 mins)`);
     } catch (err) {
       console.error('Failed to allocate paycheck:', err);
       toast.error('Failed to allocate paycheck to pools');
+    }
+  };
+
+  const handleRevertPaycheckAllocation = async () => {
+    if (!paycheckTx || isReverting) return;
+    const meta = getPaycheckAllocationMeta(paycheckTx.id);
+    if (!meta) {
+      toast.error('Allocation record expired or not found');
+      return;
+    }
+
+    try {
+      setIsReverting(true);
+      const { breakdown } = meta;
+
+      // 1. Revert emergency fund top-up
+      if (breakdown.emergencyTopUp > 0) {
+        const emergencyGoal = finance.goals.find(g => (g as any).is_emergency === true || g.name.toLowerCase().includes('emergency'));
+        if (emergencyGoal) {
+          const current = emergencyGoal.assigned_amount || 0;
+          await finance.updateGoal(emergencyGoal.id, {
+            assigned_amount: Math.max(0, current - breakdown.emergencyTopUp),
+          } as any);
+        }
+      }
+
+      // 2. Revert goal allocations
+      for (const item of breakdown.goalAllocations) {
+        if (item.allocatedAmount <= 0) continue;
+        const g = finance.goals.find(x => x.id === item.goalId);
+        if (g) {
+          const current = g.assigned_amount || 0;
+          await finance.updateGoal(g.id, {
+            assigned_amount: Math.max(0, current - item.allocatedAmount),
+          } as any);
+        }
+      }
+
+      // 3. Unmark paycheck processed
+      unmarkPaycheckProcessed(paycheckTx.id);
+      setPaycheckAllocated(false);
+      setRevertSecondsLeft(0);
+
+      toast.success('Paycheck allocation reverted successfully!');
+    } catch (err) {
+      console.error('Failed to revert paycheck allocation:', err);
+      toast.error('Failed to revert paycheck allocation');
+    } finally {
+      setIsReverting(false);
     }
   };
 
@@ -477,8 +562,8 @@ export default function FinancePoolsPage() {
 
         <TabsContent value="pools" className="space-y-6">
           {/* Paycheck Landed Auto-Allocation Banner */}
-          {paycheckTx && waterfallBreakdown && detectedPaycheck && (
-            <Card className="bg-gradient-to-r from-emerald-50 via-white to-sky-50 border-2 border-emerald-300 shadow-[6px_6px_0px_0px_rgba(16,185,129,0.12)] font-body">
+          {paycheckTx && waterfallBreakdown && detectedPaycheck && (!paycheckAllocated || revertSecondsLeft > 0) && (
+            <Card className="bg-gradient-to-r from-emerald-50 via-white to-sky-50 border-2 border-emerald-300 shadow-[6px_6px_0px_0px_rgba(16,185,129,0.12)] font-body transition-all duration-300">
               <CardContent className="p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div className="space-y-1.5">
                   <div className="flex items-center gap-2">
@@ -510,10 +595,24 @@ export default function FinancePoolsPage() {
 
                 <div className="shrink-0 flex items-center gap-2">
                   {paycheckAllocated ? (
-                    <Badge variant="outline" className="bg-emerald-100/70 text-emerald-800 border-emerald-300 font-display font-bold text-xs px-3 py-2 rounded-xl flex items-center gap-1.5">
-                      <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-                      Allocated to Pools
-                    </Badge>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant="outline" className="bg-emerald-100/70 text-emerald-800 border-emerald-300 font-display font-bold text-xs px-3 py-2 rounded-xl flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                        Allocated to Pools
+                      </Badge>
+                      {revertSecondsLeft > 0 && (
+                        <Button
+                          onClick={handleRevertPaycheckAllocation}
+                          disabled={isReverting}
+                          variant="outline"
+                          className="bg-amber-50 hover:bg-amber-100 text-amber-900 border-2 border-amber-300 font-display font-bold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1.5 transition-all hover:scale-105"
+                          title="Click to revert pool allocations back to pre-allocation amounts"
+                        >
+                          <RotateCcw className={`w-3.5 h-3.5 text-amber-600 ${isReverting ? 'animate-spin' : ''}`} />
+                          {isReverting ? 'Reverting...' : `Revert (${Math.floor(revertSecondsLeft / 60)}:${(revertSecondsLeft % 60).toString().padStart(2, '0')})`}
+                        </Button>
+                      )}
+                    </div>
                   ) : (
                     <Button
                       onClick={handleExecutePaycheckAllocation}

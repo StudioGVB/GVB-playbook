@@ -126,6 +126,43 @@ export function markPaycheckProcessed(txId: string): void {
 }
 
 /**
+  * Unmarks a paycheck transaction ID as processed so it can be re-allocated.
+  */
+export function unmarkPaycheckProcessed(txId: string): void {
+  if (!txId) return;
+  localStorage.removeItem(`paycheck_processed_${txId}`);
+  localStorage.removeItem(`paycheck_allocated_at_${txId}`);
+  localStorage.removeItem(`paycheck_allocation_snapshot_${txId}`);
+}
+
+/**
+  * Saves allocation timestamp and waterfall snapshot for exact reversal.
+  */
+export function savePaycheckAllocationMeta(txId: string, breakdown: PaycheckWaterfallBreakdown): void {
+  if (!txId) return;
+  localStorage.setItem(`paycheck_allocated_at_${txId}`, Date.now().toString());
+  localStorage.setItem(`paycheck_allocation_snapshot_${txId}`, JSON.stringify(breakdown));
+}
+
+/**
+  * Retrieves allocation timestamp and waterfall snapshot if available.
+  */
+export function getPaycheckAllocationMeta(txId: string): { allocatedAt: number; breakdown: PaycheckWaterfallBreakdown } | null {
+  if (!txId) return null;
+  const timeStr = localStorage.getItem(`paycheck_allocated_at_${txId}`);
+  const snapStr = localStorage.getItem(`paycheck_allocation_snapshot_${txId}`);
+  if (!timeStr || !snapStr) return null;
+  try {
+    return {
+      allocatedAt: parseInt(timeStr, 10),
+      breakdown: JSON.parse(snapStr),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Calculates the strict 4-step monthly waterfall allocation for a paycheck:
  * 1. Reserved Fixed Bills + Essential Living (Monthly)
  * 2. Emergency Reserve Top-up (up to 100% target floor)
