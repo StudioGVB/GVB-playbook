@@ -7,7 +7,7 @@ import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { CheckCircle2, XCircle, Loader2, Shield, Pencil, Trash2, EyeOff, Palette, Plus, Receipt, Lock, Eye, Globe } from 'lucide-react';
+import { CheckCircle2, XCircle, Loader2, Shield, Pencil, Trash2, EyeOff, Palette, Plus, Receipt, Lock, Eye, Globe, RefreshCw } from 'lucide-react';
 import DeleteConfirmDialog from '@/components/DeleteConfirmDialog';
 import type { useFinanceData } from '@/hooks/useFinanceData';
 import { useFixedExpenses } from '@/hooks/useFixedExpenses';

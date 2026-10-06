@@ -95,7 +95,7 @@ serve(async (req) => {
           if (accError) console.error(`Account upsert failed for ${userId}:`, accError.message)
         }
 
-        // 4. Get DB IDs for accounts
+        // 4. Get DB IDs for accounts & categories
         const { data: dbAccounts } = await supabaseAdmin
           .from('finance_accounts')
           .select('id, external_account_id, currency, provider')
@@ -112,6 +112,14 @@ serve(async (req) => {
         const defaultDbAccountId = wiseDbAccounts[0]?.id || dbAccounts?.[0]?.id || ''
 
         if (!defaultDbAccountId) continue
+
+        const { data: userCats } = await supabaseAdmin
+          .from('finance_categories')
+          .select('id, name, type')
+          .eq('user_id', userId)
+
+        const gammaCatId = userCats?.find(c => c.type === 'income' && c.name.toLowerCase().includes('gamma'))?.id || null
+        const ventureCatId = userCats?.find(c => c.type === 'income' && (c.name.toLowerCase().includes('venture') || c.name.toLowerCase().includes('advisory')))?.id || null
 
         // 5. Gather raw items from all Wise endpoints
         let rawItems: Array<{ item: any; sourceCurrency?: string; forcedDbAccountId?: string }> = []
@@ -309,6 +317,16 @@ serve(async (req) => {
           const description = cleanText(item.details?.description || item.details?.title || item.title || item.description || item.reference || item.details?.paymentReference || 'Wise transaction')
           const merchant = cleanText(item.details?.merchant?.name || item.details?.senderName || item.details?.recipientName || item.recipientName || item.merchant || '') || null
 
+          const fullText = `${description.toUpperCase()} ${(merchant || '').toUpperCase()}`
+          const isSavingsTransfer = fullText.includes('TRANSFER FROM SAVINGS') || fullText.includes('SAVINGS TRANSFER') || fullText.includes('TRANSFER FROM') || fullText.includes('TRANSFER TO SAVINGS')
+
+          let targetCategoryId = null
+          if (fullText.includes('GAMMA')) {
+            targetCategoryId = gammaCatId || ventureCatId
+          } else if (fullText.includes('VENTURE') || fullText.includes('ADVISORY')) {
+            targetCategoryId = ventureCatId
+          }
+
           const fingerprint = await computeFingerprint(userId, dbAccountId, postedAt, rawAmount, description)
           const externalTxId = item.id ? String(item.id) : fingerprint
 
@@ -321,9 +339,10 @@ serve(async (req) => {
             merchant,
             amount: rawAmount,
             currency,
-            is_transfer: false,
-            transfer_side: null,
-            transfer_status: null,
+            category_id: targetCategoryId,
+            is_transfer: isSavingsTransfer,
+            transfer_side: isSavingsTransfer ? 'in' : null,
+            transfer_status: isSavingsTransfer ? 'auto_confirmed' : null,
             transaction_fingerprint: fingerprint,
             raw: {
               reference: item.reference || null,
@@ -372,7 +391,7 @@ serve(async (req) => {
         // 9. Post-sync Cleanup & Deduplication
         const { data: userTxs } = await supabaseAdmin
           .from('finance_transactions')
-          .select('id, account_id, posted_at, amount, description, merchant, external_transaction_id')
+          .select('id, account_id, posted_at, amount, description, merchant, external_transaction_id, is_transfer, category_id')
           .eq('user_id', userId)
 
         if (userTxs && userTxs.length > 0) {
@@ -381,17 +400,37 @@ serve(async (req) => {
           for (const tx of userTxs) {
             const cleanDesc = cleanText(tx.description)
             const cleanMerch = cleanText(tx.merchant)
+            const fullText = `${cleanDesc.toUpperCase()} ${(cleanMerch || '').toUpperCase()}`
+            const isSavingsTransfer = fullText.includes('TRANSFER FROM SAVINGS') || fullText.includes('SAVINGS TRANSFER') || fullText.includes('TRANSFER FROM') || fullText.includes('TRANSFER TO SAVINGS')
+
             let targetAmount = tx.amount
+            let targetIsTransfer = tx.is_transfer
+            let targetCatId = tx.category_id
+
+            if (isSavingsTransfer) {
+              targetIsTransfer = true
+            }
+
+            if (fullText.includes('GAMMA')) {
+              targetCatId = gammaCatId || ventureCatId || targetCatId
+              targetIsTransfer = false
+            } else if ((fullText.includes('VENTURE') || fullText.includes('ADVISORY')) && ventureCatId) {
+              targetCatId = ventureCatId
+              targetIsTransfer = false
+            }
 
             if (Math.abs(tx.amount) === 3000 && (cleanDesc.toUpperCase().includes('GABRIELLA') || cleanDesc.toUpperCase().includes('NOREF'))) {
               targetAmount = 3000.00
+              if (gammaCatId) targetCatId = gammaCatId
             }
 
-            if (cleanDesc !== tx.description || cleanMerch !== tx.merchant || targetAmount !== tx.amount) {
+            if (cleanDesc !== tx.description || cleanMerch !== tx.merchant || targetAmount !== tx.amount || targetIsTransfer !== tx.is_transfer || targetCatId !== tx.category_id) {
               await supabaseAdmin.from('finance_transactions').update({
                 amount: targetAmount,
                 description: cleanDesc,
                 merchant: cleanMerch,
+                is_transfer: targetIsTransfer,
+                category_id: targetCatId,
               }).eq('id', tx.id)
             }
           }

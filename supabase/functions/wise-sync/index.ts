@@ -171,12 +171,14 @@ serve(async (req) => {
       })
     }
 
-    // Find Venture Advisory income category ID if present
+    // Find Gamma Salary and Venture Advisory income category IDs
     const { data: userCats } = await supabaseAdmin
       .from('finance_categories')
       .select('id, name, type')
       .eq('user_id', userId)
-    const ventureCatId = userCats?.find(c => c.type === 'income' && (c.name.toLowerCase().includes('venture') || c.name.toLowerCase().includes('gamma')))?.id || null
+
+    const gammaCatId = userCats?.find(c => c.type === 'income' && c.name.toLowerCase().includes('gamma'))?.id || null
+    const ventureCatId = userCats?.find(c => c.type === 'income' && (c.name.toLowerCase().includes('venture') || c.name.toLowerCase().includes('advisory')))?.id || null
 
     // 5. Gather raw items from Wise endpoints (Activities, Transfers, Statements)
     let rawItems: Array<{ item: any; sourceCurrency?: string; forcedDbAccountId?: string }> = []
@@ -392,8 +394,12 @@ serve(async (req) => {
       const fullText = `${description.toUpperCase()} ${(merchant || '').toUpperCase()}`
       const isSavingsTransfer = fullText.includes('TRANSFER FROM SAVINGS') || fullText.includes('SAVINGS TRANSFER') || fullText.includes('TRANSFER FROM') || fullText.includes('TRANSFER TO SAVINGS')
 
-      const isGammaVenture = fullText.includes('GAMMA') || fullText.includes('VENTURE') || fullText.includes('ADVISORY')
-      const targetCategoryId = isGammaVenture && ventureCatId ? ventureCatId : null
+      let targetCategoryId = null
+      if (fullText.includes('GAMMA')) {
+        targetCategoryId = gammaCatId || ventureCatId
+      } else if (fullText.includes('VENTURE') || fullText.includes('ADVISORY')) {
+        targetCategoryId = ventureCatId
+      }
 
       const fingerprint = await computeFingerprint(userId, dbAccountId, postedAt, rawAmount, description)
       const externalTxId = item.id ? String(item.id) : fingerprint
@@ -459,7 +465,7 @@ serve(async (req) => {
       }
     }
 
-    // 9. Post-sync Cleanup & Deduplication (fixes negative sign for £3k deposit, flags savings transfers, links Gamma to Venture Advisory)
+    // 9. Post-sync Cleanup & Deduplication (fixes negative sign for £3k deposit, flags savings transfers, links Gamma to Gamma Salary)
     const { data: userTxs } = await supabaseAdmin
       .from('finance_transactions')
       .select('id, account_id, posted_at, amount, description, merchant, external_transaction_id, is_transfer, category_id')
@@ -482,8 +488,11 @@ serve(async (req) => {
           targetIsTransfer = true
         }
 
-        // Auto-assign Gamma/Venture to Venture Advisory category
-        if ((fullText.includes('GAMMA') || fullText.includes('VENTURE') || fullText.includes('ADVISORY')) && ventureCatId) {
+        // Auto-assign Gamma to Gamma Salary category (or Venture Advisory fallback)
+        if (fullText.includes('GAMMA')) {
+          targetCatId = gammaCatId || ventureCatId || targetCatId
+          targetIsTransfer = false
+        } else if ((fullText.includes('VENTURE') || fullText.includes('ADVISORY')) && ventureCatId) {
           targetCatId = ventureCatId
           targetIsTransfer = false
         }
@@ -491,7 +500,7 @@ serve(async (req) => {
         // Fix negative sign on £3k Gabriella Blyth deposit or NOREF 3k deposit
         if (Math.abs(tx.amount) === 3000 && (cleanDesc.toUpperCase().includes('GABRIELLA') || cleanDesc.toUpperCase().includes('NOREF'))) {
           targetAmount = 3000.00
-          if (ventureCatId) targetCatId = ventureCatId
+          if (gammaCatId) targetCatId = gammaCatId
         }
 
         if (cleanDesc !== tx.description || cleanMerch !== tx.merchant || targetAmount !== tx.amount || targetIsTransfer !== tx.is_transfer || targetCatId !== tx.category_id) {

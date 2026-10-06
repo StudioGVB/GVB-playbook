@@ -26,6 +26,7 @@ const CATEGORY_TYPE_COLORS: Record<string, string> = {
 };
 
 const INCOME_SOURCE_OPTIONS = [
+  { name: 'Gamma Salary', color: '#DB2777' },
   { name: 'Venture Advisory', color: '#2563EB' },
   { name: 'Etsy', color: '#EA580C' },
   { name: 'Back Pocket Games', color: '#7C3AED' },

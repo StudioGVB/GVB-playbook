@@ -150,6 +150,8 @@ const DEFAULT_CATEGORIES = [
   { name: 'Shopping', type: 'variable', is_cuttable: true, is_essential: false, color: '#ec4899' },
   { name: 'Subscriptions', type: 'fixed', is_cuttable: true, is_essential: false, color: '#6366f1' },
   { name: 'Income', type: 'income', is_cuttable: false, is_essential: false, color: '#22c55e' },
+  { name: 'Gamma Salary', type: 'income', is_cuttable: false, is_essential: false, color: '#db2777' },
+  { name: 'Venture Advisory', type: 'income', is_cuttable: false, is_essential: false, color: '#2563eb' },
   { name: 'Transfers', type: 'transfer', is_cuttable: false, is_essential: false, color: '#64748b' },
 ];
 
@@ -274,6 +276,23 @@ export function useFinanceDataState() {
               console.error('[self-healing] Failed to set default essential categories', err);
             });
           }
+        }
+
+        // Self-healing: Ensure Gamma Salary income category exists
+        const hasGammaCat = catRes.data.some((c: any) => c.type === 'income' && c.name.toLowerCase().includes('gamma'));
+        if (!hasGammaCat && catRes.data.length > 0) {
+          supabase.from('finance_categories').insert({
+            user_id: user.id,
+            name: 'Gamma Salary',
+            type: 'income',
+            is_cuttable: false,
+            is_essential: false,
+            color: '#db2777'
+          }).then(() => {
+            fetchAll();
+          }).catch(err => {
+            console.error('[self-healing] Failed to create Gamma Salary category', err);
+          });
         }
 
         // Detect and merge duplicate categories (case-insensitive name match)
@@ -942,9 +961,10 @@ export function useFinanceDataState() {
         toast.info(data.message || 'All transactions categorised');
       }
 
-      // Repair pass: Flag savings transfers as transfers, strip HTML tags, fix £3k deposit sign & link Gamma to Venture Advisory
+      // Repair pass: Flag savings transfers as transfers, strip HTML tags, fix £3k deposit sign & link Gamma / Venture correctly
       const incomeCat = categories.find(c => c.type === 'income' || c.name.toLowerCase() === 'income');
-      const ventureCat = categories.find(c => c.type === 'income' && (c.name.toLowerCase().includes('venture') || c.name.toLowerCase().includes('gamma')));
+      const gammaCat = categories.find(c => c.type === 'income' && c.name.toLowerCase().includes('gamma'));
+      const ventureCat = categories.find(c => c.type === 'income' && (c.name.toLowerCase().includes('venture') || c.name.toLowerCase().includes('advisory')));
       const rentCat = categories.find(c => c.name.toLowerCase() === 'rent');
       const wiseAccountIds = new Set(accounts.filter(a => a.provider === 'wise').map(a => a.id));
 
@@ -989,7 +1009,14 @@ export function useFinanceDataState() {
 
         // Income auto-categorization
         if (targetAmount > 0 && !isSavingsTransfer) {
-          if (fullText.includes('GAMMA') || fullText.includes('VENTURE') || fullText.includes('ADVISORY')) {
+          if (fullText.includes('GAMMA')) {
+            if (gammaCat && t.category_id !== gammaCat.id) {
+              await supabase.from('finance_transactions').update({
+                is_transfer: false,
+                category_id: gammaCat.id,
+              }).eq('id', t.id);
+            }
+          } else if (fullText.includes('VENTURE') || fullText.includes('ADVISORY')) {
             if (ventureCat && t.category_id !== ventureCat.id) {
               await supabase.from('finance_transactions').update({
                 is_transfer: false,

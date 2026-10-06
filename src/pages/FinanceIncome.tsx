@@ -35,7 +35,9 @@ type Bucket = {
 // Legacy matchers to keep prior data flowing into the seeded sources.
 const LEGACY_MATCHERS: Record<string, string[]> = {
   'batchbase': ['batchbase', 'batch base', 'batch'],
-  'venture advisory': ['venture advisory', 'venture', 'gamma', 'proposal'],
+  'gamma salary': ['gamma salary', 'gamma'],
+  'gamma': ['gamma salary', 'gamma'],
+  'venture advisory': ['venture advisory', 'venture', 'proposal'],
   'etsy': ['etsy'],
   'back pocket games': ['back pocket', 'bpg', 'back pocket games'],
 };
@@ -65,7 +67,7 @@ function tint(hex: string, alpha: number): string {
 
 export default function FinanceIncome() {
   const finance = useFinanceData();
-  const { transactions, categories, settings, updateTransaction } = finance;
+  const { transactions, categories, settings, updateTransaction, addCategory } = finance;
   const { reimbursementsOn } = useFixedExpenses();
   const baseCurrency = settings?.base_currency || 'GBP';
 
@@ -74,6 +76,8 @@ export default function FinanceIncome() {
   const [assigningTxId, setAssigningTxId] = useState<string | null>(null);
   const [reimbursementFilter, setReimbursementFilter] = useState<'all' | 'pending' | 'reimbursed'>('all');
   const [matchingTxId, setMatchingTxId] = useState<string | null>(null);
+  const [newSourceName, setNewSourceName] = useState('');
+  const [isAddingSource, setIsAddingSource] = useState(false);
 
   const monthStart = useMemo(() => startOfMonth(addMonths(new Date(), monthOffset)), [monthOffset]);
   const monthEnd = useMemo(() => endOfMonth(monthStart), [monthStart]);
@@ -146,11 +150,16 @@ export default function FinanceIncome() {
 
   const incomeTxs = useMemo(() => transactions.filter(tx => {
     if (tx.amount <= 0) return false;
-    if (isInternalTransfer(tx)) return false;
     if (tx.is_reimbursable) return false; // Exclude employer work payback deposits from earned personal income
+
+    // If explicitly assigned to an income category, bypass transfer filter
+    const cat = categories.find(c => c.id === tx.category_id);
+    const isExplicitIncome = cat?.type === 'income';
+    if (!isExplicitIncome && isInternalTransfer(tx)) return false;
+
     const d = new Date(tx.posted_at);
     return d >= monthStart && d <= monthEnd;
-  }), [transactions, monthStart, monthEnd]);
+  }), [transactions, categories, monthStart, monthEnd]);
 
   const grandTotal = useMemo(() => incomeTxs.reduce((s, tx) => s + baseAmt(tx), 0), [incomeTxs]);
 
@@ -181,9 +190,28 @@ export default function FinanceIncome() {
   }, [incomeTxs, BUCKETS, monthStart, reimbursementsOn]);
 
   const handleAssignTx = async (txId: string, categoryId: string | null) => {
-    await updateTransaction(txId, { category_id: categoryId } as any);
+    const updateData: any = { category_id: categoryId };
+    if (categoryId) {
+      const cat = categories.find(c => c.id === categoryId);
+      if (cat?.type === 'income') {
+        updateData.is_transfer = false;
+        updateData.transfer_status = null;
+        updateData.transfer_side = null;
+      }
+    }
+    await updateTransaction(txId, updateData);
     setAssigningTxId(null);
     toast.success(categoryId ? 'Moved to source' : 'Moved to Other');
+  };
+
+  const handleCreateAndAssignSource = async (txId: string) => {
+    if (!newSourceName.trim()) return;
+    const newCat = await addCategory({ name: newSourceName.trim(), type: 'income', color: '#db2777' });
+    if (newCat) {
+      await handleAssignTx(txId, newCat.id);
+      setNewSourceName('');
+      setIsAddingSource(false);
+    }
   };
 
   const topBucket = [...BUCKETS].sort((a, b) => (bucketed[b.key]?.total || 0) - (bucketed[a.key]?.total || 0))[0];
@@ -535,7 +563,7 @@ export default function FinanceIncome() {
                                       </PopoverTrigger>
                                       <PopoverContent align="end" className="w-52 p-2 rounded-2xl border-2 border-[#FF7AD1]/30">
                                         <p className="text-[10px] font-display font-bold uppercase tracking-widest text-slate-400 mb-1.5 px-1">Move to source</p>
-                                        <div className="space-y-0.5">
+                                        <div className="space-y-0.5 max-h-48 overflow-y-auto pr-0.5">
                                           {incomeCats.map(c => (
                                             <button
                                               key={c.id}
@@ -545,21 +573,53 @@ export default function FinanceIncome() {
                                               }`}
                                             >
                                               {c.color && <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: c.color }} />}
-                                              {c.name}
+                                              <span className="truncate">{c.name}</span>
                                             </button>
                                           ))}
-                                          {tx.category_id && (
-                                            <>
-                                              <div className="border-t border-slate-100 my-1" />
-                                              <button
-                                                onClick={() => handleAssignTx(tx.id, null)}
-                                                className="w-full text-left text-xs px-2 py-1.5 rounded-lg hover:bg-[#FFF5FA] text-[#FF2EB8] flex items-center gap-1.5 font-semibold"
-                                              >
-                                                <X className="h-3 w-3" /> Move to Other
-                                              </button>
-                                            </>
-                                          )}
                                         </div>
+
+                                        <div className="border-t border-slate-100 my-1" />
+
+                                        {isAddingSource ? (
+                                          <div className="flex items-center gap-1 p-1">
+                                            <input
+                                              type="text"
+                                              placeholder="New source name..."
+                                              value={newSourceName}
+                                              onChange={e => setNewSourceName(e.target.value)}
+                                              className="w-full text-xs px-2 py-1 border rounded-lg focus:outline-none focus:border-[#FF2EB8]"
+                                              autoFocus
+                                              onKeyDown={e => {
+                                                if (e.key === 'Enter') handleCreateAndAssignSource(tx.id);
+                                              }}
+                                            />
+                                            <button
+                                              onClick={() => handleCreateAndAssignSource(tx.id)}
+                                              className="px-2 py-1 bg-[#FF2EB8] text-white text-xs font-bold rounded-lg hover:bg-[#db2777] shrink-0"
+                                            >
+                                              Add
+                                            </button>
+                                          </div>
+                                        ) : (
+                                          <button
+                                            onClick={() => setIsAddingSource(true)}
+                                            className="w-full text-left text-xs px-2 py-1.5 rounded-lg hover:bg-[#FFF5FA] text-slate-600 hover:text-slate-900 flex items-center gap-1.5 font-medium"
+                                          >
+                                            + Add New Source
+                                          </button>
+                                        )}
+
+                                        {tx.category_id && (
+                                          <>
+                                            <div className="border-t border-slate-100 my-1" />
+                                            <button
+                                              onClick={() => handleAssignTx(tx.id, null)}
+                                              className="w-full text-left text-xs px-2 py-1.5 rounded-lg hover:bg-[#FFF5FA] text-[#FF2EB8] flex items-center gap-1.5 font-semibold"
+                                            >
+                                              <X className="h-3 w-3" /> Move to Other
+                                            </button>
+                                          </>
+                                        )}
                                       </PopoverContent>
                                     </Popover>
                                   )}
