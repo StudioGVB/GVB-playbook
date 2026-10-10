@@ -284,8 +284,11 @@ export default function FinancePoolsPage() {
 
   const unassignedCashAmount = Math.max(0, totalCash - assignedOtherGoalsTotal - currentEmergencyFunded);
 
+  const emergencyMonthsCovered = actualMonthlySurvival > 0 ? (currentEmergencyFunded / actualMonthlySurvival) : 0;
+  const emergencySegColor = emergencyMonthsCovered < 2 ? '#f43f5e' : emergencyMonthsCovered < 3 ? '#f59e0b' : '#10b981';
+
   const segments = [
-    ...(currentEmergencyFunded > 0 ? [{ label: 'Emergency Reserve', amount: currentEmergencyFunded, color: '#ef6b6b' }] : []),
+    ...(currentEmergencyFunded > 0 ? [{ label: 'Emergency Reserve', amount: currentEmergencyFunded, color: emergencySegColor }] : []),
     ...otherGoalSegments,
     ...(unassignedCashAmount > 0.01 ? [{ label: 'Unallocated Cash', amount: unassignedCashAmount, color: '#FFB8E6' }] : []),
   ];
@@ -822,28 +825,53 @@ export default function FinancePoolsPage() {
           const shortfallAmt = emergencyShortfallAmt;
           const isShort = shortfallAmt > 0.01;
           const fundPct = emergencyFloor > 0 ? Math.min(100, (currentFunded / emergencyFloor) * 100) : 100;
+          const monthsCovered = actualMonthlySurvival > 0 ? (currentFunded / actualMonthlySurvival) : 0;
+
+          // Color tier logic:
+          // < 2 months: Red background & border
+          // 2 to < 3 months: Orange background & border
+          // >= 3 months: Green background & border
+          let cardStyle = 'bg-emerald-50/80 border-emerald-300 shadow-[4px_4px_0px_0px_rgba(16,185,129,0.15)]';
+          let iconStyle = 'bg-emerald-100 text-emerald-600';
+          let barStyle = 'bg-emerald-500';
+          let badgeStyle = 'bg-emerald-100 text-emerald-700 border-emerald-200';
+          let alertTextStyle = 'text-emerald-700';
+
+          if (monthsCovered < 2) {
+            cardStyle = 'bg-rose-50/80 border-rose-300 shadow-[4px_4px_0px_0px_rgba(244,63,94,0.15)]';
+            iconStyle = 'bg-rose-100 text-rose-600';
+            barStyle = 'bg-rose-500';
+            badgeStyle = 'bg-rose-100 text-rose-700 border-rose-200';
+            alertTextStyle = 'text-rose-600';
+          } else if (monthsCovered < 3) {
+            cardStyle = 'bg-amber-50/80 border-amber-300 shadow-[4px_4px_0px_0px_rgba(245,158,11,0.15)]';
+            iconStyle = 'bg-amber-100 text-amber-700';
+            barStyle = 'bg-amber-500';
+            badgeStyle = 'bg-amber-100 text-amber-800 border-amber-300';
+            alertTextStyle = 'text-amber-700';
+          }
 
           return (
-            <div className={`bg-white rounded-2xl border-2 ${isShort ? 'border-[#ef6b6b]/60 shadow-[4px_4px_0px_0px_rgba(239,107,107,0.15)]' : 'border-emerald-300 shadow-[4px_4px_0px_0px_rgba(16,185,129,0.15)]'} p-5 transition-all flex flex-col justify-between hover:scale-[1.01]`}>
+            <div className={`${cardStyle} rounded-2xl border-2 p-5 transition-all flex flex-col justify-between hover:scale-[1.01]`}>
               <div>
                 <div className="flex items-start justify-between gap-2 mb-2">
                   <div className="flex items-center gap-3">
-                    <div className={`w-11 h-11 rounded-xl ${isShort ? 'bg-[#ef6b6b]/10' : 'bg-emerald-100'} flex items-center justify-center flex-shrink-0`}>
-                      <Lock className={`w-5 h-5 ${isShort ? 'text-[#ef6b6b]' : 'text-emerald-600'}`} />
+                    <div className={`w-11 h-11 rounded-xl ${iconStyle} flex items-center justify-center flex-shrink-0`}>
+                      <Lock className="w-5 h-5" />
                     </div>
                     <div>
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <h3 className="text-base font-bold text-slate-900">Emergency Fund</h3>
-                        <Badge variant="outline" className="text-[10px] text-muted-foreground border-slate-200">Auto-calculated</Badge>
+                        <Badge variant="outline" className="text-[10px] text-muted-foreground border-slate-200 bg-white/60">Auto-calculated</Badge>
                       </div>
                     </div>
                   </div>
                   {isShort ? (
-                    <Badge className="bg-rose-100 text-rose-700 border border-rose-200 font-display font-extrabold text-xs px-2.5 py-1 rounded-full shrink-0">
+                    <Badge className={`${badgeStyle} border font-display font-extrabold text-xs px-2.5 py-1 rounded-full shrink-0`}>
                       {fmt(shortfallAmt)} short
                     </Badge>
                   ) : (
-                    <Badge className="bg-emerald-100 text-emerald-700 border border-emerald-200 font-display font-bold text-xs px-2.5 py-1 rounded-full shrink-0">
+                    <Badge className={`${badgeStyle} border font-display font-bold text-xs px-2.5 py-1 rounded-full shrink-0`}>
                       Fully Funded
                     </Badge>
                   )}
@@ -860,16 +888,16 @@ export default function FinancePoolsPage() {
                   </div>
 
                   {/* Funding Progress Bar */}
-                  <div className="mt-2.5 w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+                  <div className="mt-2.5 w-full bg-slate-200/60 rounded-full h-2 overflow-hidden">
                     <div
-                      className={`h-full transition-all rounded-full ${isShort ? 'bg-[#ef6b6b]' : 'bg-emerald-500'}`}
+                      className={`h-full transition-all rounded-full ${barStyle}`}
                       style={{ width: `${fundPct}%` }}
                     />
                   </div>
 
                   {isShort && (
                     <div className="mt-2 flex items-center justify-between text-xs">
-                      <span className="text-rose-600 font-display font-bold flex items-center gap-1">
+                      <span className={`${alertTextStyle} font-display font-bold flex items-center gap-1`}>
                         <AlertCircle className="w-3.5 h-3.5" />
                         {fmt(shortfallAmt)} short
                       </span>
@@ -880,8 +908,8 @@ export default function FinancePoolsPage() {
               </div>
 
               <div>
-                <p className="text-[11px] text-slate-500 mt-4 pt-3 border-t border-slate-100 font-medium">
-                  {bufferMonths}mo × {fmt(actualMonthlySurvival)}/mo × 1.2 buffer
+                <p className="text-[11px] text-slate-500 mt-4 pt-3 border-t border-slate-200/60 font-medium">
+                  {monthsCovered.toFixed(1)}mo covered • ({bufferMonths}mo target × {fmt(actualMonthlySurvival)}/mo × 1.2 buffer)
                 </p>
 
                 {/* Actions */}
@@ -889,7 +917,7 @@ export default function FinancePoolsPage() {
                   <Button
                     size="sm"
                     variant="outline"
-                    className="h-8 text-xs font-semibold gap-1.5 flex-1 border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-colors"
+                    className="h-8 text-xs font-semibold gap-1.5 flex-1 border-slate-200/80 bg-white/80 hover:bg-white transition-colors"
                     onClick={() => {
                       const emId = emergencyGoal ? emergencyGoal.id : EMERGENCY_VIRTUAL;
                       const defaultSource = poolOptions.find(p => p.available > 0 && p.id !== emId)?.id || '';
@@ -905,7 +933,7 @@ export default function FinancePoolsPage() {
                     <Button
                       size="sm"
                       variant="ghost"
-                      className="h-8 text-xs font-semibold gap-1 text-slate-500 hover:text-slate-900 transition-colors"
+                      className="h-8 text-xs font-semibold gap-1 text-slate-600 hover:text-slate-900 transition-colors"
                       onClick={() => {
                         const emId = emergencyGoal ? emergencyGoal.id : EMERGENCY_VIRTUAL;
                         setMoveFrom(emId);
