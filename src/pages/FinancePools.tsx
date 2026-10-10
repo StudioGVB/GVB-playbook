@@ -63,7 +63,8 @@ import { toast } from 'sonner';
 type PoolId = string; // goal id or virtual id
 const UNALLOCATED = '__unallocated__';
 const LIVING_POOL = '__living_pool__';
-const isVirtualPool = (id: PoolId) => id === UNALLOCATED || id === LIVING_POOL;
+const EMERGENCY_VIRTUAL = '__emergency_virtual__';
+const isVirtualPool = (id: PoolId) => id === UNALLOCATED || id === LIVING_POOL || id === EMERGENCY_VIRTUAL;
 
 export default function FinancePoolsPage() {
   const finance = useFinanceData();
@@ -179,12 +180,41 @@ export default function FinancePoolsPage() {
     : essentialVariable;
   const funMoney = Math.max(0, spendablePool - fixedReserve - essentialReserve);
 
+  // Identify existing Emergency Reserve goal if any
+  const emergencyGoal = useMemo(() => {
+    return finance.goals.find(g => (g as any).is_emergency === true || g.name.toLowerCase().includes('emergency'));
+  }, [finance.goals]);
+
+  const emergencyGoalAssigned = useMemo(() => {
+    if (!emergencyGoal) return 0;
+    return finance.convertToBase(emergencyGoal.assigned_amount || 0, emergencyGoal.currency);
+  }, [emergencyGoal, finance.convertToBase]);
+
+  const otherGoalSegments = useMemo(() => {
+    return finance.goals
+      .filter(g => !(g as any).is_emergency && !g.name.toLowerCase().includes('emergency'))
+      .filter(g => (g.assigned_amount || 0) > 0)
+      .map(g => ({
+        label: g.name,
+        amount: finance.convertToBase(g.assigned_amount || 0, g.currency),
+        color: g.color || '#4558ff',
+      }));
+  }, [finance.goals, finance.convertToBase]);
+
+  const assignedOtherGoalsTotal = otherGoalSegments.reduce((s, seg) => s + seg.amount, 0);
+  const unassignedCash = Math.max(0, totalCash - assignedOtherGoalsTotal);
+
+  // Cash for emergency includes explicitly assigned emergency funds + unassigned headroom
+  const cashForEmergency = Math.max(emergencyGoalAssigned, unassignedCash);
+  const currentEmergencyFunded = Math.min(emergencyFloor, cashForEmergency);
+  const emergencyShortfallAmt = Math.max(0, emergencyFloor - currentEmergencyFunded);
+  const isEmergencyFull = emergencyShortfallAmt <= 0.01;
+
   // Build pool options for the move dialog
   const poolOptions: { id: PoolId; label: string; available: number; cap?: number }[] = useMemo(() => {
     const opts: { id: PoolId; label: string; available: number; cap?: number }[] = [];
     opts.push({ id: UNALLOCATED, label: 'Fun Money', available: funMoney });
-    // Living Pool (free savings) — only show as a distinct option if it exceeds Fun Money
-    // (i.e. there's additional headroom beyond the discretionary slice).
+    // Living Pool (free savings)
     if (livingRemainder > funMoney + 0.01) {
       opts.push({
         id: LIVING_POOL,
@@ -192,7 +222,19 @@ export default function FinancePoolsPage() {
         available: livingRemainder,
       });
     }
+
+    // Emergency Reserve pool option
+    const emId = emergencyGoal ? emergencyGoal.id : EMERGENCY_VIRTUAL;
+    const emAvailable = emergencyGoal ? emergencyGoalAssigned : currentEmergencyFunded;
+    opts.push({
+      id: emId,
+      label: 'Emergency Reserve',
+      available: emAvailable,
+      cap: emergencyFloor,
+    });
+
     finance.goals.forEach(g => {
+      if ((g as any).is_emergency || g.name.toLowerCase().includes('emergency')) return;
       opts.push({
         id: g.id,
         label: g.name,
@@ -201,10 +243,9 @@ export default function FinancePoolsPage() {
       });
     });
     return opts;
-  }, [finance.goals, funMoney, livingRemainder]);
+  }, [finance.goals, funMoney, livingRemainder, emergencyGoal, emergencyGoalAssigned, currentEmergencyFunded, emergencyFloor, finance.convertToBase]);
 
-  // Stacked bar segments — Emergency + Goals + Living Pool always sum to totalCash.
-  // Goal amounts must be converted to base currency (goals can be stored in AUD while base is GBP).
+  // Stacked bar segments
   const goalSegments = finance.goals
     .filter(g => (g.assigned_amount || 0) > 0)
     .map(g => ({
@@ -213,17 +254,13 @@ export default function FinancePoolsPage() {
       color: g.color || '#4558ff',
     }));
   const assignedGoalsTotal = goalSegments.reduce((s, seg) => s + seg.amount, 0);
-  const cashForEmergency = Math.max(0, totalCash - assignedGoalsTotal);
-  const currentEmergencyFunded = Math.min(emergencyFloor, cashForEmergency);
-  const emergencyShortfallAmt = Math.max(0, emergencyFloor - currentEmergencyFunded);
-  const isEmergencyFull = emergencyShortfallAmt <= 0.01;
 
-  const accountedFor = currentEmergencyFunded + assignedGoalsTotal + livingRemainder;
+  const accountedFor = currentEmergencyFunded + assignedOtherGoalsTotal + livingRemainder;
   const shortfall = Math.max(0, totalCash - accountedFor);
 
   const segments = [
     ...(currentEmergencyFunded > 0 ? [{ label: 'Emergency', amount: currentEmergencyFunded, color: '#ef6b6b' }] : []),
-    ...goalSegments,
+    ...otherGoalSegments,
     ...(isEmergencyFull && livingRemainder > 0 ? [{ label: 'Living Pool', amount: livingRemainder, color: '#FFB8E6' }] : []),
     ...(shortfall > 0.01 ? [{ label: 'Unallocated', amount: shortfall, color: '#e5e7eb' }] : []),
   ];
@@ -482,7 +519,7 @@ export default function FinancePoolsPage() {
     };
 
     // Execute: decrease source, increase destination
-    const updates: Promise<void>[] = [];
+    const updates: Promise<any>[] = [];
 
     if (!isVirtualPool(moveFrom)) {
       const goal = finance.goals.find(g => g.id === moveFrom);
@@ -495,7 +532,20 @@ export default function FinancePoolsPage() {
     }
     // Virtual sources (Fun Money / Living Pool) have no DB update — they're derived.
 
-    if (!isVirtualPool(moveTo)) {
+    if (moveTo === EMERGENCY_VIRTUAL) {
+      updates.push(
+        finance.addGoal({
+          name: 'Emergency Reserve',
+          target_amount: emergencyFloor,
+          currency: baseCurrency,
+          priority: 1,
+          safety_mode: 'balanced',
+          assigned_amount: val,
+          color: '#ef6b6b',
+          is_emergency: true,
+        } as any)
+      );
+    } else if (!isVirtualPool(moveTo)) {
       const goal = finance.goals.find(g => g.id === moveTo);
       if (goal) {
         const deltaNative = toGoalCurrency(val, goal.currency);
@@ -504,7 +554,7 @@ export default function FinancePoolsPage() {
         );
       }
     }
-    // Virtual destinations are also derived — only the source side needs a write.
+    // Virtual destinations (like Fun Money) are derived — only source needs write.
 
     await Promise.all(updates);
     toast.success(`Moved ${fmt(val)} from ${source?.label} → ${dest?.label}`);
@@ -730,9 +780,46 @@ export default function FinancePoolsPage() {
                 </div>
               </div>
 
-              <p className="text-[11px] text-slate-500 mt-4 pt-3 border-t border-slate-100 font-medium">
-                {bufferMonths}mo × {fmt(actualMonthlySurvival)}/mo × 1.2 buffer
-              </p>
+              <div>
+                <p className="text-[11px] text-slate-500 mt-4 pt-3 border-t border-slate-100 font-medium">
+                  {bufferMonths}mo × {fmt(actualMonthlySurvival)}/mo × 1.2 buffer
+                </p>
+
+                {/* Actions */}
+                <div className="flex gap-2 pt-2 mt-2 w-full">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-8 text-xs font-semibold gap-1.5 flex-1 border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-colors"
+                    onClick={() => {
+                      const emId = emergencyGoal ? emergencyGoal.id : EMERGENCY_VIRTUAL;
+                      const defaultSource = poolOptions.find(p => p.available > 0 && p.id !== emId)?.id || '';
+                      setMoveFrom(defaultSource);
+                      setMoveTo(emId);
+                      setMoveAmount('');
+                      setMoveOpen(true);
+                    }}
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Add funds
+                  </Button>
+                  {currentFunded > 0 && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-8 text-xs font-semibold gap-1 text-slate-500 hover:text-slate-900 transition-colors"
+                      onClick={() => {
+                        const emId = emergencyGoal ? emergencyGoal.id : EMERGENCY_VIRTUAL;
+                        setMoveFrom(emId);
+                        setMoveTo('');
+                        setMoveAmount('');
+                        setMoveOpen(true);
+                      }}
+                    >
+                      <ArrowRightLeft className="w-3 h-3" /> Move out
+                    </Button>
+                  )}
+                </div>
+              </div>
             </div>
           );
         })()}
@@ -838,7 +925,7 @@ export default function FinancePoolsPage() {
         )}
 
         {/* Goal Pool Cards */}
-        {finance.goals.map(goal => {
+        {finance.goals.filter(g => !(g as any).is_emergency && !g.name.toLowerCase().includes('emergency')).map(goal => {
           const assigned = goal.assigned_amount || 0;
           const tripInfo = goalTripSpent.get(goal.id);
           const tripSpent = tripInfo?.spent || 0;
@@ -1017,7 +1104,8 @@ export default function FinancePoolsPage() {
                   <Button
                     size="sm" variant="outline" className="h-8 text-xs font-semibold gap-1.5 flex-1 border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-colors"
                     onClick={() => {
-                      setMoveFrom(UNALLOCATED);
+                      const defaultSource = poolOptions.find(p => p.available > 0 && p.id !== goal.id)?.id || (funMoney > 0 ? UNALLOCATED : '');
+                      setMoveFrom(defaultSource);
                       setMoveTo(goal.id);
                       setMoveAmount('');
                       setMoveOpen(true);
