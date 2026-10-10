@@ -652,7 +652,7 @@ export default function FinanceIncome() {
                 const data = bucketed[b.key] || { total: 0, count: 0, txs: [] };
                 const pct = grandTotalWithReimbursements > 0 ? (data.total / grandTotalWithReimbursements) * 100 : 0;
                 const Icon = b.icon;
-                const isQuarter = data.total < 20;
+                const isQuarter = data.total <= 0;
 
                 return (
                   <Collapsible
@@ -667,7 +667,7 @@ export default function FinanceIncome() {
                       style={{ background: b.bg, borderColor: b.border }}
                     >
                       {isQuarter ? (
-                        /* --- QUARTER PILL CARD (< 20) --- */
+                        /* --- QUARTER PILL CARD (£0) --- */
                         <div className="flex flex-col justify-between h-full space-y-3">
                           <div className="flex items-center justify-between gap-2">
                             <div className="flex items-center gap-2.5 min-w-0">
