@@ -263,6 +263,10 @@ export default function FinanceMonthly() {
   const diffExpenses = selectedBenchmark.monthlyExpenses - totalSpent; // positive = spending less than benchmark!
   const annualizedNetProfit = netProfit * 12;
 
+  const incomeDiffPct = selectedBenchmark.monthlyIncome > 0 ? ((incomeTotal - selectedBenchmark.monthlyIncome) / selectedBenchmark.monthlyIncome) * 100 : 0;
+  const spendingDiffPct = selectedBenchmark.monthlyExpenses > 0 ? ((totalSpent - selectedBenchmark.monthlyExpenses) / selectedBenchmark.monthlyExpenses) * 100 : 0;
+  const netProfitDiffPct = selectedBenchmark.monthlySavings > 0 ? ((netProfit - selectedBenchmark.monthlySavings) / selectedBenchmark.monthlySavings) * 100 : 0;
+
   const { percentileLabel, percentileRank } = useMemo(() => {
     const p = netProfit;
     if (p >= 1500) return { percentileLabel: 'Top 2%', percentileRank: 98 };
@@ -1350,6 +1354,50 @@ export default function FinanceMonthly() {
           </div>
         </div>
 
+        {/* Peer Standing Percentage Scorecard */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3.5 bg-slate-50/80 rounded-2xl border border-slate-200/80">
+          {/* Income Status */}
+          <div className="flex items-center gap-2.5 px-3.5 py-2.5 bg-white rounded-xl border border-emerald-100 shadow-xs">
+            <div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center text-emerald-700 font-bold shrink-0">
+              <TrendingUp className="w-4 h-4" />
+            </div>
+            <div>
+              <p className="text-[10px] font-display font-bold uppercase tracking-wider text-slate-400">Income Status</p>
+              <p className="text-xs font-display font-extrabold text-emerald-700">
+                {incomeDiffPct >= 0 ? `+${incomeDiffPct.toFixed(0)}% Above Average` : `${Math.abs(incomeDiffPct).toFixed(0)}% Below Average`}
+              </p>
+            </div>
+          </div>
+
+          {/* Spending Status */}
+          <div className="flex items-center gap-2.5 px-3.5 py-2.5 bg-white rounded-xl border border-sky-100 shadow-xs">
+            <div className="w-8 h-8 rounded-lg bg-sky-100 flex items-center justify-center text-sky-700 font-bold shrink-0">
+              <TrendingDown className="w-4 h-4" />
+            </div>
+            <div>
+              <p className="text-[10px] font-display font-bold uppercase tracking-wider text-slate-400">Spending Status</p>
+              <p className="text-xs font-display font-extrabold text-sky-800">
+                {spendingDiffPct <= 0
+                  ? `${Math.abs(spendingDiffPct).toFixed(0)}% Leaner (Below Avg)`
+                  : `+${spendingDiffPct.toFixed(0)}% Above Avg spending`}
+              </p>
+            </div>
+          </div>
+
+          {/* Financial Position Badge */}
+          <div className="flex items-center gap-2.5 px-3.5 py-2.5 bg-white rounded-xl border border-pink-100 shadow-xs">
+            <div className="w-8 h-8 rounded-lg bg-pink-100 flex items-center justify-center text-[#FF2EB8] font-bold shrink-0">
+              <Sparkles className="w-4 h-4" />
+            </div>
+            <div>
+              <p className="text-[10px] font-display font-bold uppercase tracking-wider text-slate-400">Overall Peer Standing</p>
+              <p className="text-xs font-display font-extrabold text-[#FF2EB8]">
+                {percentileLabel} ({netProfitDiffPct >= 0 ? `+${netProfitDiffPct.toFixed(0)}%` : `${netProfitDiffPct.toFixed(0)}%`} Surplus)
+              </p>
+            </div>
+          </div>
+        </div>
+
         {/* Stat Summary Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           {/* Card 1: Net Profit & Savings Rate */}
@@ -1363,7 +1411,7 @@ export default function FinanceMonthly() {
                 {netProfit >= 0 ? '+' : ''}{fmt(netProfit)}
               </div>
               <p className="text-xs text-slate-500 mt-1 font-semibold flex items-center gap-1">
-                <Percent className="w-3 h-3 text-[#FF2EB8]" /> {savingsRate.toFixed(0)}% Savings Rate · vs {fmt(selectedBenchmark.monthlySavings)} peer avg
+                <Percent className="w-3 h-3 text-[#FF2EB8]" /> {savingsRate.toFixed(0)}% Savings Rate · {netProfitDiffPct >= 0 ? `+${netProfitDiffPct.toFixed(0)}%` : `${netProfitDiffPct.toFixed(0)}%`} vs peer avg
               </p>
             </div>
           </div>
@@ -1379,7 +1427,9 @@ export default function FinanceMonthly() {
                 {fmt(totalSpent)}
               </div>
               <p className="text-xs text-[#166534]/80 mt-1 font-semibold">
-                {diffExpenses >= 0 ? `${fmt(diffExpenses)} lower spending than` : `${fmt(Math.abs(diffExpenses))} higher than`} {selectedBenchmark.label} ({fmt(selectedBenchmark.monthlyExpenses)}/mo)
+                {spendingDiffPct <= 0
+                  ? `${Math.abs(spendingDiffPct).toFixed(0)}% lower spending than`
+                  : `${spendingDiffPct.toFixed(0)}% higher than`} {selectedBenchmark.label} ({fmt(selectedBenchmark.monthlyExpenses)}/mo)
               </p>
             </div>
           </div>
@@ -1395,7 +1445,7 @@ export default function FinanceMonthly() {
                 {fmt(annualizedNetProfit)}<span className="text-sm font-normal text-slate-500">/yr net</span>
               </div>
               <p className="text-xs text-sky-900/80 mt-1 font-semibold">
-                vs {fmt(selectedBenchmark.annualProfit)}/yr average peer net savings
+                vs {fmt(selectedBenchmark.annualProfit)}/yr avg peer net savings pacing
               </p>
             </div>
           </div>
@@ -1440,7 +1490,7 @@ export default function FinanceMonthly() {
           <div className="flex items-center gap-2.5">
             <span className="text-xl">🦘</span>
             <p>
-              <strong className="font-bold text-[#FF2EB8]">Net Profit Summary:</strong> For {monthLabel}, your net monthly profit is <strong className="text-slate-900">{fmt(netProfit)}</strong> ({savingsRate.toFixed(0)}% savings rate), which is <strong className="text-slate-900">{diffProfit >= 0 ? `${fmt(diffProfit)} higher` : `${fmt(Math.abs(diffProfit))} lower`}</strong> than the {selectedBenchmark.label} net profit benchmark ({fmt(selectedBenchmark.monthlySavings)}/mo net).
+              <strong className="font-bold text-[#FF2EB8]">Financial Position Summary:</strong> For {monthLabel}, your spending is <strong className="text-slate-900">{spendingDiffPct <= 0 ? `${Math.abs(spendingDiffPct).toFixed(0)}% below average (Lean)` : `${spendingDiffPct.toFixed(0)}% above average`}</strong>, your income is <strong className="text-slate-900">{incomeDiffPct >= 0 ? `+${incomeDiffPct.toFixed(0)}% above average` : `${Math.abs(incomeDiffPct).toFixed(0)}% below average`}</strong>, placing your financial position at <strong className="text-slate-900">{percentileLabel}</strong> against UK full-time 23yo peers with <strong className="text-[#FF2EB8]">{fmt(netProfit)}</strong> net monthly profit ({savingsRate.toFixed(0)}% savings rate).
             </p>
           </div>
         </div>

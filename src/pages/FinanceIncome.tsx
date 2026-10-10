@@ -994,6 +994,35 @@ export default function FinanceIncome() {
                 </div>
               </div>
 
+              {/* Peer Standing Percentage Scorecard */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3.5 bg-slate-50/80 rounded-2xl border border-slate-200/80">
+                {/* Income Status */}
+                <div className="flex items-center gap-2.5 px-3.5 py-2.5 bg-white rounded-xl border border-emerald-100 shadow-xs">
+                  <div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center text-emerald-700 font-bold shrink-0">
+                    <TrendingUp className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-display font-bold uppercase tracking-wider text-slate-400">Income Status</p>
+                    <p className="text-xs font-display font-extrabold text-emerald-700">
+                      {percentDiff >= 0 ? `+${percentDiff.toFixed(0)}% Above Average` : `${Math.abs(percentDiff).toFixed(0)}% Below Average`}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Overall Peer Standing */}
+                <div className="flex items-center gap-2.5 px-3.5 py-2.5 bg-white rounded-xl border border-pink-100 shadow-xs">
+                  <div className="w-8 h-8 rounded-lg bg-pink-100 flex items-center justify-center text-[#FF2EB8] font-bold shrink-0">
+                    <Sparkles className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-display font-bold uppercase tracking-wider text-slate-400">Overall Peer Standing</p>
+                    <p className="text-xs font-display font-extrabold text-[#FF2EB8]">
+                      {percentileLabel} (Top {100 - percentileRank}% UK FT Workers)
+                    </p>
+                  </div>
+                </div>
+              </div>
+
               {/* Stat Summary Cards */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 {/* Card 1: Percentile Ranking */}
@@ -1084,7 +1113,7 @@ export default function FinanceIncome() {
                 <div className="flex items-center gap-2.5">
                   <span className="text-xl">🦘</span>
                   <p>
-                    <strong className="font-bold text-[#FF2EB8]">Smashing it in Manchester!</strong> As a 23yo Australian working full-time in the UK, your income is <strong className="text-slate-900">{percentDiff >= 0 ? `${percentDiff.toFixed(0)}% above` : `${Math.abs(percentDiff).toFixed(0)}% below`}</strong> the {selectedBenchmark.label} peer average ({formatCurrency(selectedBenchmark.monthlyNet, baseCurrency)}/mo net). Keep directing that surplus into your savings stash &amp; pools!
+                    <strong className="font-bold text-[#FF2EB8]">Income Position Summary:</strong> As a 23yo working full-time, your income is <strong className="text-slate-900">{percentDiff >= 0 ? `+${percentDiff.toFixed(0)}% above average` : `${Math.abs(percentDiff).toFixed(0)}% below average`}</strong> compared to the {selectedBenchmark.label} peer benchmark ({formatCurrency(selectedBenchmark.monthlyNet, baseCurrency)}/mo net), placing your financial position at <strong className="text-slate-900">{percentileLabel}</strong>.
                   </p>
                 </div>
               </div>
