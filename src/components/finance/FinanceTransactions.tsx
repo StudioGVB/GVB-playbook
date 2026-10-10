@@ -247,7 +247,8 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
       .filter(Boolean) as typeof categories;
   }, [categories]);
 
-  const categoryOptions = useMemo(() => categories, [categories]);
+  const incomeCategoryOptions = useMemo(() => categories.filter(c => c.type === 'income'), [categories]);
+  const expenseCategoryOptions = useMemo(() => categories.filter(c => c.type !== 'income'), [categories]);
 
   const uncategorizedCount = transactions.filter(tx => !tx.category_id).length;
   const transferCount = transactions.filter(tx => tx.is_transfer || tx.transfer_group_id).length;
@@ -406,11 +407,34 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
             <SelectTrigger className="w-32 sm:w-36 shrink-0 text-xs">
               <SelectValue placeholder="Category" />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent className="max-h-64">
               <SelectItem value="all">All Categories</SelectItem>
-              {categories.map(c => (
-                <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-              ))}
+              {incomeCategoryOptions.length > 0 && (
+                <>
+                  <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground bg-muted/30">Income Streams</div>
+                  {incomeCategoryOptions.map(c => (
+                    <SelectItem key={c.id} value={c.id}>
+                      <div className="flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: c.color || '#22c55e' }} />
+                        {c.name}
+                      </div>
+                    </SelectItem>
+                  ))}
+                </>
+              )}
+              {expenseCategoryOptions.length > 0 && (
+                <>
+                  <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground bg-muted/30 border-t my-1">Expense Categories</div>
+                  {expenseCategoryOptions.map(c => (
+                    <SelectItem key={c.id} value={c.id}>
+                      <div className="flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: c.color || '#888' }} />
+                        {c.name}
+                      </div>
+                    </SelectItem>
+                  ))}
+                </>
+              )}
             </SelectContent>
           </Select>
         </div>
@@ -539,7 +563,7 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                   </SelectTrigger>
                   <SelectContent className="max-h-48">
                     <SelectItem value="__none__">None / Uncategorised</SelectItem>
-                    {categories.map(c => (
+                    {(newTxType === 'income' ? incomeCategoryOptions : expenseCategoryOptions).map(c => (
                       <SelectItem key={c.id} value={c.id}>
                         <div className="flex items-center gap-2">
                           <span className="w-2 h-2 rounded-full" style={{ backgroundColor: c.color || '#888' }} />
@@ -719,19 +743,21 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                         </button>
                       )}
                     </PopoverTrigger>
-                    <PopoverContent className="w-44 p-2" align="end">
-                      <p className="text-[10px] font-medium text-muted-foreground mb-1.5 px-1">Assign category</p>
+                    <PopoverContent className="w-48 p-2" align="end">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1.5 px-1">
+                        {tx.amount > 0 ? 'Assign Income Stream' : 'Assign Expense Category'}
+                      </p>
                       <div className="space-y-0.5 max-h-48 overflow-y-auto">
-                        {categoryOptions.map(c => (
+                        {(tx.amount > 0 ? incomeCategoryOptions : expenseCategoryOptions).map(c => (
                           <button
                             key={c.id}
                             onClick={() => handleCategoryChange(tx.id, tx.category_id, c.id)}
                             className={`w-full text-left text-xs px-2 py-1.5 rounded hover:bg-muted/50 transition-colors flex items-center gap-2 ${
-                              (tx.category_id === c.id || (isIncomeTransaction && c.id === genericIncomeCategory?.id && cat?.type === 'income')) ? 'bg-muted font-medium' : ''
+                              tx.category_id === c.id ? 'bg-muted font-bold' : ''
                             }`}
                           >
                             {c.color && <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: c.color }} />}
-                            {c.name}
+                            <span className="truncate">{c.name}</span>
                           </button>
                         ))}
                       </div>
