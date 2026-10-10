@@ -155,8 +155,17 @@ export default function PriorMonthAllocator({
           ? (convertToBase(1, g.currency) || 1)
           : 1;
         const addNative = addBase / nativePerBase;
+        const targetNative = g.target_amount || Infinity;
+        const currentAssigned = g.assigned_amount || 0;
+        const remainingNeededNative = Math.max(0, targetNative - currentAssigned);
+
+        if (remainingNeededNative <= 0.01) continue;
+
+        const cappedAddNative = Math.min(addNative, remainingNeededNative);
+        const newNativeAssigned = Math.min(targetNative, currentAssigned + cappedAddNative);
+
         await updateGoal(g.id, {
-          assigned_amount: (g.assigned_amount || 0) + addNative,
+          assigned_amount: newNativeAssigned,
         } as any);
       }
       toast.success(`Allocated ${formatCurrency(Math.round(totalAllocated), 'GBP')} to pools`);

@@ -201,17 +201,18 @@ export function calculatePaycheckWaterfall(
     const assignedBase = convertToBase(g.assigned_amount || 0, g.currency);
     const remainingNeeded = Math.max(0, targetBase - assignedBase);
 
+    // Rule: Pot reached target amount -> skip allocation even if deadline is upcoming
+    if (remainingNeeded <= 0.01) continue;
+
     let monthlyTarget = 0;
-    if (remainingNeeded > 0.01) {
-      if (g.deadline) {
-        const daysLeft = Math.max(1, Math.ceil((new Date(g.deadline).getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
-        const weeksLeft = Math.max(1, daysLeft / 7);
-        monthlyTarget = (remainingNeeded / weeksLeft) * 4.33;
-      } else if (g.percent_allocation && g.percent_allocation > 0) {
-        monthlyTarget = (g.percent_allocation / 100) * 500; // default baseline target
-      } else {
-        monthlyTarget = Math.min(remainingNeeded, 100);
-      }
+    if (g.deadline) {
+      const daysLeft = Math.max(1, Math.ceil((new Date(g.deadline).getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
+      const weeksLeft = Math.max(1, daysLeft / 7);
+      monthlyTarget = Math.min(remainingNeeded, (remainingNeeded / weeksLeft) * 4.33);
+    } else if (g.percent_allocation && g.percent_allocation > 0) {
+      monthlyTarget = Math.min(remainingNeeded, (g.percent_allocation / 100) * 500); // default baseline target
+    } else {
+      monthlyTarget = Math.min(remainingNeeded, 100);
     }
 
     const allocatedAmount = Math.min(remaining, monthlyTarget);

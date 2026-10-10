@@ -675,14 +675,17 @@ export function computeMoneySplit(
     const targetBase = convertToBase ? convertToBase(g.target_amount || 0, g.currency) : (g.target_amount || 0);
     const assignedBase = convertToBase ? convertToBase(g.assigned_amount || 0, g.currency) : (g.assigned_amount || 0);
     const remainingBase = Math.max(0, targetBase - assignedBase);
+
+    // Rule: If pot has reached or exceeded target amount, it receives £0.00 even if deadline is upcoming
     if (remainingBase <= 0.01) continue;
+
     if (g.deadline) {
       const daysLeft = Math.max(1, Math.ceil((new Date(g.deadline).getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
       const weeksLeft = Math.max(1, daysLeft / 7);
-      const weeklyRequired = remainingBase / weeksLeft;
+      const weeklyRequired = Math.min(remainingBase, remainingBase / weeksLeft);
       poolSavingsMonthly += weeklyRequired * 4.33;
     } else if (g.percent_allocation && g.percent_allocation > 0) {
-      poolSavingsMonthly += (g.percent_allocation / 100) * effectiveIncome;
+      poolSavingsMonthly += Math.min(remainingBase, (g.percent_allocation / 100) * effectiveIncome);
     }
   }
 

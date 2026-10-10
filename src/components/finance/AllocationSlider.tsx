@@ -26,8 +26,13 @@ export default function AllocationSlider({
   compact?: boolean;
 }) {
   const allocatable = useMemo(
-    () => goals.filter(g => !(g as any).is_stash),
-    [goals],
+    () => goals.filter(g => {
+      if ((g as any).is_stash) return false;
+      const targetBase = convertToBase ? convertToBase(g.target_amount || 0, g.currency) : (g.target_amount || 0);
+      const assignedBase = convertToBase ? convertToBase(g.assigned_amount || 0, g.currency) : (g.assigned_amount || 0);
+      return (targetBase - assignedBase) > 0.01;
+    }),
+    [goals, convertToBase],
   );
   const emergencyIdx = useMemo(
     () => allocatable.findIndex(g => /emergenc/i.test(g.name)),

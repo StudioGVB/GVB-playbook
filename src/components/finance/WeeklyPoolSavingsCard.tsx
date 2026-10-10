@@ -115,7 +115,15 @@ export default function WeeklyPoolSavingsCard({ finance, spendablePool = 0, funM
         // Convert base weekly required amount to goal native currency
         const oneInBase = finance.convertToBase(1, item.goal.currency);
         const nativeAdd = oneInBase === 0 ? item.weeklyRequiredBase : item.weeklyRequiredBase / oneInBase;
-        const newNativeAssigned = (item.goal.assigned_amount || 0) + nativeAdd;
+        
+        const targetNative = item.goal.target_amount || Infinity;
+        const currentAssigned = item.goal.assigned_amount || 0;
+        const remainingNeededNative = Math.max(0, targetNative - currentAssigned);
+
+        if (remainingNeededNative <= 0.01) continue;
+
+        const cappedNativeAdd = Math.min(nativeAdd, remainingNeededNative);
+        const newNativeAssigned = Math.min(targetNative, currentAssigned + cappedNativeAdd);
 
         updates.push(
           finance.updateGoal(item.goal.id, { assigned_amount: newNativeAssigned } as any)
