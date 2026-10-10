@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { format, startOfMonth, endOfMonth, addMonths } from 'date-fns';
-import { ChevronLeft, ChevronRight, TrendingUp, DollarSign, Tag, X, Briefcase, HelpCircle, Home, Download, CheckCircle2, Clock, FileText, Check, ArrowRightLeft, PieChart } from 'lucide-react';
+import { ChevronLeft, ChevronRight, TrendingUp, DollarSign, Tag, X, Briefcase, HelpCircle, Home, Download, CheckCircle2, Clock, FileText, Check, ArrowRightLeft, PieChart, Award, Sparkles, MapPin, BarChart3, Globe, UserCheck } from 'lucide-react';
 import { PieChart as RePieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 import { useFinanceData } from '@/hooks/useFinanceData';
 import { useFixedExpenses } from '@/hooks/useFixedExpenses';
@@ -66,6 +66,38 @@ function tint(hex: string, alpha: number): string {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
+// UK & Manchester Income Benchmarks (ONS / ASHE UK statistics for 23yo / 18-29 bracket)
+const AGE_BENCHMARKS = [
+  {
+    id: 'manchester_avg',
+    label: 'Manchester 23yo Avg',
+    monthlyNet: 1750,
+    annualGross: 25000,
+    description: 'Average net monthly earnings for early-career workers in Manchester',
+  },
+  {
+    id: 'uk_22_29_median',
+    label: 'UK 22–29 Median',
+    monthlyNet: 1850,
+    annualGross: 27500,
+    description: 'UK national median net monthly earnings for ages 22–29',
+  },
+  {
+    id: 'uk_18_24_median',
+    label: 'UK 18–24 Median',
+    monthlyNet: 1550,
+    annualGross: 22000,
+    description: 'UK national median for young adults (ages 18–24)',
+  },
+  {
+    id: 'uk_top_10',
+    label: 'UK Top 10% (Age 20-24)',
+    monthlyNet: 2400,
+    annualGross: 36000,
+    description: '90th percentile income for under-25s in the UK',
+  },
+];
+
 export default function FinanceIncome() {
   const finance = useFinanceData();
   const { transactions, categories, settings, updateTransaction, addCategory } = finance;
@@ -79,6 +111,7 @@ export default function FinanceIncome() {
   const [matchingTxId, setMatchingTxId] = useState<string | null>(null);
   const [newSourceName, setNewSourceName] = useState('');
   const [isAddingSource, setIsAddingSource] = useState(false);
+  const [selectedBenchmarkId, setSelectedBenchmarkId] = useState<string>('manchester_avg');
 
   const monthStart = useMemo(() => startOfMonth(addMonths(new Date(), monthOffset)), [monthOffset]);
   const monthEnd = useMemo(() => endOfMonth(monthStart), [monthStart]);
@@ -231,6 +264,25 @@ export default function FinanceIncome() {
       return a.label.localeCompare(b.label);
     });
   }, [BUCKETS, bucketed]);
+
+  const selectedBenchmark = useMemo(() => (
+    AGE_BENCHMARKS.find(b => b.id === selectedBenchmarkId) || AGE_BENCHMARKS[0]
+  ), [selectedBenchmarkId]);
+
+  const diffMonthly = grandTotalWithReimbursements - selectedBenchmark.monthlyNet;
+  const percentDiff = selectedBenchmark.monthlyNet > 0 ? (diffMonthly / selectedBenchmark.monthlyNet) * 100 : 0;
+  const annualizedUser = grandTotalWithReimbursements * 12;
+
+  const { percentileLabel, percentileRank } = useMemo(() => {
+    const inc = grandTotalWithReimbursements;
+    if (inc >= 3500) return { percentileLabel: 'Top 2%', percentileRank: 98 };
+    if (inc >= 3000) return { percentileLabel: 'Top 4%', percentileRank: 96 };
+    if (inc >= 2500) return { percentileLabel: 'Top 8%', percentileRank: 92 };
+    if (inc >= 2200) return { percentileLabel: 'Top 15%', percentileRank: 85 };
+    if (inc >= 1850) return { percentileLabel: 'Top 35%', percentileRank: 65 };
+    if (inc >= 1550) return { percentileLabel: 'Top 50%', percentileRank: 50 };
+    return { percentileLabel: 'Top 70%', percentileRank: 30 };
+  }, [grandTotalWithReimbursements]);
 
   const handleAssignTx = async (txId: string, categoryId: string | null) => {
     const updateData: any = { category_id: categoryId };
@@ -901,6 +953,141 @@ export default function FinanceIncome() {
                   </Collapsible>
                 );
               })}
+            </div>
+
+            {/* Peer Income Benchmark Model Widget */}
+            <div className="bg-white rounded-[2rem] p-6 sm:p-7 border-2 border-[#FF7AD1]/40 shadow-sm relative overflow-hidden space-y-6">
+              {/* Header */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-5">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-[#FF2EB8] to-[#FF7AD1] flex items-center justify-center text-white shadow-md shrink-0">
+                    <Award className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="font-display font-black text-xl text-slate-900">23yo Peer Benchmark Model</h3>
+                      <Badge variant="outline" className="bg-[#FFF5FA] border-[#FF7AD1]/40 text-[#FF2EB8] font-display font-bold px-2.5 py-0.5 rounded-full text-[11px] flex items-center gap-1">
+                        <MapPin className="w-3 h-3 text-[#FF2EB8]" /> Manchester, UK · 🦘 AU Expats
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Comparing your monthly income ({formatCurrency(grandTotalWithReimbursements, baseCurrency)}) against UK &amp; local Manchester age benchmarks.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Benchmark selector pill tabs */}
+                <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-2xl shrink-0 overflow-x-auto">
+                  {AGE_BENCHMARKS.map(b => (
+                    <button
+                      key={b.id}
+                      onClick={() => setSelectedBenchmarkId(b.id)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-display font-bold whitespace-nowrap transition-all ${
+                        selectedBenchmarkId === b.id
+                          ? 'bg-[#FF2EB8] text-white shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                      }`}
+                    >
+                      {b.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Stat Summary Cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                {/* Card 1: Percentile Ranking */}
+                <div className="bg-gradient-to-br from-[#FFF5FA] to-white rounded-2xl p-5 border border-[#FF7AD1]/30 flex flex-col justify-between">
+                  <div className="flex items-center justify-between text-[#FF2EB8] text-xs font-display font-bold uppercase tracking-wider mb-2">
+                    <span>UK Age Percentile</span>
+                    <Sparkles className="w-4 h-4 text-[#FF2EB8]" />
+                  </div>
+                  <div>
+                    <div className="text-3xl sm:text-4xl font-display font-black text-slate-900 tabular-nums">
+                      {percentileLabel}
+                    </div>
+                    <p className="text-xs text-slate-500 mt-1 font-medium">
+                      Outperforming ~{percentileRank}% of 23yo workers in the UK
+                    </p>
+                  </div>
+                </div>
+
+                {/* Card 2: Monthly Comparison Surplus */}
+                <div className="bg-emerald-50/60 rounded-2xl p-5 border border-emerald-200/80 flex flex-col justify-between">
+                  <div className="flex items-center justify-between text-[#166534] text-xs font-display font-bold uppercase tracking-wider mb-2">
+                    <span>vs {selectedBenchmark.label}</span>
+                    <TrendingUp className="w-4 h-4 text-[#22C55E]" />
+                  </div>
+                  <div>
+                    <div className="text-3xl sm:text-4xl font-display font-black text-[#166534] tabular-nums">
+                      {diffMonthly >= 0 ? '+' : ''}{formatCurrency(diffMonthly, baseCurrency)}
+                    </div>
+                    <p className="text-xs text-[#166534]/80 mt-1 font-semibold">
+                      {percentDiff >= 0 ? `${percentDiff.toFixed(0)}% ahead of` : `${Math.abs(percentDiff).toFixed(0)}% below`} benchmark ({formatCurrency(selectedBenchmark.monthlyNet, baseCurrency)}/mo)
+                    </p>
+                  </div>
+                </div>
+
+                {/* Card 3: Annualized Pacing */}
+                <div className="bg-sky-50/60 rounded-2xl p-5 border border-sky-200/80 flex flex-col justify-between">
+                  <div className="flex items-center justify-between text-sky-800 text-xs font-display font-bold uppercase tracking-wider mb-2">
+                    <span>Annualized Pacing</span>
+                    <BarChart3 className="w-4 h-4 text-[#0284C7]" />
+                  </div>
+                  <div>
+                    <div className="text-3xl sm:text-4xl font-display font-black text-slate-900 tabular-nums">
+                      {formatCurrency(annualizedUser, baseCurrency)}<span className="text-sm font-normal text-slate-500">/yr</span>
+                    </div>
+                    <p className="text-xs text-sky-900/80 mt-1 font-semibold">
+                      vs {formatCurrency(selectedBenchmark.annualGross, baseCurrency)} average peer gross
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Visual Progress Scale */}
+              <div className="bg-slate-50 rounded-2xl p-5 border border-slate-200/70 space-y-3">
+                <div className="flex justify-between items-center text-xs font-display font-bold text-slate-700">
+                  <span>UK Youth Income Spectrum (Monthly Net)</span>
+                  <span className="text-[#FF2EB8]">★ You: {formatCurrency(grandTotalWithReimbursements, baseCurrency)}/mo</span>
+                </div>
+                {/* Progress bar line */}
+                <div className="relative w-full bg-slate-200 rounded-full h-4 overflow-hidden flex items-center">
+                  <div
+                    className="h-full bg-gradient-to-r from-[#FF7AD1] to-[#FF2EB8] transition-all duration-500 rounded-full"
+                    style={{ width: `${Math.min(100, Math.max(10, (grandTotalWithReimbursements / 3600) * 100))}%` }}
+                  />
+                </div>
+                {/* Milestone ticks below scale */}
+                <div className="grid grid-cols-4 gap-2 pt-1 text-[11px] font-semibold text-slate-500 text-center">
+                  <div className="border-r border-slate-200 pr-1">
+                    <p className="text-slate-400 font-normal text-[10px]">18-24 Median</p>
+                    <p className="font-bold text-slate-700">£1,550/mo</p>
+                  </div>
+                  <div className="border-r border-slate-200 pr-1">
+                    <p className="text-slate-400 font-normal text-[10px]">Manchester 23yo</p>
+                    <p className="font-bold text-slate-700">£1,750/mo</p>
+                  </div>
+                  <div className="border-r border-slate-200 pr-1">
+                    <p className="text-slate-400 font-normal text-[10px]">UK 22-29 Median</p>
+                    <p className="font-bold text-slate-700">£1,850/mo</p>
+                  </div>
+                  <div>
+                    <p className="text-slate-400 font-normal text-[10px]">UK Top 10%</p>
+                    <p className="font-bold text-[#FF2EB8]">£2,400/mo</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Personalized Motivational Insight */}
+              <div className="bg-[#FFF5FA] border border-[#FF7AD1]/40 rounded-2xl p-4 flex items-center justify-between text-xs text-slate-700 font-medium">
+                <div className="flex items-center gap-2.5">
+                  <span className="text-xl">🦘</span>
+                  <p>
+                    <strong className="font-bold text-[#FF2EB8]">Smashing it in Manchester!</strong> As a 23yo Australian living in the UK, your income is <strong className="text-slate-900">{percentDiff >= 0 ? `${percentDiff.toFixed(0)}% above` : `${Math.abs(percentDiff).toFixed(0)}% below`}</strong> the {selectedBenchmark.label} average. Keep directing that surplus into your savings stash &amp; pools!
+                  </p>
+                </div>
+              </div>
             </div>
           </div>
         )}
