@@ -104,17 +104,29 @@ serve(async (req) => {
     // 2. Fetch borderless accounts (balances) across all profiles
     let allBalances: any[] = []
     for (const prof of profiles) {
-      const balancesRes = await fetch(`https://api.wise.com/v4/profiles/${prof.id}/balances`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Accept': 'application/json',
-        },
-      })
+      const balUrls = [
+        `https://api.wise.com/v4/profiles/${prof.id}/balances?types=STANDARD`,
+        `https://api.wise.com/v4/profiles/${prof.id}/balances`,
+        `https://api.wise.com/v3/profiles/${prof.id}/balances`,
+      ]
+      for (const balUrl of balUrls) {
+        try {
+          const balancesRes = await fetch(balUrl, {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Accept': 'application/json',
+            },
+          })
 
-      if (balancesRes.ok) {
-        const bals = await balancesRes.json()
-        if (Array.isArray(bals)) {
-          bals.forEach((b: any) => allBalances.push({ ...b, profileId: prof.id }))
+          if (balancesRes.ok) {
+            const bals = await balancesRes.json()
+            if (Array.isArray(bals) && bals.length > 0) {
+              bals.forEach((b: any) => allBalances.push({ ...b, profileId: prof.id }))
+              break
+            }
+          }
+        } catch (err) {
+          console.error(`Wise balances fetch error ${balUrl}:`, err)
         }
       }
     }
