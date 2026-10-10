@@ -695,13 +695,13 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
           groupedTransactions.map(group => (
             <div key={group.key} className="space-y-1.5">
               {/* Group Section Heading */}
-              <div className="sticky top-0 z-10 flex items-center justify-between px-3.5 py-1.5 bg-slate-100/95 dark:bg-slate-800/95 backdrop-blur-md rounded-xl text-xs font-display font-bold text-slate-700 dark:text-slate-200 border border-slate-200/80 dark:border-slate-700/80 shadow-xs">
+              <div className="sticky top-0 z-10 flex items-center justify-between px-4 sm:px-5 py-2 bg-slate-100/95 dark:bg-slate-800/95 backdrop-blur-md rounded-xl text-xs font-display font-bold text-slate-700 dark:text-slate-200 border border-slate-200/80 dark:border-slate-700/80 shadow-xs">
                 <div className="flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-[#FF2EB8]" />
                   <span>{group.label}</span>
                   <span className="text-[10px] text-slate-400 font-medium">({group.txs.length})</span>
                 </div>
-                <div className="flex items-center gap-3 text-[11px] font-semibold tabular-nums">
+                <div className="flex items-center gap-3 sm:gap-4 text-[11px] font-semibold tabular-nums pr-2 sm:pr-24">
                   {group.totalSpent > 0 && (
                     <span className="text-slate-600 dark:text-slate-300">
                       Spent: <strong className="text-slate-900 dark:text-white font-bold">{formatCurrency(group.totalSpent, baseCurrency)}</strong>
@@ -816,7 +816,7 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                       {/* Right: Category, Amount & Actions in clean aligned columns */}
                       <div className="flex items-center gap-2 sm:gap-3 shrink-0 ml-auto">
                         {/* Category pill */}
-                        <div className="w-24 sm:w-28 flex justify-start shrink-0 min-w-0">
+                        <div className="w-28 sm:w-32 flex justify-start shrink-0 min-w-0">
                           <Popover>
                             <PopoverTrigger asChild>
                               {displayCat ? (
@@ -868,15 +868,15 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                           </Popover>
                         </div>
 
-                        {/* Amount (Fixed width, left aligned) */}
-                        <div className="w-20 sm:w-24 text-left shrink-0">
+                        {/* Amount (Moved left with generous padding before widgets) */}
+                        <div className="w-24 sm:w-28 text-left shrink-0 pr-3">
                           <p className={`text-xs sm:text-sm font-display font-bold tabular-nums ${tx.amount >= 0 ? 'text-[hsl(var(--success))]' : 'text-slate-900'}`}>
                             {formatCurrency(tx.base_amount !== undefined && tx.base_amount !== null ? tx.base_amount : tx.amount, finance.settings?.base_currency || 'GBP')}
                           </p>
                         </div>
 
                         {/* Action Icons Toolbar */}
-                        <div className="w-14 sm:w-16 flex items-center justify-end gap-0.5 shrink-0">
+                        <div className="w-14 sm:w-16 flex items-center justify-end gap-1 shrink-0 pl-1">
                           {/* Pool assignment / refund flag */}
                           {tx.amount < 0 && goals.length > 0 ? (
                             <Popover>

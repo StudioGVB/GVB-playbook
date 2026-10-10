@@ -66,35 +66,35 @@ function tint(hex: string, alpha: number): string {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
-// UK & Manchester Income Benchmarks (ONS / ASHE UK statistics for 23yo / 18-29 bracket)
+// UK & Manchester Income Benchmarks (ONS / ASHE statistics for FULL-TIME WORKING INDIVIDUALS, excluding students)
 const AGE_BENCHMARKS = [
   {
     id: 'manchester_avg',
-    label: 'Manchester 23yo Avg',
-    monthlyNet: 1750,
-    annualGross: 25000,
-    description: 'Average net monthly earnings for early-career workers in Manchester',
+    label: 'Manchester 23yo Full-Time',
+    monthlyNet: 1950,
+    annualGross: 29000,
+    description: 'Average net monthly earnings for full-time working 23yo young professionals in Manchester',
   },
   {
     id: 'uk_22_29_median',
-    label: 'UK 22–29 Median',
-    monthlyNet: 1850,
-    annualGross: 27500,
-    description: 'UK national median net monthly earnings for ages 22–29',
+    label: 'UK 22–29 Full-Time Median',
+    monthlyNet: 2100,
+    annualGross: 31500,
+    description: 'UK national median net monthly earnings for full-time workers aged 22–29',
   },
   {
     id: 'uk_18_24_median',
-    label: 'UK 18–24 Median',
-    monthlyNet: 1550,
-    annualGross: 22000,
-    description: 'UK national median for young adults (ages 18–24)',
+    label: 'UK 18–24 Full-Time Median',
+    monthlyNet: 1750,
+    annualGross: 25000,
+    description: 'UK national median for full-time employed young adults (ages 18–24)',
   },
   {
     id: 'uk_top_10',
-    label: 'UK Top 10% (Age 20-24)',
-    monthlyNet: 2400,
-    annualGross: 36000,
-    description: '90th percentile income for under-25s in the UK',
+    label: 'UK Top 10% (Full-Time Under-25)',
+    monthlyNet: 2750,
+    annualGross: 41000,
+    description: '90th percentile income for full-time working under-25s in the UK',
   },
 ];
 
@@ -275,12 +275,12 @@ export default function FinanceIncome() {
 
   const { percentileLabel, percentileRank } = useMemo(() => {
     const inc = grandTotalWithReimbursements;
-    if (inc >= 3500) return { percentileLabel: 'Top 2%', percentileRank: 98 };
-    if (inc >= 3000) return { percentileLabel: 'Top 4%', percentileRank: 96 };
-    if (inc >= 2500) return { percentileLabel: 'Top 8%', percentileRank: 92 };
-    if (inc >= 2200) return { percentileLabel: 'Top 15%', percentileRank: 85 };
-    if (inc >= 1850) return { percentileLabel: 'Top 35%', percentileRank: 65 };
-    if (inc >= 1550) return { percentileLabel: 'Top 50%', percentileRank: 50 };
+    if (inc >= 4000) return { percentileLabel: 'Top 2%', percentileRank: 98 };
+    if (inc >= 3200) return { percentileLabel: 'Top 5%', percentileRank: 95 };
+    if (inc >= 2750) return { percentileLabel: 'Top 10%', percentileRank: 90 };
+    if (inc >= 2400) return { percentileLabel: 'Top 20%', percentileRank: 80 };
+    if (inc >= 2100) return { percentileLabel: 'Top 35%', percentileRank: 65 };
+    if (inc >= 1750) return { percentileLabel: 'Top 50%', percentileRank: 50 };
     return { percentileLabel: 'Top 70%', percentileRank: 30 };
   }, [grandTotalWithReimbursements]);
 
@@ -967,11 +967,11 @@ export default function FinanceIncome() {
                     <div className="flex items-center gap-2 flex-wrap">
                       <h3 className="font-display font-black text-xl text-slate-900">23yo Peer Benchmark Model</h3>
                       <Badge variant="outline" className="bg-[#FFF5FA] border-[#FF7AD1]/40 text-[#FF2EB8] font-display font-bold px-2.5 py-0.5 rounded-full text-[11px] flex items-center gap-1">
-                        <MapPin className="w-3 h-3 text-[#FF2EB8]" /> Manchester, UK · 🦘 AU Expats
+                        <MapPin className="w-3 h-3 text-[#FF2EB8]" /> Manchester, UK · 🦘 Full-Time Workers (Excl. Students)
                       </Badge>
                     </div>
                     <p className="text-xs text-slate-500 mt-0.5">
-                      Comparing your monthly income ({formatCurrency(grandTotalWithReimbursements, baseCurrency)}) against UK &amp; local Manchester age benchmarks.
+                      Comparing your monthly income ({formatCurrency(grandTotalWithReimbursements, baseCurrency)}) against UK &amp; local Manchester full-time employed benchmarks.
                     </p>
                   </div>
                 </div>
@@ -999,7 +999,7 @@ export default function FinanceIncome() {
                 {/* Card 1: Percentile Ranking */}
                 <div className="bg-gradient-to-br from-[#FFF5FA] to-white rounded-2xl p-5 border border-[#FF7AD1]/30 flex flex-col justify-between">
                   <div className="flex items-center justify-between text-[#FF2EB8] text-xs font-display font-bold uppercase tracking-wider mb-2">
-                    <span>UK Age Percentile</span>
+                    <span>UK FT Worker Percentile</span>
                     <Sparkles className="w-4 h-4 text-[#FF2EB8]" />
                   </div>
                   <div>
@@ -1007,7 +1007,7 @@ export default function FinanceIncome() {
                       {percentileLabel}
                     </div>
                     <p className="text-xs text-slate-500 mt-1 font-medium">
-                      Outperforming ~{percentileRank}% of 23yo workers in the UK
+                      Outperforming ~{percentileRank}% of full-time working 23yo adults in the UK
                     </p>
                   </div>
                 </div>
@@ -1023,7 +1023,7 @@ export default function FinanceIncome() {
                       {diffMonthly >= 0 ? '+' : ''}{formatCurrency(diffMonthly, baseCurrency)}
                     </div>
                     <p className="text-xs text-[#166534]/80 mt-1 font-semibold">
-                      {percentDiff >= 0 ? `${percentDiff.toFixed(0)}% ahead of` : `${Math.abs(percentDiff).toFixed(0)}% below`} benchmark ({formatCurrency(selectedBenchmark.monthlyNet, baseCurrency)}/mo)
+                      {percentDiff >= 0 ? `${percentDiff.toFixed(0)}% ahead of` : `${Math.abs(percentDiff).toFixed(0)}% below`} benchmark ({formatCurrency(selectedBenchmark.monthlyNet, baseCurrency)}/mo net)
                     </p>
                   </div>
                 </div>
@@ -1039,7 +1039,7 @@ export default function FinanceIncome() {
                       {formatCurrency(annualizedUser, baseCurrency)}<span className="text-sm font-normal text-slate-500">/yr</span>
                     </div>
                     <p className="text-xs text-sky-900/80 mt-1 font-semibold">
-                      vs {formatCurrency(selectedBenchmark.annualGross, baseCurrency)} average peer gross
+                      vs {formatCurrency(selectedBenchmark.annualGross, baseCurrency)} full-time average peer gross
                     </p>
                   </div>
                 </div>
@@ -1048,7 +1048,7 @@ export default function FinanceIncome() {
               {/* Visual Progress Scale */}
               <div className="bg-slate-50 rounded-2xl p-5 border border-slate-200/70 space-y-3">
                 <div className="flex justify-between items-center text-xs font-display font-bold text-slate-700">
-                  <span>UK Youth Income Spectrum (Monthly Net)</span>
+                  <span>UK Full-Time Youth Income Spectrum (Monthly Net, Excl. Students)</span>
                   <span className="text-[#FF2EB8]">★ You: {formatCurrency(grandTotalWithReimbursements, baseCurrency)}/mo</span>
                 </div>
                 {/* Progress bar line */}
@@ -1061,20 +1061,20 @@ export default function FinanceIncome() {
                 {/* Milestone ticks below scale */}
                 <div className="grid grid-cols-4 gap-2 pt-1 text-[11px] font-semibold text-slate-500 text-center">
                   <div className="border-r border-slate-200 pr-1">
-                    <p className="text-slate-400 font-normal text-[10px]">18-24 Median</p>
-                    <p className="font-bold text-slate-700">£1,550/mo</p>
-                  </div>
-                  <div className="border-r border-slate-200 pr-1">
-                    <p className="text-slate-400 font-normal text-[10px]">Manchester 23yo</p>
+                    <p className="text-slate-400 font-normal text-[10px]">18-24 FT Median</p>
                     <p className="font-bold text-slate-700">£1,750/mo</p>
                   </div>
                   <div className="border-r border-slate-200 pr-1">
-                    <p className="text-slate-400 font-normal text-[10px]">UK 22-29 Median</p>
-                    <p className="font-bold text-slate-700">£1,850/mo</p>
+                    <p className="text-slate-400 font-normal text-[10px]">Manchester 23yo FT</p>
+                    <p className="font-bold text-slate-700">£1,950/mo</p>
+                  </div>
+                  <div className="border-r border-slate-200 pr-1">
+                    <p className="text-slate-400 font-normal text-[10px]">UK 22-29 FT Median</p>
+                    <p className="font-bold text-slate-700">£2,100/mo</p>
                   </div>
                   <div>
-                    <p className="text-slate-400 font-normal text-[10px]">UK Top 10%</p>
-                    <p className="font-bold text-[#FF2EB8]">£2,400/mo</p>
+                    <p className="text-slate-400 font-normal text-[10px]">UK Top 10% FT</p>
+                    <p className="font-bold text-[#FF2EB8]">£2,750/mo</p>
                   </div>
                 </div>
               </div>
@@ -1084,7 +1084,7 @@ export default function FinanceIncome() {
                 <div className="flex items-center gap-2.5">
                   <span className="text-xl">🦘</span>
                   <p>
-                    <strong className="font-bold text-[#FF2EB8]">Smashing it in Manchester!</strong> As a 23yo Australian living in the UK, your income is <strong className="text-slate-900">{percentDiff >= 0 ? `${percentDiff.toFixed(0)}% above` : `${Math.abs(percentDiff).toFixed(0)}% below`}</strong> the {selectedBenchmark.label} average. Keep directing that surplus into your savings stash &amp; pools!
+                    <strong className="font-bold text-[#FF2EB8]">Smashing it in Manchester!</strong> As a 23yo Australian working full-time in the UK, your income is <strong className="text-slate-900">{percentDiff >= 0 ? `${percentDiff.toFixed(0)}% above` : `${Math.abs(percentDiff).toFixed(0)}% below`}</strong> the {selectedBenchmark.label} peer average ({formatCurrency(selectedBenchmark.monthlyNet, baseCurrency)}/mo net). Keep directing that surplus into your savings stash &amp; pools!
                   </p>
                 </div>
               </div>
