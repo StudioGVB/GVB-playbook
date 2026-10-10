@@ -49,19 +49,21 @@ export default function FinanceAccountsPage({ defaultTab }: { defaultTab?: strin
   const wtMap = useMemo(() => weekTypeMap(), [weekTypeMap]);
 
   const snapshot = useMemo(() => {
-    if (!assumptions) return null;
+    if (!assumptions || finance.loading) return null;
     return computePolicySnapshot(
-      finance.accounts,
-      finance.goals,
       assumptions,
+      finance.accounts,
       finance.transactions,
       finance.categories,
-      fixedMonthlyTotal,
-      fixedMonthlyTotalAll,
+      finance.goals,
       finance.convertToBase,
-      wtMap
+      fixedMonthlyTotal,
+      undefined,
+      wtMap,
+      [],
+      fixedMonthlyTotalAll
     );
-  }, [assumptions, finance, fixedMonthlyTotal, fixedMonthlyTotalAll, wtMap]);
+  }, [assumptions, finance.accounts, finance.transactions, finance.categories, finance.goals, finance.convertToBase, finance.loading, fixedMonthlyTotal, fixedMonthlyTotalAll, wtMap]);
 
   const activeTab = useMemo(() => {
     if (defaultTab) return defaultTab;

@@ -814,9 +814,9 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                       </div>
 
                       {/* Right: Category, Amount & Actions in clean aligned columns */}
-                      <div className="flex items-center gap-2 sm:gap-3 shrink-0 ml-auto">
+                      <div className="flex items-center gap-3 sm:gap-4 shrink-0 ml-auto">
                         {/* Category pill */}
-                        <div className="w-28 sm:w-32 flex justify-start shrink-0 min-w-0">
+                        <div className="w-28 sm:w-36 flex justify-start shrink-0 min-w-0">
                           <Popover>
                             <PopoverTrigger asChild>
                               {displayCat ? (
@@ -868,15 +868,15 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                           </Popover>
                         </div>
 
-                        {/* Amount (Moved left with generous padding before widgets) */}
-                        <div className="w-24 sm:w-28 text-left shrink-0 pr-3">
+                        {/* Amount (Clean left-aligned column with clear right padding before action buttons) */}
+                        <div className="w-24 sm:w-28 text-left shrink-0 pr-2">
                           <p className={`text-xs sm:text-sm font-display font-bold tabular-nums ${tx.amount >= 0 ? 'text-[hsl(var(--success))]' : 'text-slate-900'}`}>
                             {formatCurrency(tx.base_amount !== undefined && tx.base_amount !== null ? tx.base_amount : tx.amount, finance.settings?.base_currency || 'GBP')}
                           </p>
                         </div>
 
-                        {/* Action Icons Toolbar */}
-                        <div className="w-14 sm:w-16 flex items-center justify-end gap-1 shrink-0 pl-1">
+                        {/* Action Icons Toolbar (Auto-fit width so buttons never overflow onto amount) */}
+                        <div className="flex items-center justify-end gap-1 shrink-0">
                           {/* Pool assignment / refund flag */}
                           {tx.amount < 0 && goals.length > 0 ? (
                             <Popover>
