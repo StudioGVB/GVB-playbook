@@ -66,7 +66,7 @@ function tint(hex: string, alpha: number): string {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
-// UK & Manchester Income Benchmarks (ONS / ASHE statistics for FULL-TIME WORKING INDIVIDUALS, excluding students)
+// UK, Manchester & Australia Income Benchmarks (ONS / ASHE & ABS statistics for FULL-TIME WORKING INDIVIDUALS, excluding students)
 const AGE_BENCHMARKS = [
   {
     id: 'manchester_avg',
@@ -83,18 +83,18 @@ const AGE_BENCHMARKS = [
     description: 'UK national median net monthly earnings for full-time workers aged 22–29',
   },
   {
-    id: 'uk_18_24_median',
-    label: 'UK 18–24 Full-Time Median',
-    monthlyNet: 1750,
-    annualGross: 25000,
-    description: 'UK national median for full-time employed young adults (ages 18–24)',
+    id: 'australia_23yo_ft',
+    label: 'Australia 23yo FT ($72k AUD)',
+    monthlyNet: 2400,
+    annualGross: 36000,
+    description: 'ABS median net monthly earnings for 23yo full-time working graduates in Australia (~$72,000 AUD/yr)',
   },
   {
     id: 'uk_top_10',
-    label: 'UK Top 10% (Full-Time Under-25)',
-    monthlyNet: 2750,
-    annualGross: 41000,
-    description: '90th percentile income for full-time working under-25s in the UK',
+    label: 'UK Top 10% (Age 22–29)',
+    monthlyNet: 2850,
+    annualGross: 43000,
+    description: '90th percentile income for full-time working young adults (22–29) in the UK',
   },
 ];
 
@@ -1048,7 +1048,7 @@ export default function FinanceIncome() {
               {/* Visual Progress Scale */}
               <div className="bg-slate-50 rounded-2xl p-5 border border-slate-200/70 space-y-3">
                 <div className="flex justify-between items-center text-xs font-display font-bold text-slate-700">
-                  <span>UK Full-Time Youth Income Spectrum (Monthly Net, Excl. Students)</span>
+                  <span>Full-Time Youth Income Spectrum (Monthly Net, Excl. Students)</span>
                   <span className="text-[#FF2EB8]">★ You: {formatCurrency(grandTotalWithReimbursements, baseCurrency)}/mo</span>
                 </div>
                 {/* Progress bar line */}
@@ -1061,10 +1061,6 @@ export default function FinanceIncome() {
                 {/* Milestone ticks below scale */}
                 <div className="grid grid-cols-4 gap-2 pt-1 text-[11px] font-semibold text-slate-500 text-center">
                   <div className="border-r border-slate-200 pr-1">
-                    <p className="text-slate-400 font-normal text-[10px]">18-24 FT Median</p>
-                    <p className="font-bold text-slate-700">£1,750/mo</p>
-                  </div>
-                  <div className="border-r border-slate-200 pr-1">
                     <p className="text-slate-400 font-normal text-[10px]">Manchester 23yo FT</p>
                     <p className="font-bold text-slate-700">£1,950/mo</p>
                   </div>
@@ -1072,9 +1068,13 @@ export default function FinanceIncome() {
                     <p className="text-slate-400 font-normal text-[10px]">UK 22-29 FT Median</p>
                     <p className="font-bold text-slate-700">£2,100/mo</p>
                   </div>
+                  <div className="border-r border-slate-200 pr-1">
+                    <p className="text-slate-400 font-normal text-[10px]">Australia 23yo FT</p>
+                    <p className="font-bold text-slate-700">£2,400/mo <span className="text-[9px] font-normal text-slate-400">($72k AUD)</span></p>
+                  </div>
                   <div>
                     <p className="text-slate-400 font-normal text-[10px]">UK Top 10% FT</p>
-                    <p className="font-bold text-[#FF2EB8]">£2,750/mo</p>
+                    <p className="font-bold text-[#FF2EB8]">£2,850/mo</p>
                   </div>
                 </div>
               </div>
