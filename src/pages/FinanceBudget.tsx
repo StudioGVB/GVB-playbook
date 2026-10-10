@@ -352,7 +352,7 @@ export default function FinanceBudget() {
   ), [finance.categories]);
 
   // Categorize transactions from last 28 days
-  const { essentials, funCategories, essentialSpentThisWeek, funSpentThisWeek, thisWeekByCategory, thisWeekTxns } = useMemo(() => {
+  const { essentials, funCategories, allVariableCategories, essentialSpentThisWeek, funSpentThisWeek, thisWeekByCategory, thisWeekTxns } = useMemo(() => {
     const cutoff = startOfDay(subDays(now, 28));
     const { transactions } = finance;
 
@@ -418,7 +418,13 @@ export default function FinanceBudget() {
       }
     }
 
-    return { essentials, funCategories, essentialSpentThisWeek, funSpentThisWeek, thisWeekByCategory, thisWeekTxns };
+    const allVariableCategories = [...essentials, ...funCategories].sort((a, b) => {
+      const aSpent = thisWeekByCategory.get(a.catId) || 0;
+      const bSpent = thisWeekByCategory.get(b.catId) || 0;
+      return bSpent - aSpent;
+    });
+
+    return { essentials, funCategories, allVariableCategories, essentialSpentThisWeek, funSpentThisWeek, thisWeekByCategory, thisWeekTxns };
   }, [finance.transactions, finance.categories, weekStart]);
 
   const [selectedCategory, setSelectedCategory] = useState<any | null>(null);
@@ -851,12 +857,12 @@ export default function FinanceBudget() {
       {/* === DETAIL DRILL-DOWNS (Essentials / Fun / Bills) === */}
       <div>
         <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-muted-foreground/75 mb-3">Pool Breakdown</p>
-        <div className={cn('grid grid-cols-1 sm:grid-cols-2 gap-4', snapshot.isTravelWeek ? 'md:grid-cols-2 xl:grid-cols-4' : 'md:grid-cols-3 xl:grid-cols-5')}>
+        <div className={cn('grid grid-cols-1 sm:grid-cols-2 gap-4', snapshot.isTravelWeek ? 'md:grid-cols-2 xl:grid-cols-4' : 'md:grid-cols-2 xl:grid-cols-4')}>
           <MetricCard
             label={!isCurrentWeek ? "Total Spent" : "Spent This Week"}
             value={fmt(essentialSpentThisWeek + effectiveFunSpent)}
             icon={Zap}
-            delta={`of ${fmt(essentialWeeklyBudget + snapshot.weeklyFunBudget)}`}
+            delta={`of ${fmt(totalWeeklyBudget)}`}
             deltaType="neutral"
             subtitle={<span>{!isCurrentWeek ? "7 of 7 days complete" : `Day ${dayOfWeek} of 7`} · <span className="text-muted-foreground/50">{fmtGbp(essentialSpentThisWeek + effectiveFunSpent)}</span></span>}
             valueClassName="text-foreground"
@@ -902,39 +908,27 @@ export default function FinanceBudget() {
               onAction={() => navigate('/finance/travel')}
             />
           ) : (
-            <>
-              <MetricCard
-                label="Essentials"
-                value={fmt(essentialRemaining)}
-                icon={ShoppingCart}
-                delta={`/${fmt(essentialWeeklyBudget)}`}
-                deltaType="neutral"
-                subtitle={<span>{fmt(essentialSpentThisWeek)} spent · <span className="text-muted-foreground/50">{fmtGbp(essentialRemaining)} left</span></span>}
-                valueClassName="text-[#8B5CF6]"
-                className="bg-white border-2 border-purple-200 shadow-[4px_4px_0px_0px_rgba(139,92,246,0.06)]"
-              />
-              <MetricCard
-                label="Fun Money"
-                value={fmt(Math.max(0, snapshot.weeklyFunBudget - effectiveFunSpent))}
-                icon={PartyPopper}
-                delta={`/${fmt(snapshot.weeklyFunBudget)}`}
-                deltaType="neutral"
-                subtitle={
-                  <span className="flex flex-col gap-0.5">
-                    <span>{fmt(effectiveFunSpent)} spent · <span className="text-muted-foreground/50">{fmtGbp(Math.max(0, snapshot.weeklyFunBudget - effectiveFunSpent))}</span></span>
-                    {snapshot.carryForwardDebt > 0 && (
-                      <span className="text-[10px] text-destructive/80">
-                        {fmt((assumptions?.weekly_fun_budget || snapshot.baseWeeklyFun) + snapshot.boostAmount)} allowance − {fmt(snapshot.carryForwardDebt)} last week = {fmt(snapshot.weeklyFunBudget)}
-                      </span>
-                    )}
-                  </span>
-                }
-                valueClassName="text-emerald-500"
-                className="bg-white border-2 border-emerald-200 shadow-[4px_4px_0px_0px_rgba(16,185,129,0.06)]"
-                onAction={handleStashWithdraw}
-                actionDisabled={stashBalance <= 0}
-              />
-            </>
+            <MetricCard
+              label="Weekly Safe to Spend"
+              value={fmt(combinedSafeToSpend)}
+              icon={PartyPopper}
+              delta={`/${fmt(totalWeeklyBudget)}`}
+              deltaType="neutral"
+              subtitle={
+                <span className="flex flex-col gap-0.5">
+                  <span>{fmt(essentialSpentThisWeek + effectiveFunSpent)} spent · <span className="text-muted-foreground/50">{fmtGbp(combinedSafeToSpend)} left</span></span>
+                  {snapshot.carryForwardDebt > 0 && (
+                    <span className="text-[10px] text-destructive/80">
+                      −{fmt(snapshot.carryForwardDebt)} last week overspend
+                    </span>
+                  )}
+                </span>
+              }
+              valueClassName={combinedSafeToSpend < 0 ? "text-destructive" : "text-[#FF2EB8]"}
+              className="bg-white border-2 border-pink-200 shadow-[4px_4px_0px_0px_rgba(255,46,184,0.06)]"
+              onAction={handleStashWithdraw}
+              actionDisabled={stashBalance <= 0}
+            />
           )}
         </div>
       </div>
@@ -1030,13 +1024,13 @@ export default function FinanceBudget() {
         </CardContent>
       </Card>
 
-      {/* === ESSENTIALS === */}
+      {/* === WEEKLY SPENDING === */}
       <Card className="border-border/60">
         <CardContent className="p-5 space-y-5">
           <div className="flex items-center gap-2">
-            <span className="w-1 h-4 rounded-full bg-[#8B5CF6]" />
+            <span className="w-1 h-4 rounded-full bg-[#FF2EB8]" />
             <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-              Essentials · This Week
+              Weekly Spending · This Week
             </p>
           </div>
 
@@ -1044,24 +1038,23 @@ export default function FinanceBudget() {
           <div className="flex items-end justify-between gap-4">
             <div>
               <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Left to Spend</p>
-              <p className={`text-3xl font-semibold tracking-tight tabular-nums ${essentialRemaining < 0 ? 'text-destructive' : 'text-foreground'}`}>
-                {essentialRemaining < 0 ? `−${fmt(Math.abs(essentialRemaining))}` : fmt(essentialRemaining)}
+              <p className={`text-3xl font-semibold tracking-tight tabular-nums ${combinedSafeToSpend < 0 ? 'text-destructive' : 'text-foreground'}`}>
+                {combinedSafeToSpend < 0 ? `−${fmt(Math.abs(combinedSafeToSpend))}` : fmt(combinedSafeToSpend)}
               </p>
             </div>
             <div className="text-right text-xs font-medium text-muted-foreground tabular-nums space-y-0.5">
-              <div>{fmt(essentialSpentThisWeek)} of {fmt(essentialWeeklyBudget)}</div>
-              {snapshot.essentialOverspend > 0 && (
-                <div className="text-destructive font-semibold">−{fmt(snapshot.essentialOverspend)} from fun</div>
-              )}
+              <div>{fmt(essentialSpentThisWeek + funSpentThisWeek)} of {fmt(totalWeeklyBudget)}</div>
+              {snapshot.boostAmount > 0 && <div className="text-emerald-600 font-semibold">+{fmt(snapshot.boostAmount)} boosts</div>}
+              {snapshot.carryForwardDebt > 0 && <div className="text-destructive font-semibold">−{fmt(snapshot.carryForwardDebt)} last week overspend</div>}
             </div>
           </div>
 
           {/* Where it's going */}
-          {essentials.length > 0 && (
+          {allVariableCategories.length > 0 && (
             <div className="pt-4 border-t border-border/50">
               <div className="flex items-center justify-between gap-6">
                 <div className="flex flex-col gap-2.5 flex-1 min-w-0">
-                   {essentials.map((cat) => {
+                  {allVariableCategories.map((cat) => {
                     const actualSpent = thisWeekByCategory.get(cat.catId) || 0;
                     return (
                       <button
@@ -1071,7 +1064,7 @@ export default function FinanceBudget() {
                       >
                         <span
                           className="w-1.5 h-1.5 rounded-full shrink-0"
-                          style={{ backgroundColor: cat.color || '#8B5CF6' }}
+                          style={{ backgroundColor: cat.color || '#FF2EB8' }}
                         />
                         <span className="text-xs font-medium text-muted-foreground truncate">{cat.name}</span>
                         <span className="text-xs font-semibold tabular-nums ml-auto text-foreground">{fmt(actualSpent)}</span>
@@ -1080,15 +1073,15 @@ export default function FinanceBudget() {
                   })}
                 </div>
                 <MultiSegmentDonut
-                  segments={essentials.map((cat) => ({
-                    color: cat.color || '#8B5CF6',
+                  segments={allVariableCategories.map((cat) => ({
+                    color: cat.color || '#FF2EB8',
                     value: thisWeekByCategory.get(cat.catId) || 0,
                     label: cat.name,
                   }))}
-                  total={essentialWeeklyBudget}
-                  size={104}
-                  centerTop={fmt(essentialSpentThisWeek)}
-                  centerBottom={`/ ${fmt(essentialWeeklyBudget)}`}
+                  total={totalWeeklyBudget}
+                  size={115}
+                  centerTop={fmt(essentialSpentThisWeek + funSpentThisWeek)}
+                  centerBottom={`/ ${fmt(totalWeeklyBudget)}`}
                 />
               </div>
 
@@ -1096,77 +1089,6 @@ export default function FinanceBudget() {
                 Based on last <span className="font-semibold text-foreground/80">{snapshot.normalWeeksUsed}</span> normal week{snapshot.normalWeeksUsed !== 1 ? 's' : ''}
                 {snapshot.excludedWeeksCount > 0 && ` · ${snapshot.excludedWeeksCount} travel/exception week${snapshot.excludedWeeksCount !== 1 ? 's' : ''} excluded`}
               </p>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* === FUN MONEY === */}
-      <Card className="border-border/60">
-        <CardContent className="p-5 space-y-5">
-          <div className="flex items-center gap-2">
-            <span className="w-1 h-4 rounded-full bg-emerald-500" />
-            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-              Fun Money · This Week
-            </p>
-          </div>
-
-          {/* Hero: Left to Spend */}
-          {(() => {
-            const funLeft = snapshot.weeklyFunBudget - effectiveFunSpent;
-            return (
-              <div className="flex items-end justify-between gap-4">
-                <div>
-                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Left to Spend</p>
-                  <p className={`text-3xl font-semibold tracking-tight tabular-nums ${funLeft < 0 ? 'text-destructive' : 'text-foreground'}`}>
-                    {funLeft < 0 ? `−${fmt(Math.abs(funLeft))}` : fmt(funLeft)}
-                  </p>
-                </div>
-                <div className="text-right text-xs font-medium text-muted-foreground tabular-nums space-y-0.5">
-                  <div>{fmt(funSpentThisWeek)} of {fmt(snapshot.weeklyFunBudget)}</div>
-                  {snapshot.rollover > 0 && <div className="text-emerald-600 font-semibold">+{fmt(snapshot.rollover)} rollover</div>}
-                  {snapshot.boostAmount > 0 && <div className="text-emerald-600 font-semibold">+{fmt(snapshot.boostAmount)} boosts</div>}
-                  {snapshot.essentialOverspend > 0 && <div className="text-destructive font-semibold">−{fmt(snapshot.essentialOverspend)} essentials</div>}
-                </div>
-              </div>
-            );
-          })()}
-
-          {/* Where it's going */}
-          {funCategories.length > 0 && (
-            <div className="pt-4 border-t border-border/50">
-              <div className="flex items-center justify-between gap-6">
-                <div className="flex flex-col gap-2.5 flex-1 min-w-0">
-                  {funCategories.map((cat) => {
-                    const actualSpent = thisWeekByCategory.get(cat.catId) || 0;
-                    return (
-                      <button
-                        key={cat.catId}
-                        onClick={() => setSelectedCategory(cat)}
-                        className="flex items-center gap-2.5 w-full text-left p-1 -m-1 rounded-md hover:bg-muted/40 transition-colors"
-                      >
-                        <span
-                          className="w-1.5 h-1.5 rounded-full shrink-0"
-                          style={{ backgroundColor: cat.color || 'hsl(var(--primary))' }}
-                        />
-                        <span className="text-xs font-medium text-muted-foreground truncate">{cat.name}</span>
-                        <span className="text-xs font-semibold tabular-nums ml-auto text-foreground">{fmt(actualSpent)}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-                <MultiSegmentDonut
-                  segments={funCategories.map((cat) => ({
-                    color: cat.color || 'hsl(var(--primary))',
-                    value: effectiveFunByCategory.get(cat.catId) || 0,
-                    label: cat.name,
-                  }))}
-                  total={snapshot.weeklyFunBudget}
-                  size={104}
-                  centerTop={fmt(effectiveFunSpent)}
-                  centerBottom={`/ ${fmt(snapshot.weeklyFunBudget)}`}
-                />
-              </div>
             </div>
           )}
         </CardContent>
