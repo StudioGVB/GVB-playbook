@@ -217,10 +217,19 @@ serve(async (req) => {
     // First pass: rule-based + Up hints + recurring→Bills
     const ruleResults: { id: string; category_id: string }[] = []
     const remaining: typeof uncatTxs = []
-    const incomeCat = categories.find((c: any) => c.type === 'income' || c.name.toLowerCase() === 'income')
+    const incomeCat = categories.find((c: any) => c.name.toLowerCase() === 'income')
     const billsCat = categories.find((c: any) => c.name.toLowerCase() === 'bills')
 
     for (const tx of uncatTxs) {
+      const descUpper = (tx.description || '').toUpperCase()
+      const merchUpper = (tx.merchant || '').toUpperCase()
+      const fullText = `${descUpper} ${merchUpper}`
+
+      // Gabriella / Up account transfers must remain in "Other" (uncategorized)
+      if (fullText.includes('GABRIELLA') || fullText.includes('UP ACCOUNT') || fullText.includes('UP BANK')) {
+        continue
+      }
+
       // Income detection
       if (tx.amount > 0 && !tx.is_transfer && incomeCat) {
         ruleResults.push({ id: tx.id, category_id: incomeCat.id })

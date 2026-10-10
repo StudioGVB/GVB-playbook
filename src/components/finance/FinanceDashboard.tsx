@@ -332,7 +332,7 @@ export function FinanceDashboard() {
       .filter(tx => {
         if (tx.amount <= 0 || tx.is_transfer) return false;
         const desc = `${(tx.merchant || '').toLowerCase()} ${(tx.description || '').toLowerCase()}`;
-        return desc.includes('back pocket') || desc.includes('bpg') || desc.includes('games');
+        return desc.includes('back pocket') || desc.includes('bpg');
       })
       .reduce((sum, tx) => sum + baseAmt(tx), 0);
   }, [finance.transactions]);

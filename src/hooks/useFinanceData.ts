@@ -1017,7 +1017,7 @@ export function useFinanceDataState() {
       }
 
       // Repair pass: Flag savings transfers as transfers, strip HTML tags, fix £3k deposit sign & link Gamma / Venture correctly
-      const incomeCat = categories.find(c => c.type === 'income' || c.name.toLowerCase() === 'income');
+      const genericIncomeCat = categories.find(c => c.name.toLowerCase() === 'income');
       const gammaCat = categories.find(c => c.type === 'income' && c.name.toLowerCase().includes('gamma'));
       const ventureCat = categories.find(c => c.type === 'income' && (c.name.toLowerCase().includes('venture') || c.name.toLowerCase().includes('advisory')));
       const rentCat = categories.find(c => c.name.toLowerCase() === 'rent');
@@ -1045,6 +1045,8 @@ export function useFinanceDataState() {
         const merchUpper = (cleanMerch || '').toUpperCase();
         const fullText = `${descUpper} ${merchUpper}`;
 
+        const isGabriellaOrUp = fullText.includes('GABRIELLA') || fullText.includes('UP ACCOUNT') || fullText.includes('UP BANK');
+
         // Flag internal transfers from savings
         const isSavingsTransfer = fullText.includes('TRANSFER FROM SAVINGS') || fullText.includes('SAVINGS TRANSFER') || fullText.includes('TRANSFER FROM') || fullText.includes('TRANSFER TO SAVINGS');
         if (isSavingsTransfer) {
@@ -1064,7 +1066,15 @@ export function useFinanceDataState() {
 
         // Income auto-categorization
         if (targetAmount > 0 && !isSavingsTransfer) {
-          if (fullText.includes('GAMMA')) {
+          if (isGabriellaOrUp) {
+            // Gabriella / Up account incoming money -> keep category_id null so it goes to "Other" (uncategorized)
+            if (t.category_id !== null || t.is_transfer) {
+              await supabase.from('finance_transactions').update({
+                is_transfer: false,
+                category_id: null,
+              }).eq('id', t.id);
+            }
+          } else if (fullText.includes('GAMMA')) {
             if (gammaCat && t.category_id !== gammaCat.id) {
               await supabase.from('finance_transactions').update({
                 is_transfer: false,
@@ -1078,10 +1088,10 @@ export function useFinanceDataState() {
                 category_id: ventureCat.id,
               }).eq('id', t.id);
             }
-          } else if (t.is_transfer || (incomeCat && !t.category_id)) {
+          } else if (t.is_transfer || (genericIncomeCat && !t.category_id)) {
             await supabase.from('finance_transactions').update({
               is_transfer: false,
-              category_id: incomeCat?.id || t.category_id,
+              category_id: genericIncomeCat?.id || null,
             }).eq('id', t.id);
           }
         }

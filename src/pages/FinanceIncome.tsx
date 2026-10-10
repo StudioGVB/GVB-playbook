@@ -218,6 +218,20 @@ export default function FinanceIncome() {
       .sort((a, b) => b.value - a.value);
   }, [BUCKETS, bucketed, grandTotalWithReimbursements]);
 
+  const sortedBuckets = useMemo(() => {
+    return [...BUCKETS].sort((a, b) => {
+      const totalA = bucketed[a.key]?.total || 0;
+      const totalB = bucketed[b.key]?.total || 0;
+      if (totalB !== totalA) {
+        return totalB - totalA;
+      }
+      const countA = bucketed[a.key]?.count || 0;
+      const countB = bucketed[b.key]?.count || 0;
+      if (countB !== countA) return countB - countA;
+      return a.label.localeCompare(b.label);
+    });
+  }, [BUCKETS, bucketed]);
+
   const handleAssignTx = async (txId: string, categoryId: string | null) => {
     const updateData: any = { category_id: categoryId };
     if (categoryId) {
