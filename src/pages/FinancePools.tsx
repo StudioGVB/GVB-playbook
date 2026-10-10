@@ -226,10 +226,10 @@ export default function FinancePoolsPage() {
       transactions: finance.transactions,
       categories: finance.categories,
       fixedMonthlyExpenses: fixedMonthlyTotal,
-      weeklyVariableBudget: (assumptions?.weekly_fun_budget || 100) + (assumptions?.weekly_essential_budget || 50),
+      weeklyVariableBudget: essentialVariable / 4.33,
       convertToBase: finance.convertToBase,
     });
-  }, [newAmount, newCurrency, newDeadline, newStartDate, newName, finance.goals, finance.transactions, finance.categories, fixedMonthlyTotal, assumptions, finance.convertToBase]);
+  }, [newAmount, newCurrency, newDeadline, newStartDate, newName, finance.goals, finance.transactions, finance.categories, fixedMonthlyTotal, essentialVariable, assumptions, finance.convertToBase]);
 
   const editFeasibility = useMemo(() => {
     const targetVal = finance.convertToBase(parseFloat(editTarget) || 0, editCurrency);
@@ -246,10 +246,10 @@ export default function FinancePoolsPage() {
       transactions: finance.transactions,
       categories: finance.categories,
       fixedMonthlyExpenses: fixedMonthlyTotal,
-      weeklyVariableBudget: (assumptions?.weekly_fun_budget || 100) + (assumptions?.weekly_essential_budget || 50),
+      weeklyVariableBudget: essentialVariable / 4.33,
       convertToBase: finance.convertToBase,
     });
-  }, [editTarget, editCurrency, editDeadline, editStartDate, editGoalId, finance.goals, finance.transactions, finance.categories, fixedMonthlyTotal, assumptions, finance.convertToBase]);
+  }, [editTarget, editCurrency, editDeadline, editStartDate, editGoalId, finance.goals, finance.transactions, finance.categories, fixedMonthlyTotal, essentialVariable, assumptions, finance.convertToBase]);
 
   const emergencyGoalAssigned = useMemo(() => {
     if (!emergencyGoal) return 0;
@@ -1055,7 +1055,7 @@ export default function FinancePoolsPage() {
                           transactions: finance.transactions,
                           categories: finance.categories,
                           fixedMonthlyExpenses: fixedMonthlyTotal,
-                          weeklyVariableBudget: (assumptions?.weekly_fun_budget || 100) + (assumptions?.weekly_essential_budget || 50),
+                          weeklyVariableBudget: essentialVariable / 4.33,
                           convertToBase: finance.convertToBase,
                         }) : null;
 
