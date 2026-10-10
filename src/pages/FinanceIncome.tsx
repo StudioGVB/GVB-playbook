@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { format, startOfMonth, endOfMonth, addMonths } from 'date-fns';
-import { ChevronLeft, ChevronRight, TrendingUp, DollarSign, Tag, X, Briefcase, HelpCircle, Home, Download, CheckCircle2, Clock, FileText, Check, ArrowRightLeft } from 'lucide-react';
+import { ChevronLeft, ChevronRight, TrendingUp, DollarSign, Tag, X, Briefcase, HelpCircle, Home, Download, CheckCircle2, Clock, FileText, Check, ArrowRightLeft, PieChart } from 'lucide-react';
+import { PieChart as RePieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 import { useFinanceData } from '@/hooks/useFinanceData';
 import { useFixedExpenses } from '@/hooks/useFixedExpenses';
 import { baseAmt, formatCurrency, formatUkDate } from '@/lib/financeUtils';
@@ -200,6 +201,22 @@ export default function FinanceIncome() {
     return map;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [incomeTxs, BUCKETS, monthStart, reimbursementsOn]);
+
+  const pieData = useMemo(() => {
+    return BUCKETS.map(b => {
+      const amount = bucketed[b.key]?.total || 0;
+      return {
+        key: b.key,
+        name: b.label,
+        value: amount,
+        color: b.accent,
+        count: bucketed[b.key]?.count || 0,
+        percentage: grandTotalWithReimbursements > 0 ? (amount / grandTotalWithReimbursements) * 100 : 0,
+      };
+    })
+      .filter(item => item.value > 0)
+      .sort((a, b) => b.value - a.value);
+  }, [BUCKETS, bucketed, grandTotalWithReimbursements]);
 
   const handleAssignTx = async (txId: string, categoryId: string | null) => {
     const updateData: any = { category_id: categoryId };

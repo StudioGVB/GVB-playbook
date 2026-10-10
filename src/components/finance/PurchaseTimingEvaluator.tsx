@@ -86,10 +86,16 @@ export default function PurchaseTimingEvaluator({
 
   const {
     weeklyFunBudget,
-    remainingWeeklyFun,
+    weeklyEssentialBudget,
+    spentThisWeek,
+    essentialSpentThisWeek,
     emergencyFloor,
     availableSavings
   } = snapshot;
+
+  const totalWeeklyBudget = weeklyEssentialBudget + weeklyFunBudget;
+  const totalWeeklySpent = essentialSpentThisWeek + spentThisWeek;
+  const remainingWeeklyBudget = totalWeeklyBudget - totalWeeklySpent;
 
   const [itemTitle, setItemTitle] = useState('Lip Filler');
   const [itemAmount, setItemAmount] = useState<number | ''>(80);
@@ -122,40 +128,40 @@ export default function PurchaseTimingEvaluator({
         status: 'neutral' as const,
         verdict: 'Enter an amount',
         headline: 'Financial Readiness Evaluator',
-        advice: 'Enter an item title and cost to run an instant AI evaluation against your live fun budget, emergency floor, and upcoming bills.',
+        advice: 'Enter an item title and cost to run an instant AI evaluation against your live weekly budget, emergency floor, and upcoming bills.',
         weeksToWait: 0,
         targetDate: new Date(),
-        percentOfFunBudget: 0,
-        weeklyFunRemainingAfter: remainingWeeklyFun,
+        percentOfWeeklyBudget: 0,
+        weeklyBudgetRemainingAfter: remainingWeeklyBudget,
         impactOnSafety: 'safe' as const,
         weeklySavingsPace: 0,
       };
     }
 
-    const funRemaining = Math.max(0, remainingWeeklyFun);
-    const weeklyFun = Math.max(1, weeklyFunBudget);
-    const percentOfFun = Math.round((parsedAmount / weeklyFun) * 100);
+    const budgetRemaining = Math.max(0, remainingWeeklyBudget);
+    const weeklyBudget = Math.max(1, totalWeeklyBudget);
+    const percentOfBudget = Math.round((parsedAmount / weeklyBudget) * 100);
 
-    // Case 1: Ready to buy now out of remaining fun budget
-    if (parsedAmount <= remainingWeeklyFun) {
-      const remainingAfter = remainingWeeklyFun - parsedAmount;
+    // Case 1: Ready to buy now out of remaining weekly budget
+    if (parsedAmount <= remainingWeeklyBudget) {
+      const remainingAfter = remainingWeeklyBudget - parsedAmount;
       return {
         status: 'ready' as const,
         verdict: 'Financially Ready 🟢',
         headline: `You can buy ${itemTitle ? `"${itemTitle}"` : 'this'} today!`,
-        advice: `${itemTitle ? `"${itemTitle}"` : 'This purchase'} (${fmt(parsedAmount)}) fits fully inside your remaining fun money for this week. You will still have ${fmt(remainingAfter)} left for the rest of the week without dipping into savings.`,
+        advice: `${itemTitle ? `"${itemTitle}"` : 'This purchase'} (${fmt(parsedAmount)}) fits fully inside your remaining safe-to-spend weekly budget. You will still have ${fmt(remainingAfter)} left for the rest of the week without dipping into savings.`,
         weeksToWait: 0,
         targetDate: new Date(),
-        percentOfFunBudget: percentOfFun,
-        weeklyFunRemainingAfter: remainingAfter,
+        percentOfWeeklyBudget: percentOfBudget,
+        weeklyBudgetRemainingAfter: remainingAfter,
         impactOnSafety: 'safe' as const,
         weeklySavingsPace: parsedAmount,
       };
     }
 
     // Case 2: Safe in X weeks
-    const excess = parsedAmount - funRemaining;
-    const weeksToWait = Math.max(1, Math.ceil(excess / weeklyFun));
+    const excess = parsedAmount - budgetRemaining;
+    const weeksToWait = Math.max(1, Math.ceil(excess / weeklyBudget));
     const targetDate = addWeeks(new Date(), weeksToWait);
     const weeklyPace = Math.ceil(parsedAmount / weeksToWait);
 
@@ -166,11 +172,11 @@ export default function PurchaseTimingEvaluator({
         status: 'wait' as const,
         verdict: `Safe to Buy in ${weeksToWait} Week${weeksToWait > 1 ? 's' : ''} 🟡`,
         headline: `AI Recommendation: Wait ${weeksToWait} week${weeksToWait > 1 ? 's' : ''} (Ready around ${format(targetDate, 'EEEE, MMM d')})`,
-        advice: `Buying ${itemTitle ? `"${itemTitle}"` : 'this'} (${fmt(parsedAmount)}) today will exceed your fun budget this week by ${fmt(excess)}. However, your core emergency floor of ${fmt(emergencyFloor)} remains safe. Setting aside ${fmt(weeklyPace)}/week over the next ${weeksToWait} week${weeksToWait > 1 ? 's' : ''} allows you to buy it guilt-free on ${format(targetDate, 'MMM d')}.`,
+        advice: `Buying ${itemTitle ? `"${itemTitle}"` : 'this'} (${fmt(parsedAmount)}) today will exceed your weekly budget by ${fmt(excess)}. However, your core emergency floor of ${fmt(emergencyFloor)} remains safe. Setting aside ${fmt(weeklyPace)}/week over the next ${weeksToWait} week${weeksToWait > 1 ? 's' : ''} allows you to buy it guilt-free on ${format(targetDate, 'MMM d')}.`,
         weeksToWait,
         targetDate,
-        percentOfFunBudget: percentOfFun,
-        weeklyFunRemainingAfter: 0,
+        percentOfWeeklyBudget: percentOfBudget,
+        weeklyBudgetRemainingAfter: 0,
         impactOnSafety: 'moderate' as const,
         weeklySavingsPace: weeklyPace,
       };
@@ -184,12 +190,12 @@ export default function PurchaseTimingEvaluator({
       advice: `${itemTitle ? `"${itemTitle}"` : 'This purchase'} of ${fmt(parsedAmount)} exceeds your liquid cash cushion above your emergency floor (${fmt(emergencyFloor)}). Making this purchase today would compromise your emergency safety net. AI strongly advises delaying until your liquid reserves build back up.`,
       weeksToWait: weeksToWait + 2,
       targetDate: addWeeks(new Date(), weeksToWait + 2),
-      percentOfFunBudget: percentOfFun,
-      weeklyFunRemainingAfter: 0,
+      percentOfWeeklyBudget: percentOfBudget,
+      weeklyBudgetRemainingAfter: 0,
       impactOnSafety: 'danger' as const,
       weeklySavingsPace: Math.ceil(parsedAmount / (weeksToWait + 2)),
     };
-  }, [parsedAmount, remainingWeeklyFun, weeklyFunBudget, availableSavings, emergencyFloor, itemTitle, fmt]);
+  }, [parsedAmount, remainingWeeklyBudget, totalWeeklyBudget, availableSavings, emergencyFloor, itemTitle, fmt]);
 
   const handleApplyPreset = (p: typeof PRESETS[0]) => {
     setItemTitle(p.title);
@@ -250,8 +256,8 @@ export default function PurchaseTimingEvaluator({
             <div className="flex items-center gap-2.5 self-start sm:self-auto bg-slate-50 dark:bg-slate-800/80 px-3.5 py-2 rounded-2xl border border-slate-200/60 dark:border-slate-700">
               <ShieldCheck className="w-4 h-4 text-emerald-500" />
               <div className="text-right">
-                <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 block">Weekly Fun Left</span>
-                <span className="text-sm font-black text-slate-900 dark:text-white">{fmt(remainingWeeklyFun)}</span>
+                <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 block">Weekly Safe to Spend</span>
+                <span className="text-sm font-black text-slate-900 dark:text-white">{fmt(remainingWeeklyBudget)}</span>
               </div>
             </div>
           </div>
@@ -385,15 +391,15 @@ export default function PurchaseTimingEvaluator({
               {/* Metrics Grid */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
                 <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200/60 dark:border-slate-800 shadow-sm">
-                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Fun Budget Impact</span>
-                  <span className="text-xl font-black text-slate-900 dark:text-white mt-1 block">{evaluation.percentOfFunBudget}%</span>
-                  <span className="text-[11px] text-slate-500 block">of weekly fun budget</span>
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Weekly Budget Impact</span>
+                  <span className="text-xl font-black text-slate-900 dark:text-white mt-1 block">{evaluation.percentOfWeeklyBudget}%</span>
+                  <span className="text-[11px] text-slate-500 block">of weekly budget</span>
                 </div>
 
                 <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200/60 dark:border-slate-800 shadow-sm">
-                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Remaining Fun</span>
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Remaining Budget</span>
                   <span className="text-xl font-black text-slate-900 dark:text-white mt-1 block">
-                    {fmt(evaluation.weeklyFunRemainingAfter)}
+                    {fmt(evaluation.weeklyBudgetRemainingAfter)}
                   </span>
                   <span className="text-[11px] text-slate-500 block">left for this week</span>
                 </div>
@@ -430,15 +436,15 @@ export default function PurchaseTimingEvaluator({
                   <div className="w-full bg-slate-100 dark:bg-slate-800 rounded-full h-2.5 overflow-hidden flex">
                     <div
                       className="bg-emerald-500 h-full transition-all duration-500"
-                      style={{ width: `${Math.min(100, Math.max(10, (remainingWeeklyFun / parsedAmount) * 100))}%` }}
+                      style={{ width: `${Math.min(100, Math.max(10, (remainingWeeklyBudget / parsedAmount) * 100))}%` }}
                     />
                     <div
                       className="bg-amber-400/80 h-full transition-all duration-500"
-                      style={{ width: `${Math.max(0, 100 - Math.min(100, (remainingWeeklyFun / parsedAmount) * 100))}%` }}
+                      style={{ width: `${Math.max(0, 100 - Math.min(100, (remainingWeeklyBudget / parsedAmount) * 100))}%` }}
                     />
                   </div>
                   <div className="flex justify-between text-[11px] text-slate-500 font-medium">
-                    <span>Today: {fmt(Math.max(0, remainingWeeklyFun))} available</span>
+                    <span>Today: {fmt(Math.max(0, remainingWeeklyBudget))} available</span>
                     <span>Target: {format(evaluation.targetDate, 'MMM d')} ({fmt(parsedAmount)})</span>
                   </div>
                 </div>
