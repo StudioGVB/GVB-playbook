@@ -44,6 +44,24 @@ export default function FinanceAccountsPage({ defaultTab }: { defaultTab?: strin
   const navigate = useNavigate();
   const finance = useFinanceData();
   const { assumptions, loading: assumptionsLoading, update: updateAssumptions } = useFinanceAssumptions();
+  const { monthlyTotalInternal: fixedMonthlyTotal, monthlyTotal: fixedMonthlyTotalAll } = useFixedExpenses();
+  const { weekTypeMap } = useWeekTypes();
+  const wtMap = useMemo(() => weekTypeMap(), [weekTypeMap]);
+
+  const snapshot = useMemo(() => {
+    if (!assumptions) return null;
+    return computePolicySnapshot(
+      finance.accounts,
+      finance.goals,
+      assumptions,
+      finance.transactions,
+      finance.categories,
+      fixedMonthlyTotal,
+      fixedMonthlyTotalAll,
+      finance.convertToBase,
+      wtMap
+    );
+  }, [assumptions, finance, fixedMonthlyTotal, fixedMonthlyTotalAll, wtMap]);
 
   const activeTab = useMemo(() => {
     if (defaultTab) return defaultTab;
