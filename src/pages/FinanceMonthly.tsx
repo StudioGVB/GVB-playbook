@@ -255,17 +255,36 @@ export default function FinanceMonthly() {
   const netProfit = incomeTotal - totalSpent;
   const savingsRate = incomeTotal > 0 ? (netProfit / incomeTotal) * 100 : 0;
 
+  // Pace projection (only meaningful for current month)
+  const today = new Date();
+  const isCurrentMonth = today >= monthStart && today <= monthEnd;
+  const daysInMonth = getDaysInMonth(monthStart);
+  const daysElapsed = isCurrentMonth ? getDate(today) : daysInMonth;
+  const daysRemaining = Math.max(0, daysInMonth - daysElapsed);
+  const variableSpent = essentialSpent + funSpent;
+  const dailyVariablePace = daysElapsed > 0 ? variableSpent / daysElapsed : 0;
+  const projectedVariableSpend = dailyVariablePace * daysInMonth;
+  const projectedSpend = projectedVariableSpend + fixedMonthly;
+  const projectedDiff = projectedSpend - monthlyTotalBudget; // positive => over
+  const spendPct = monthlyTotalBudget > 0 ? (totalSpent / monthlyTotalBudget) * 100 : 0;
+  const timePct = (daysElapsed / daysInMonth) * 100;
+
+  // Effective spending for peer benchmark comparison:
+  // For current active month, use projected full-month pace so comparison is 1:1 proportional (full month vs full month).
+  const effectiveSpent = isCurrentMonth ? projectedSpend : totalSpent;
+  const effectiveNetProfit = incomeTotal - effectiveSpent;
+
   const selectedBenchmark = useMemo(() => (
     MONTHLY_PEER_BENCHMARKS.find(b => b.id === selectedBenchmarkId) || MONTHLY_PEER_BENCHMARKS[0]
   ), [selectedBenchmarkId]);
 
-  const diffProfit = netProfit - selectedBenchmark.monthlySavings;
-  const diffExpenses = selectedBenchmark.monthlyExpenses - totalSpent; // positive = spending less than benchmark!
+  const diffProfit = effectiveNetProfit - selectedBenchmark.monthlySavings;
+  const diffExpenses = selectedBenchmark.monthlyExpenses - effectiveSpent; // positive = spending less than benchmark!
   const annualizedNetProfit = netProfit * 12;
 
   const incomeDiffPct = selectedBenchmark.monthlyIncome > 0 ? ((incomeTotal - selectedBenchmark.monthlyIncome) / selectedBenchmark.monthlyIncome) * 100 : 0;
-  const spendingDiffPct = selectedBenchmark.monthlyExpenses > 0 ? ((totalSpent - selectedBenchmark.monthlyExpenses) / selectedBenchmark.monthlyExpenses) * 100 : 0;
-  const netProfitDiffPct = selectedBenchmark.monthlySavings > 0 ? ((netProfit - selectedBenchmark.monthlySavings) / selectedBenchmark.monthlySavings) * 100 : 0;
+  const spendingDiffPct = selectedBenchmark.monthlyExpenses > 0 ? ((effectiveSpent - selectedBenchmark.monthlyExpenses) / selectedBenchmark.monthlyExpenses) * 100 : 0;
+  const netProfitDiffPct = selectedBenchmark.monthlySavings > 0 ? ((effectiveNetProfit - selectedBenchmark.monthlySavings) / selectedBenchmark.monthlySavings) * 100 : 0;
 
   const { percentileLabel, percentileRank } = useMemo(() => {
     const p = netProfit;
@@ -309,20 +328,6 @@ export default function FinanceMonthly() {
   }, [prevMonthTxns, catMap, essentialCatIds, isFixedTx]);
 
   const netBudget = monthlyTotalBudget - totalSpent;
-
-  // Pace projection (only meaningful for current month)
-  const today = new Date();
-  const isCurrentMonth = today >= monthStart && today <= monthEnd;
-  const daysInMonth = getDaysInMonth(monthStart);
-  const daysElapsed = isCurrentMonth ? getDate(today) : daysInMonth;
-  const daysRemaining = Math.max(0, daysInMonth - daysElapsed);
-  const variableSpent = essentialSpent + funSpent;
-  const dailyVariablePace = daysElapsed > 0 ? variableSpent / daysElapsed : 0;
-  const projectedVariableSpend = dailyVariablePace * daysInMonth;
-  const projectedSpend = projectedVariableSpend + fixedMonthly;
-  const projectedDiff = projectedSpend - monthlyTotalBudget; // positive => over
-  const spendPct = monthlyTotalBudget > 0 ? (totalSpent / monthlyTotalBudget) * 100 : 0;
-  const timePct = (daysElapsed / daysInMonth) * 100;
 
   // Pro-rated comparison scaling for month-to-date (e.g. Day 11 of 30 vs Day 11 of 31)
   const daysInPrevMonth = useMemo(() => getDaysInMonth(prevMonthStart), [prevMonthStart]);
