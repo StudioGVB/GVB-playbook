@@ -674,10 +674,16 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
             const accent = getRowAccent(tx, cat);
             const isBillCategorized = (tx.is_fixed || cat?.type === 'fixed') && !assignedFixedExpense;
 
+            const isIncome = tx.amount > 0;
+
             return (
               <div
                 key={tx.id}
-                className="relative flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-4 py-2.5 px-4 rounded-2xl border border-slate-100 bg-white hover:bg-slate-50/80 transition-all overflow-hidden"
+                className={`relative flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-4 py-2.5 px-4 rounded-2xl border transition-all overflow-hidden ${
+                  isIncome
+                    ? 'bg-emerald-50/70 hover:bg-emerald-100/70 border-emerald-200/80 dark:bg-emerald-950/25 dark:border-emerald-900/40'
+                    : 'bg-white hover:bg-slate-50/80 border-slate-100'
+                }`}
                 style={{ boxShadow: `inset 4px 0 0 0 ${accent}` }}
               >
                 {/* Left: Description & Metadata */}

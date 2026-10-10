@@ -11,6 +11,9 @@ import { ArrowUpRight, Wallet, Sparkles, Settings2, TrendingUp, Plus, Trash2, Br
 import { Badge } from '@/components/ui/badge';
 import { useFinanceData } from '@/hooks/useFinanceData';
 import { useFinanceAssumptions } from '@/hooks/useFinanceAssumptions';
+import { useFixedExpenses } from '@/hooks/useFixedExpenses';
+import { useWeekTypes } from '@/hooks/useWeekTypes';
+import { computePolicySnapshot } from '@/lib/policyEngine';
 import { formatCurrency } from '@/lib/financeUtils';
 import FinanceSettingsPanel from '@/components/finance/FinanceSettingsPanel';
 import FinanceAccountsComponent from '@/components/finance/FinanceAccounts';
