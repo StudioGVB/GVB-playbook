@@ -76,6 +76,19 @@ const LIVING_POOL = '__living_pool__';
 const EMERGENCY_VIRTUAL = '__emergency_virtual__';
 const isVirtualPool = (id: PoolId) => id === UNALLOCATED || id === LIVING_POOL || id === EMERGENCY_VIRTUAL;
 
+interface CapOverflowInfo {
+  goalId: string | null;
+  isEmergencyVirtual?: boolean;
+  goalName: string;
+  currency: string;
+  currentAssignedNative: number;
+  currentTargetNative: number;
+  deltaNative: number;
+  newTargetNative: number;
+  moveValBase: number;
+  sourceLabel: string;
+}
+
 export default function FinancePoolsPage() {
   const finance = useFinanceData();
   const { assumptions, loading: assumptionsLoading } = useFinanceAssumptions();
@@ -109,6 +122,10 @@ export default function FinancePoolsPage() {
   const [moveFrom, setMoveFrom] = useState<PoolId>('');
   const [moveTo, setMoveTo] = useState<PoolId>('');
   const [moveAmount, setMoveAmount] = useState('');
+  // Capacity overflow dialog
+  const [capOverflowOpen, setCapOverflowOpen] = useState(false);
+  const [capOverflowData, setCapOverflowData] = useState<CapOverflowInfo | null>(null);
+  const [customNewTarget, setCustomNewTarget] = useState<string>('');
   // Edit goal dialog
   const [editOpen, setEditOpen] = useState(false);
   const [editGoalId, setEditGoalId] = useState<string | null>(null);
@@ -223,7 +240,7 @@ export default function FinancePoolsPage() {
   // Build pool options for the move dialog
   const poolOptions: { id: PoolId; label: string; available: number; cap?: number }[] = useMemo(() => {
     const opts: { id: PoolId; label: string; available: number; cap?: number }[] = [];
-    opts.push({ id: UNALLOCATED, label: 'Fun Money', available: funMoney });
+    opts.push({ id: UNALLOCATED, label: 'Unallocated Spendable Cash', available: funMoney });
     // Living Pool (free savings)
     if (livingRemainder > funMoney + 0.01) {
       opts.push({
@@ -495,7 +512,7 @@ export default function FinancePoolsPage() {
     setNewName(''); setNewDescription(''); setNewAmount(''); setNewColor(POOL_COLORS[0]); setNewPercentAllocation('0'); setNewStartDate(''); setNewDeadline(''); setCreateOpen(false);
   };
 
-  const handleMoveFunds = async () => {
+  const handleMoveFunds = async (bypassCapCheck = false) => {
     const val = parseFloat(moveAmount);
     if (!moveFrom || !moveTo || moveFrom === moveTo || isNaN(val) || val <= 0) {
       toast.error('Please select two different pools and enter an amount');
@@ -509,24 +526,61 @@ export default function FinancePoolsPage() {
       return;
     }
 
-    // val is in base currency; check destination cap in base too
-    const dest = poolOptions.find(p => p.id === moveTo);
-    if (dest && !isVirtualPool(dest.id) && dest.cap !== undefined) {
-      const destGoal = finance.goals.find(g => g.id === dest.id);
-      const currentAssignedBase = destGoal
-        ? finance.convertToBase(destGoal.assigned_amount || 0, destGoal.currency)
-        : 0;
-      if (currentAssignedBase + val > dest.cap) {
-        toast.error(`Would exceed ${dest.label}'s target of ${fmt(dest.cap)}`);
-        return;
-      }
-    }
-
     // Helper: convert base-currency amount back to a goal's native currency
     const toGoalCurrency = (baseAmt: number, currency: string) => {
       const oneInBase = finance.convertToBase(1, currency);
       return oneInBase === 0 ? baseAmt : baseAmt / oneInBase;
     };
+
+    const dest = poolOptions.find(p => p.id === moveTo);
+    const destGoal = !isVirtualPool(moveTo) ? finance.goals.find(g => g.id === moveTo) : null;
+
+    if (!bypassCapCheck) {
+      if (destGoal) {
+        const deltaNative = toGoalCurrency(val, destGoal.currency);
+        const currentAssignedNative = destGoal.assigned_amount || 0;
+        const newAssignedNative = currentAssignedNative + deltaNative;
+        const targetNative = destGoal.target_amount || 0;
+
+        if (newAssignedNative > targetNative + 0.001) {
+          const calculatedNewTarget = Math.round(newAssignedNative * 100) / 100;
+          setCapOverflowData({
+            goalId: destGoal.id,
+            goalName: destGoal.name,
+            currency: destGoal.currency,
+            currentAssignedNative,
+            currentTargetNative: targetNative,
+            deltaNative,
+            newTargetNative: calculatedNewTarget,
+            moveValBase: val,
+            sourceLabel: source?.label || '',
+          });
+          setCustomNewTarget(String(calculatedNewTarget));
+          setCapOverflowOpen(true);
+          return;
+        }
+      } else if (moveTo === EMERGENCY_VIRTUAL || (emergencyGoal && moveTo === emergencyGoal.id)) {
+        const currentEmAssigned = emergencyGoal ? (emergencyGoal.assigned_amount || 0) : currentEmergencyFunded;
+        if (currentEmAssigned + val > emergencyFloor + 0.001) {
+          const calculatedNewTarget = Math.round((currentEmAssigned + val) * 100) / 100;
+          setCapOverflowData({
+            goalId: emergencyGoal ? emergencyGoal.id : null,
+            isEmergencyVirtual: !emergencyGoal,
+            goalName: 'Emergency Reserve',
+            currency: baseCurrency,
+            currentAssignedNative: currentEmAssigned,
+            currentTargetNative: emergencyFloor,
+            deltaNative: val,
+            newTargetNative: calculatedNewTarget,
+            moveValBase: val,
+            sourceLabel: source?.label || '',
+          });
+          setCustomNewTarget(String(calculatedNewTarget));
+          setCapOverflowOpen(true);
+          return;
+        }
+      }
+    }
 
     // Execute: decrease source, increase destination
     const updates: Promise<any>[] = [];
@@ -572,6 +626,43 @@ export default function FinancePoolsPage() {
     setMoveFrom('');
     setMoveTo('');
     setMoveAmount('');
+  };
+
+  const handleConfirmCapOverflow = async () => {
+    if (!capOverflowData) return;
+    const targetVal = parseFloat(customNewTarget) || capOverflowData.newTargetNative;
+    if (targetVal < capOverflowData.newTargetNative) {
+      toast.error(`Goal amount must be at least ${formatCurrency(capOverflowData.newTargetNative, capOverflowData.currency)} to accommodate this transfer.`);
+      return;
+    }
+
+    const { goalId, isEmergencyVirtual, goalName, currency } = capOverflowData;
+
+    try {
+      if (goalId) {
+        await finance.updateGoal(goalId, {
+          target_amount: targetVal,
+        } as any);
+      } else if (isEmergencyVirtual) {
+        await finance.addGoal({
+          name: 'Emergency Reserve',
+          target_amount: targetVal,
+          currency: baseCurrency,
+          priority: 1,
+          safety_mode: 'balanced',
+          assigned_amount: 0,
+          color: '#ef6b6b',
+          is_emergency: true,
+        } as any);
+      }
+
+      setCapOverflowOpen(false);
+      await handleMoveFunds(true);
+      toast.success(`Goal for ${goalName} updated to ${formatCurrency(targetVal, currency)}!`);
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to update goal amount');
+    }
   };
 
   if (finance.loading || assumptionsLoading) {
@@ -921,13 +1012,15 @@ export default function FinancePoolsPage() {
 
                 <div className="flex items-center justify-between text-sm">
                   <span className="flex items-center gap-2 font-bold text-[#FF2EB8]">
-                    <span className="w-2 h-2 rounded-full bg-[#FFB8E6] flex-shrink-0" />
-                    💰 Fun Money
+                    <span className="w-2 h-2 rounded-full bg-[#FF2EB8] flex-shrink-0" />
+                    ⚡ Weekly Safe-to-Spend Allowance
                   </span>
-                  <span className="font-extrabold text-[#FF2EB8] text-xl">{fmt(funMoney)}</span>
+                  <span className="font-extrabold text-[#FF2EB8] text-xl">
+                    {fmt((snapshot?.weeklyEssentialBudget ?? 0) + (snapshot?.weeklyFunBudget ?? 0))}/wk
+                  </span>
                 </div>
                 <p className="text-[11px] text-slate-500 font-medium ml-4 -mt-2">
-                  {fmt(weeklyFromRemainder)}/wk — your weekly discretionary budget
+                  Calculated weekly budget for all variable &amp; discretionary spending
                 </p>
               </div>
             </div>
@@ -1386,15 +1479,7 @@ export default function FinancePoolsPage() {
                   onClick={() => {
                     const source = poolOptions.find(p => p.id === moveFrom);
                     if (source) {
-                      // If dest has a cap, clamp to remaining room
-                      let max = source.available;
-                      if (moveTo && !isVirtualPool(moveTo)) {
-                        const dest = poolOptions.find(p => p.id === moveTo);
-                        if (dest?.cap !== undefined) {
-                          max = Math.min(max, dest.cap - dest.available);
-                        }
-                      }
-                      setMoveAmount(String(Math.max(0, max)));
+                      setMoveAmount(String(source.available));
                     }
                   }}
                 >
@@ -1418,12 +1503,62 @@ export default function FinancePoolsPage() {
               </div>
             )}
 
-            <Button onClick={handleMoveFunds} className="w-full" disabled={!moveFrom || !moveTo || !moveAmount}>
+            <Button onClick={() => handleMoveFunds(false)} className="w-full" disabled={!moveFrom || !moveTo || !moveAmount}>
               Move {moveAmount ? fmt(parseFloat(moveAmount) || 0) : 'Funds'}
             </Button>
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Capacity Overflow Confirmation Modal */}
+      <AlertDialog open={capOverflowOpen} onOpenChange={setCapOverflowOpen}>
+        <AlertDialogContent className="sm:max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-slate-900 font-display">
+              <AlertCircle className="w-5 h-5 text-amber-500" /> Do you want to change your goal amount?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="space-y-3 pt-2 text-slate-600 font-body text-sm">
+              {capOverflowData && (
+                <>
+                  <p>
+                    <strong>{capOverflowData.goalName}</strong> is currently at or near its target capacity of{' '}
+                    <span className="font-semibold text-slate-900">{formatCurrency(capOverflowData.currentTargetNative, capOverflowData.currency)}</span>.
+                  </p>
+                  <p>
+                    Transferring <strong>{formatCurrency(capOverflowData.deltaNative, capOverflowData.currency)}</strong> will bring the total saved in this pot to{' '}
+                    <span className="font-semibold text-slate-900">{formatCurrency(capOverflowData.currentAssignedNative + capOverflowData.deltaNative, capOverflowData.currency)}</span>.
+                  </p>
+                  <div className="p-3 bg-amber-50/80 border border-amber-200/80 rounded-xl text-xs text-amber-900 font-medium leading-relaxed">
+                    Would you like to increase your goal target amount to accommodate this transfer?
+                  </div>
+                  <div className="pt-1 space-y-1.5">
+                    <Label className="text-xs font-semibold text-slate-700">New Goal Target ({capOverflowData.currency})</Label>
+                    <Input
+                      type="number"
+                      step="any"
+                      value={customNewTarget}
+                      onChange={e => setCustomNewTarget(e.target.value)}
+                      placeholder={String(capOverflowData.newTargetNative)}
+                    />
+                  </div>
+                </>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="mt-4 flex gap-2 justify-end">
+            <AlertDialogCancel>No, Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={e => {
+                e.preventDefault();
+                handleConfirmCapOverflow();
+              }}
+              className="bg-[#FF2EB8] hover:bg-[#e026a2] text-white font-semibold"
+            >
+              Yes, Update Goal & Transfer
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

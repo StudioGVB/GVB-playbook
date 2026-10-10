@@ -94,8 +94,9 @@ export default function WeeklyPoolSavingsCard({ finance, spendablePool = 0, funM
   const totalWeeklyRequired = poolBreakdown.reduce((sum, item) => sum + item.weeklyRequiredBase, 0);
   const totalMonthlyRequired = totalWeeklyRequired * 4.33;
 
-  // True Safe-to-Spend (Fun money adjusted by deducting weekly pool savings)
-  const trueWeeklySafeToSpend = Math.max(0, (funMoney / 4.33) - totalWeeklyRequired);
+  // True Safe-to-Spend (Weekly safe-to-spend allowance adjusted by deducting weekly pool savings)
+  const weeklyBudget = (finance.assumptions?.weekly_fun_budget || 100) + (finance.assumptions?.weekly_essential_budget || 50);
+  const trueWeeklySafeToSpend = Math.max(0, weeklyBudget - totalWeeklyRequired);
   const activePoolsCount = poolBreakdown.filter(p => p.remainingBase > 0.01).length;
 
   // Execute 1-Click Weekly Transfer into Pools
