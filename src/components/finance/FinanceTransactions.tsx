@@ -759,13 +759,13 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                   const accent = getRowAccent(tx, cat);
                   const isBillCategorized = (tx.is_fixed || cat?.type === 'fixed') && !assignedFixedExpense;
 
-                  const isIncome = tx.amount > 0;
+                  const isRealIncome = tx.amount > 0 && !isTransfer && !isConfirmedTransfer && !transferStatus;
 
                   return (
                     <div
                       key={tx.id}
                       className={`relative flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-4 py-2.5 px-4 rounded-2xl border transition-all overflow-hidden ${
-                        isIncome
+                        isRealIncome
                           ? 'bg-emerald-50/70 hover:bg-emerald-100/70 border-emerald-200/80 dark:bg-emerald-950/25 dark:border-emerald-900/40'
                           : 'bg-white hover:bg-slate-50/80 border-slate-100'
                       }`}
@@ -837,10 +837,10 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                             </PopoverTrigger>
                             <PopoverContent className="w-48 p-2" align="end">
                               <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1.5 px-1">
-                                {tx.amount > 0 ? 'Assign Income Stream' : 'Assign Expense Category'}
+                                {isRealIncome ? 'Assign Income Stream' : 'Assign Expense Category'}
                               </p>
                               <div className="space-y-0.5 max-h-48 overflow-y-auto">
-                                {(tx.amount > 0 ? incomeCategoryOptions : expenseCategoryOptions).map(c => (
+                                {(isRealIncome ? incomeCategoryOptions : expenseCategoryOptions).map(c => (
                                   <button
                                     key={c.id}
                                     onClick={() => handleCategoryChange(tx.id, tx.category_id, c.id)}
@@ -868,15 +868,19 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                           </Popover>
                         </div>
 
-                        {/* Amount (Clean left-aligned column with clear right padding before action buttons) */}
+                        {/* Amount (Fixed width left-aligned column with + sign for real income) */}
                         <div className="w-24 sm:w-28 text-left shrink-0 pr-2">
-                          <p className={`text-xs sm:text-sm font-display font-bold tabular-nums ${tx.amount >= 0 ? 'text-[hsl(var(--success))]' : 'text-slate-900'}`}>
-                            {formatCurrency(tx.base_amount !== undefined && tx.base_amount !== null ? tx.base_amount : tx.amount, finance.settings?.base_currency || 'GBP')}
+                          <p className={`text-xs sm:text-sm font-display font-bold tabular-nums ${isRealIncome ? 'text-[hsl(var(--success))]' : 'text-slate-900'}`}>
+                            {(() => {
+                              const rawAmt = tx.base_amount !== undefined && tx.base_amount !== null ? tx.base_amount : tx.amount;
+                              const formatted = formatCurrency(rawAmt, finance.settings?.base_currency || 'GBP');
+                              return isRealIncome && !formatted.startsWith('+') ? `+${formatted}` : formatted;
+                            })()}
                           </p>
                         </div>
 
-                        {/* Action Icons Toolbar (Auto-fit width so buttons never overflow onto amount) */}
-                        <div className="flex items-center justify-end gap-1 shrink-0">
+                        {/* Action Icons Toolbar (Fixed width container so amount column stays pixel-aligned across all income and expense rows) */}
+                        <div className="w-24 sm:w-28 flex items-center justify-end gap-1 shrink-0">
                           {/* Pool assignment / refund flag */}
                           {tx.amount < 0 && goals.length > 0 ? (
                             <Popover>
