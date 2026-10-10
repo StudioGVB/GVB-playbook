@@ -1180,100 +1180,6 @@ export default function FinanceBudget() {
         </Card>
       </Collapsible>
 
-      {/* Runway Insight */}
-      {snapshot.isDrawdownMode && (
-        <Card className={`border ${snapshot.projectedEndBalance >= 0 ? 'border-emerald-500/30 bg-emerald-500/[0.03]' : 'border-destructive/30 bg-destructive/[0.03]'}`}>
-          <CardContent className="p-4">
-            <div className="flex items-start gap-3">
-              <Target className={`w-4 h-4 mt-0.5 ${snapshot.projectedEndBalance >= 0 ? 'text-emerald-600' : 'text-destructive'}`} />
-              <div>
-                <p className="text-sm font-semibold text-foreground">
-                  {snapshot.projectedEndBalance >= 0
-                    ? `If you follow this budget, you'll have ${fmt(snapshot.projectedEndBalance)} remaining when income starts`
-                    : `At current pace, you are projected to run out ${Math.ceil(Math.abs(snapshot.projectedEndBalance) / (snapshot.weeklyGross || 1))} weeks early`
-                  }
-                </p>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  {snapshot.weeksUntilIncomeStart !== null
-                    ? `${Math.ceil(snapshot.weeksUntilIncomeStart)} weeks until income starts`
-                    : `${Math.round(snapshot.weeksUntilIncome)} weeks of runway`}
-                </p>
-
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Runway Breakdown */}
-      <Card className="border-border/50">
-        <CardContent className="p-4 space-y-3">
-          <div className="flex items-center gap-2">
-            <Shield className="w-4 h-4 text-primary" />
-            <p className="text-sm font-semibold text-foreground">Runway Breakdown</p>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Based on what you <span className="font-semibold text-foreground">actually spend</span>, not what you budget
-          </p>
-          <p className="text-[11px] text-muted-foreground/80 -mt-1">
-            Uses all liquid accounts (not excluded from totals). Emergency fund is <span className="font-semibold text-foreground">included</span> in runway — it's a target, not a locked reserve. Only goal allocations are held back.
-          </p>
-          <div className="space-y-1.5 text-sm">
-            <RunwayRow label="Total liquid cash (all accounts incl. emergency)" value={fmt(snapshot.totalLiquidCash)} />
-            <RunwayRow label="Goal allocations reserved" value={`− ${fmt(snapshot.totalGoalAllocations)}`} muted />
-            <div className="border-t border-border/50 my-1" />
-            <RunwayRow label="Runway cash" value={fmt(Math.max(0, snapshot.totalLiquidCash - snapshot.totalGoalAllocations))} bold />
-
-            <div className="border-t border-border/50 my-1" />
-            <RunwayRow label="Actual weekly spend (4wk avg)" value={fmt(snapshot.actualWeeklyBurn)} bold />
-            {snapshot.actualWeeklyBurn > snapshot.totalWeeklyBurn * 1.05 && (
-              <RunwayRow
-                label={`Budgeted weekly burn: ${fmt(snapshot.totalWeeklyBurn)}`}
-                value={`+${fmt(snapshot.actualWeeklyBurn - snapshot.totalWeeklyBurn)} over`}
-                className="text-destructive"
-              />
-            )}
-            {snapshot.actualWeeklyBurn <= snapshot.totalWeeklyBurn && (
-              <RunwayRow
-                label={`Budgeted weekly burn: ${fmt(snapshot.totalWeeklyBurn)}`}
-                value={`${fmt(snapshot.totalWeeklyBurn - snapshot.actualWeeklyBurn)} under`}
-                className="text-[hsl(var(--success))]"
-              />
-            )}
-            <div className="border-t border-border/50 my-1" />
-            <RunwayRow
-              label={`${fmt(Math.max(0, snapshot.totalLiquidCash - snapshot.totalGoalAllocations))} ÷ ${fmt(snapshot.actualWeeklyBurn)}/wk`}
-              value={`= ${Math.floor(snapshot.runwayWeeks)} weeks`}
-              bold
-            />
-            <div className="flex justify-between items-center pt-1">
-              <span className="text-xs font-semibold text-foreground">
-                Runway until
-              </span>
-              <span className="text-xs font-bold text-primary">
-                {format(addWeeks(now, Math.floor(snapshot.runwayWeeks)), 'MMMM do, yyyy')}
-              </span>
-            </div>
-            {snapshot.incomeStartDate && snapshot.weeksUntilIncomeStart !== null && (
-              <>
-                <div className="flex justify-between text-xs text-muted-foreground/80 pt-0.5">
-                  <span>Job start (income begins)</span>
-                  <span>{format(snapshot.incomeStartDate, 'MMM do, yyyy')} · {Math.ceil(snapshot.weeksUntilIncomeStart)}w away</span>
-                </div>
-                <div className={`flex justify-between text-xs font-semibold pt-0.5 ${snapshot.runwayWeeks >= snapshot.weeksUntilIncomeStart ? 'text-[hsl(var(--success))]' : 'text-destructive'}`}>
-                  <span>{snapshot.runwayWeeks >= snapshot.weeksUntilIncomeStart ? '✓ You make it to payday' : '⚠ Short by'}</span>
-                  <span>
-                    {snapshot.runwayWeeks >= snapshot.weeksUntilIncomeStart
-                      ? `+${(snapshot.runwayWeeks - snapshot.weeksUntilIncomeStart).toFixed(1)}w buffer`
-                      : `${(snapshot.weeksUntilIncomeStart - snapshot.runwayWeeks).toFixed(1)}w`}
-                  </span>
-                </div>
-              </>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-
       {/* === WEEKLY RULES EXPLAINED === */}
       <Card className="border-2 border-[#FF7AD1]/30 bg-white/60 backdrop-blur-sm shadow-[4px_4px_0px_0px_rgba(255,46,184,0.08)] rounded-3xl overflow-hidden mt-6">
         <CardContent className="p-6">
@@ -1288,9 +1194,9 @@ export default function FinanceBudget() {
                   <ShoppingCart className="w-4 h-4 text-purple-600" />
                 </div>
                 <div>
-                  <h4 className="font-bold text-slate-850">1. Essentials vs. Fun Money</h4>
+                  <h4 className="font-bold text-slate-850">1. Unified Weekly Budget</h4>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    Your spending is split: <span className="font-bold text-purple-600">Essentials</span> (Groceries/Transport) and <span className="font-bold text-emerald-600">Fun Money</span> (discretionary spending).
+                    All discretionary & variable spending flows into one clean weekly safe-to-spend allowance.
                   </p>
                 </div>
               </div>
@@ -1300,9 +1206,9 @@ export default function FinanceBudget() {
                   <TrendingDown className="w-4 h-4 text-amber-600" />
                 </div>
                 <div>
-                  <h4 className="font-bold text-slate-850">2. Bidirectional Eating</h4>
+                  <h4 className="font-bold text-slate-850">2. Auto-Savings & Overspend Adjustment</h4>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    If you overspend on Essentials, it **automatically eats** your Fun Money. If you overspend on Fun Money, it eats into your Essentials budget.
+                    Underspending at week-end automatically sweeps into your Emergency Reserve or Savings Stash. Any overspend carries forward to adjust next week's allowance.
                   </p>
                 </div>
               </div>
@@ -1314,9 +1220,9 @@ export default function FinanceBudget() {
                   <Zap className="w-4 h-4 text-[#FF2EB8]" />
                 </div>
                 <div>
-                  <h4 className="font-bold text-slate-850">3. Rollover & Debt</h4>
+                  <h4 className="font-bold text-slate-850">3. Stash & Goal Boosts</h4>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    Unspent Fun Money **rolls over** to next week. Overspend is carried forward as **debt** to reduce next week's allowance (capped at £100).
+                    Pull funds from your Savings Stash or goals anytime to boost your current week's spending room.
                   </p>
                 </div>
               </div>
@@ -1328,7 +1234,7 @@ export default function FinanceBudget() {
                 <div>
                   <h4 className="font-bold text-slate-850">4. Travel Mode Pause</h4>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    During travel weeks, both budgets are **paused (set to £0)**, and day-to-day expenses pull directly from your specific Travel Goal Pool.
+                    During travel weeks, day-to-day budgets are paused and spending pulls directly from your specific Travel Pool.
                   </p>
                 </div>
               </div>
