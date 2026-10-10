@@ -514,6 +514,124 @@ export default function FinanceIncome() {
               </div>
             </div>
 
+            {/* Income Breakdown Pie Chart Card */}
+            <div className="bg-white rounded-[2rem] p-6 sm:p-7 border-2 border-[#FF7AD1]/30 shadow-sm relative overflow-hidden">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-[#FFF5FA] flex items-center justify-center text-[#FF2EB8] border border-[#FF7AD1]/30 shrink-0">
+                    <PieChart className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-display font-bold text-xl text-slate-900">Income Breakdown</h3>
+                    <p className="text-xs text-slate-500">Percentage share of each income stream for {monthLabel}</p>
+                  </div>
+                </div>
+                {pieData.length > 0 && (
+                  <Badge variant="outline" className="w-fit bg-[#FFF5FA] border-[#FF7AD1]/40 text-[#FF2EB8] font-display font-bold px-3 py-1 rounded-full text-xs">
+                    {pieData.length} active source{pieData.length === 1 ? '' : 's'}
+                  </Badge>
+                )}
+              </div>
+
+              {pieData.length === 0 ? (
+                <div className="py-12 text-center text-slate-400 font-medium">
+                  <PieChart className="w-12 h-12 mx-auto mb-3 text-slate-300 opacity-60" />
+                  <p>No income transactions recorded for {monthLabel}</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
+                  {/* Interactive Donut Pie Chart */}
+                  <div className="lg:col-span-5 h-[240px] relative flex items-center justify-center">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <RePieChart>
+                        <Pie
+                          data={pieData}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={65}
+                          outerRadius={95}
+                          paddingAngle={3}
+                          dataKey="value"
+                          animationDuration={800}
+                        >
+                          {pieData.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={entry.color} stroke="none" />
+                          ))}
+                        </Pie>
+                        <Tooltip
+                          content={({ active, payload }: any) => {
+                            if (active && payload && payload.length) {
+                              const data = payload[0].payload;
+                              return (
+                                <div className="bg-white/95 backdrop-blur-md px-4 py-2.5 rounded-2xl shadow-xl border border-slate-200 text-xs font-body">
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <div className="w-3.5 h-3.5 rounded-full shadow-sm" style={{ backgroundColor: data.color }} />
+                                    <span className="font-display font-bold text-slate-900">{data.name}</span>
+                                  </div>
+                                  <div className="text-slate-600 font-medium space-y-0.5">
+                                    <p className="text-sm font-bold text-slate-900 tabular-nums">
+                                      {formatCurrency(data.value, baseCurrency)}
+                                    </p>
+                                    <p className="text-slate-500">
+                                      {data.percentage.toFixed(1)}% of income ({data.count} payment{data.count === 1 ? '' : 's'})
+                                    </p>
+                                  </div>
+                                </div>
+                              );
+                            }
+                            return null;
+                          }}
+                        />
+                      </RePieChart>
+                    </ResponsiveContainer>
+                    {/* Donut Center Label */}
+                    <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center px-4">
+                      <span className="text-slate-400 text-[10px] font-display font-bold uppercase tracking-wider">Total</span>
+                      <span className="text-lg sm:text-xl font-display font-black text-slate-900 tabular-nums leading-tight">
+                        {formatCurrency(grandTotalWithReimbursements, baseCurrency)}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Sources List / Legend */}
+                  <div className="lg:col-span-7 space-y-2.5">
+                    {pieData.map((item) => (
+                      <div
+                        key={item.key}
+                        className="flex items-center justify-between p-3.5 rounded-2xl bg-slate-50/80 hover:bg-[#FFF5FA]/80 transition-colors border border-slate-100"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div
+                            className="w-3.5 h-3.5 rounded-full shrink-0 shadow-sm"
+                            style={{ backgroundColor: item.color }}
+                          />
+                          <div className="min-w-0">
+                            <span className="font-display font-bold text-sm text-slate-900 block truncate">
+                              {item.name}
+                            </span>
+                            <span className="text-xs text-slate-500 font-medium">
+                              {item.count} payment{item.count === 1 ? '' : 's'}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="text-right shrink-0 flex items-center gap-3">
+                          <div>
+                            <span className="font-display font-bold text-sm text-slate-900 block tabular-nums">
+                              {formatCurrency(item.value, baseCurrency)}
+                            </span>
+                            <span className="text-xs font-bold text-[#FF2EB8] tabular-nums block">
+                              {item.percentage.toFixed(1)}%
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* Source widgets — one per income source */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {BUCKETS.map(b => {
