@@ -1001,7 +1001,7 @@ export default function FinancePoolsPage() {
                     className="h-8 text-xs font-semibold gap-1.5 flex-1 border-slate-200/80 bg-white/80 hover:bg-white transition-colors"
                     onClick={() => {
                       const emId = emergencyGoal ? emergencyGoal.id : EMERGENCY_VIRTUAL;
-                      const defaultSource = poolOptions.find(p => p.available > 0 && p.id !== emId)?.id || '';
+                      const defaultSource = poolOptions.find(p => Boolean(p.available) && p.id !== emId)?.id || '';
                       setMoveFrom(defaultSource);
                       setMoveTo(emId);
                       setMoveAmount('');

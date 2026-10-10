@@ -30,6 +30,7 @@ import {
   ChevronLeft, ChevronRight, ShoppingCart, PartyPopper,
   Lock, TrendingUp, TrendingDown, Minus, DollarSign, Shield,
   ShoppingBasket, Pill, Bus, Utensils, Pencil, Gauge, LayoutGrid, Sparkles,
+  Award, MapPin, BarChart3, PiggyBank, Percent, ArrowUpRight,
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -37,7 +38,45 @@ import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import FinancialReportExporterModal from '@/components/finance/FinancialReportExporterModal';
 
-
+// UK, Manchester & Australia Monthly Benchmarks (ONS / ASHE & ABS statistics for FULL-TIME WORKING INDIVIDUALS)
+const MONTHLY_PEER_BENCHMARKS = [
+  {
+    id: 'manchester_avg',
+    label: 'Manchester 23yo Full-Time',
+    monthlyIncome: 1950,
+    monthlyExpenses: 1450,
+    monthlySavings: 500,
+    annualProfit: 6000,
+    description: 'Full-time working 23yo young professional in Manchester',
+  },
+  {
+    id: 'uk_22_29_median',
+    label: 'UK 22–29 Full-Time Median',
+    monthlyIncome: 2100,
+    monthlyExpenses: 1550,
+    monthlySavings: 550,
+    annualProfit: 6600,
+    description: 'UK national median full-time young adult worker',
+  },
+  {
+    id: 'australia_23yo_ft',
+    label: 'Australia 23yo FT ($72k AUD)',
+    monthlyIncome: 2400,
+    monthlyExpenses: 1750,
+    monthlySavings: 650,
+    annualProfit: 7800,
+    description: 'ABS median full-time graduate worker in Australia',
+  },
+  {
+    id: 'uk_top_10',
+    label: 'UK Top 10% (Age 22–29)',
+    monthlyIncome: 2850,
+    monthlyExpenses: 1800,
+    monthlySavings: 1050,
+    annualProfit: 12600,
+    description: '90th percentile full-time young adult earner in the UK',
+  },
+];
 
 const FREQ_TO_MONTHLY: Record<string, number> = {
   weekly: 52 / 12,
@@ -66,6 +105,7 @@ export default function FinanceMonthly() {
 
   const [selectedMonth, setSelectedMonth] = useState(new Date());
   const [activeTab, setActiveTab] = useState<string>('overview');
+  const [selectedBenchmarkId, setSelectedBenchmarkId] = useState<string>('manchester_avg');
   const monthStart = startOfMonth(selectedMonth);
   const monthEnd = endOfMonth(selectedMonth);
   const monthLabel = format(monthStart, 'MMMM yyyy');
@@ -211,6 +251,29 @@ export default function FinanceMonthly() {
     return { essentialSpent, funSpent, fixedSpent, incomeTotal, categoryBreakdown, dailyData };
   }, [monthTxns, catMap, essentialCatIds, monthStart, isFixedTx, reimbursementsOn]);
 
+  const totalSpent = essentialSpent + funSpent + fixedSpent;
+  const netProfit = incomeTotal - totalSpent;
+  const savingsRate = incomeTotal > 0 ? (netProfit / incomeTotal) * 100 : 0;
+
+  const selectedBenchmark = useMemo(() => (
+    MONTHLY_PEER_BENCHMARKS.find(b => b.id === selectedBenchmarkId) || MONTHLY_PEER_BENCHMARKS[0]
+  ), [selectedBenchmarkId]);
+
+  const diffProfit = netProfit - selectedBenchmark.monthlySavings;
+  const diffExpenses = selectedBenchmark.monthlyExpenses - totalSpent; // positive = spending less than benchmark!
+  const annualizedNetProfit = netProfit * 12;
+
+  const { percentileLabel, percentileRank } = useMemo(() => {
+    const p = netProfit;
+    if (p >= 1500) return { percentileLabel: 'Top 2%', percentileRank: 98 };
+    if (p >= 1050) return { percentileLabel: 'Top 5%', percentileRank: 95 };
+    if (p >= 750) return { percentileLabel: 'Top 10%', percentileRank: 90 };
+    if (p >= 550) return { percentileLabel: 'Top 25%', percentileRank: 75 };
+    if (p >= 400) return { percentileLabel: 'Top 45%', percentileRank: 55 };
+    if (p > 0) return { percentileLabel: 'Top 60%', percentileRank: 40 };
+    return { percentileLabel: 'Building Surplus', percentileRank: 20 };
+  }, [netProfit]);
+
   // Previous month totals for comparison
   const prevTotals = useMemo(() => {
     let essential = 0, fun = 0, fixed = 0;
@@ -241,10 +304,6 @@ export default function FinanceMonthly() {
     return { essential, fun, fixed, total: essential + fun + fixed, catTotals };
   }, [prevMonthTxns, catMap, essentialCatIds, isFixedTx]);
 
-
-  // Actual total spent in logged transactions this month (variable + paid fixed bills)
-  const actualTotalSpent = essentialSpent + funSpent + fixedSpent;
-  const totalSpent = actualTotalSpent;
   const netBudget = monthlyTotalBudget - totalSpent;
 
   // Pace projection (only meaningful for current month)
@@ -258,7 +317,7 @@ export default function FinanceMonthly() {
   const projectedVariableSpend = dailyVariablePace * daysInMonth;
   const projectedSpend = projectedVariableSpend + fixedMonthly;
   const projectedDiff = projectedSpend - monthlyTotalBudget; // positive => over
-  const spendPct = monthlyTotalBudget > 0 ? (actualTotalSpent / monthlyTotalBudget) * 100 : 0;
+  const spendPct = monthlyTotalBudget > 0 ? (totalSpent / monthlyTotalBudget) * 100 : 0;
   const timePct = (daysElapsed / daysInMonth) * 100;
 
   // Pro-rated comparison scaling for month-to-date (e.g. Day 11 of 30 vs Day 11 of 31)
@@ -1251,6 +1310,141 @@ export default function FinanceMonthly() {
           })()}
         </TabsContent>
       </Tabs>
+
+      {/* Monthly Financial Peer Benchmark Model Widget */}
+      <div className="bg-white rounded-[2rem] p-6 sm:p-7 border-2 border-[#FF7AD1]/40 shadow-sm relative overflow-hidden space-y-6 mt-8">
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-5">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-[#FF2EB8] to-[#FF7AD1] flex items-center justify-center text-white shadow-md shrink-0">
+              <Award className="w-6 h-6" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="font-display font-black text-xl text-slate-900">23yo Monthly Financial Model</h3>
+                <Badge variant="outline" className="bg-[#FFF5FA] border-[#FF7AD1]/40 text-[#FF2EB8] font-display font-bold px-2.5 py-0.5 rounded-full text-[11px] flex items-center gap-1">
+                  <MapPin className="w-3 h-3 text-[#FF2EB8]" /> Manchester, UK · 🦘 Full-Time Workers (Excl. Students)
+                </Badge>
+              </div>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Benchmarking your monthly spending ({fmt(totalSpent)}) and net profit ({fmt(netProfit)}) against UK &amp; Australian 23yo peers.
+              </p>
+            </div>
+          </div>
+
+          {/* Benchmark selector pill tabs */}
+          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-2xl shrink-0 overflow-x-auto">
+            {MONTHLY_PEER_BENCHMARKS.map(b => (
+              <button
+                key={b.id}
+                onClick={() => setSelectedBenchmarkId(b.id)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-display font-bold whitespace-nowrap transition-all ${
+                  selectedBenchmarkId === b.id
+                    ? 'bg-[#FF2EB8] text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                }`}
+              >
+                {b.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Stat Summary Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {/* Card 1: Net Profit & Savings Rate */}
+          <div className="bg-gradient-to-br from-[#FFF5FA] to-white rounded-2xl p-5 border border-[#FF7AD1]/30 flex flex-col justify-between">
+            <div className="flex items-center justify-between text-[#FF2EB8] text-xs font-display font-bold uppercase tracking-wider mb-2">
+              <span>Net Monthly Profit</span>
+              <PiggyBank className="w-4 h-4 text-[#FF2EB8]" />
+            </div>
+            <div>
+              <div className={`text-3xl sm:text-4xl font-display font-black tabular-nums ${netProfit >= 0 ? 'text-slate-900' : 'text-rose-600'}`}>
+                {netProfit >= 0 ? '+' : ''}{fmt(netProfit)}
+              </div>
+              <p className="text-xs text-slate-500 mt-1 font-semibold flex items-center gap-1">
+                <Percent className="w-3 h-3 text-[#FF2EB8]" /> {savingsRate.toFixed(0)}% Savings Rate · vs {fmt(selectedBenchmark.monthlySavings)} peer avg
+              </p>
+            </div>
+          </div>
+
+          {/* Card 2: Monthly Expenses Comparison */}
+          <div className="bg-emerald-50/60 rounded-2xl p-5 border border-emerald-200/80 flex flex-col justify-between">
+            <div className="flex items-center justify-between text-[#166534] text-xs font-display font-bold uppercase tracking-wider mb-2">
+              <span>Monthly Expenses</span>
+              <TrendingDown className="w-4 h-4 text-[#22C55E]" />
+            </div>
+            <div>
+              <div className="text-3xl sm:text-4xl font-display font-black text-[#166534] tabular-nums">
+                {fmt(totalSpent)}
+              </div>
+              <p className="text-xs text-[#166534]/80 mt-1 font-semibold">
+                {diffExpenses >= 0 ? `${fmt(diffExpenses)} lower spending than` : `${fmt(Math.abs(diffExpenses))} higher than`} {selectedBenchmark.label} ({fmt(selectedBenchmark.monthlyExpenses)}/mo)
+              </p>
+            </div>
+          </div>
+
+          {/* Card 3: Annualized Profit Pacing */}
+          <div className="bg-sky-50/60 rounded-2xl p-5 border border-sky-200/80 flex flex-col justify-between">
+            <div className="flex items-center justify-between text-sky-800 text-xs font-display font-bold uppercase tracking-wider mb-2">
+              <span>Annual Wealth Pacing</span>
+              <BarChart3 className="w-4 h-4 text-[#0284C7]" />
+            </div>
+            <div>
+              <div className="text-3xl sm:text-4xl font-display font-black text-slate-900 tabular-nums">
+                {fmt(annualizedNetProfit)}<span className="text-sm font-normal text-slate-500">/yr net</span>
+              </div>
+              <p className="text-xs text-sky-900/80 mt-1 font-semibold">
+                vs {fmt(selectedBenchmark.annualProfit)}/yr average peer net savings
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Visual Progress Scale */}
+        <div className="bg-slate-50 rounded-2xl p-5 border border-slate-200/70 space-y-3">
+          <div className="flex justify-between items-center text-xs font-display font-bold text-slate-700">
+            <span>Full-Time Net Profit Spectrum (Monthly Net Cashflow)</span>
+            <span className="text-[#FF2EB8]">★ You: {fmt(netProfit)}/mo net</span>
+          </div>
+          {/* Progress bar line */}
+          <div className="relative w-full bg-slate-200 rounded-full h-4 overflow-hidden flex items-center">
+            <div
+              className="h-full bg-gradient-to-r from-[#FF7AD1] to-[#FF2EB8] transition-all duration-500 rounded-full"
+              style={{ width: `${Math.min(100, Math.max(10, (netProfit / 1500) * 100))}%` }}
+            />
+          </div>
+          {/* Milestone ticks below scale */}
+          <div className="grid grid-cols-4 gap-2 pt-1 text-[11px] font-semibold text-slate-500 text-center">
+            <div className="border-r border-slate-200 pr-1">
+              <p className="text-slate-400 font-normal text-[10px]">Manchester 23yo FT</p>
+              <p className="font-bold text-slate-700">+£500/mo net</p>
+            </div>
+            <div className="border-r border-slate-200 pr-1">
+              <p className="text-slate-400 font-normal text-[10px]">UK 22-29 FT Median</p>
+              <p className="font-bold text-slate-700">+£550/mo net</p>
+            </div>
+            <div className="border-r border-slate-200 pr-1">
+              <p className="text-slate-400 font-normal text-[10px]">Australia 23yo FT</p>
+              <p className="font-bold text-slate-700">+£650/mo net <span className="text-[9px] font-normal text-slate-400">($19.5k AUD)</span></p>
+            </div>
+            <div>
+              <p className="text-slate-400 font-normal text-[10px]">UK Top 10% FT</p>
+              <p className="font-bold text-[#FF2EB8]">+£1,050/mo net</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Personalized Motivational Insight */}
+        <div className="bg-[#FFF5FA] border border-[#FF7AD1]/40 rounded-2xl p-4 flex items-center justify-between text-xs text-slate-700 font-medium">
+          <div className="flex items-center gap-2.5">
+            <span className="text-xl">🦘</span>
+            <p>
+              <strong className="font-bold text-[#FF2EB8]">Net Profit Summary:</strong> For {monthLabel}, your net monthly profit is <strong className="text-slate-900">{fmt(netProfit)}</strong> ({savingsRate.toFixed(0)}% savings rate), which is <strong className="text-slate-900">{diffProfit >= 0 ? `${fmt(diffProfit)} higher` : `${fmt(Math.abs(diffProfit))} lower`}</strong> than the {selectedBenchmark.label} net profit benchmark ({fmt(selectedBenchmark.monthlySavings)}/mo net).
+            </p>
+          </div>
+        </div>
+      </div>
 
       {/* Monthly Day Transactions Dialog */}
       <Dialog open={selectedDayNum !== null} onOpenChange={(open) => { if (!open) setSelectedDayNum(null); }}>
