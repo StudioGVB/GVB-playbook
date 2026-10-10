@@ -460,9 +460,9 @@ export default function FinanceIncome() {
                 </div>
                 {/* Bar viz of buckets */}
                 <div className="mt-8 flex items-end gap-2 h-20">
-                  {BUCKETS.map(b => {
+                  {sortedBuckets.map(b => {
                     const v = bucketed[b.key]?.total || 0;
-                    const max = Math.max(1, ...BUCKETS.map(x => bucketed[x.key]?.total || 0));
+                    const max = Math.max(1, ...sortedBuckets.map(x => bucketed[x.key]?.total || 0));
                     return (
                       <div key={b.key} className="flex-1 flex flex-col items-center gap-1">
                         <div
@@ -646,149 +646,298 @@ export default function FinanceIncome() {
               )}
             </div>
 
-            {/* Source widgets — one per income source */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {BUCKETS.map(b => {
+            {/* Source widgets — sorted from most received to least received */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-start">
+              {sortedBuckets.map(b => {
                 const data = bucketed[b.key] || { total: 0, count: 0, txs: [] };
                 const pct = grandTotalWithReimbursements > 0 ? (data.total / grandTotalWithReimbursements) * 100 : 0;
                 const Icon = b.icon;
+                const isQuarter = data.total < 20;
+
                 return (
-                  <Collapsible key={b.key}>
+                  <Collapsible
+                    key={b.key}
+                    className={isQuarter ? "col-span-1 sm:col-span-1 lg:col-span-1" : "col-span-1 sm:col-span-2 lg:col-span-2"}
+                  >
                     <div
                       id={`bucket-${b.key}`}
-                      className="rounded-[2rem] p-6 border-2 shadow-sm"
+                      className={`rounded-[2rem] border-2 shadow-sm flex flex-col justify-between transition-all ${
+                        isQuarter ? 'p-4 sm:p-5 min-h-[140px]' : 'p-6 min-h-[160px]'
+                      }`}
                       style={{ background: b.bg, borderColor: b.border }}
                     >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-3 flex-wrap">
-                            <div className="w-11 h-11 rounded-2xl bg-white/60 flex items-center justify-center shrink-0" style={{ color: b.text }}>
-                              <Icon className="w-5 h-5" strokeWidth={2.4} />
-                            </div>
-                            <div className="min-w-0">
-                              <h3 className="font-display font-bold text-lg truncate" style={{ color: b.text }}>{b.label}</h3>
-                              <p className="text-xs font-medium mt-0.5" style={{ color: b.text, opacity: 0.75 }}>
-                                {data.count} {data.count === 1 ? 'payment' : 'payments'} · {pct.toFixed(0)}% of month
-                              </p>
+                      {isQuarter ? (
+                        /* --- QUARTER PILL CARD (< 20) --- */
+                        <div className="flex flex-col justify-between h-full space-y-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <div
+                                className="w-9 h-9 rounded-xl bg-white/60 flex items-center justify-center shrink-0"
+                                style={{ color: b.text }}
+                              >
+                                <Icon className="w-4.5 h-4.5" strokeWidth={2.4} />
+                              </div>
+                              <h3 className="font-display font-bold text-sm truncate" style={{ color: b.text }} title={b.label}>
+                                {b.label}
+                              </h3>
                             </div>
                             {b.key === 'other' && data.count > 0 && (
-                              <Badge variant="outline" className="text-[10px] font-display font-bold px-2 py-0.5 rounded-full border-white/70 bg-white/60" style={{ color: b.text }}>
-                                Needs tagging
+                              <Badge variant="outline" className="text-[9px] font-display font-bold px-1.5 py-0.2 rounded-full border-white/70 bg-white/60 shrink-0" style={{ color: b.text }}>
+                                Tag
                               </Badge>
                             )}
                           </div>
-                        </div>
-                        <div className="text-right shrink-0">
-                          <p className="text-2xl md:text-3xl font-display font-black tabular-nums leading-none" style={{ color: b.text }}>
-                            {formatCurrency(data.total, baseCurrency)}
-                          </p>
-                        </div>
-                      </div>
 
-                      {/* Progress bar */}
-                      <div className="mt-4 h-2 rounded-full bg-white/60 overflow-hidden">
-                        <div
-                          className="h-full rounded-full transition-all"
-                          style={{ width: `${pct}%`, backgroundColor: b.accent }}
-                        />
-                      </div>
+                          <div>
+                            <p className="text-xl sm:text-2xl font-display font-black tabular-nums leading-none" style={{ color: b.text }}>
+                              {formatCurrency(data.total, baseCurrency)}
+                            </p>
+                            <p className="text-[11px] font-medium mt-1" style={{ color: b.text, opacity: 0.75 }}>
+                              {data.count} {data.count === 1 ? 'payment' : 'payments'} · {pct.toFixed(0)}%
+                            </p>
+                          </div>
 
-                      {data.count > 0 && (
-                        <>
-                          <CollapsibleTrigger asChild>
-                            <button className="mt-3 text-xs font-display font-bold hover:underline transition-colors" style={{ color: b.text }}>
-                              View {data.count} transaction{data.count === 1 ? '' : 's'} ↓
-                            </button>
-                          </CollapsibleTrigger>
+                          {/* Progress bar */}
+                          <div className="h-1.5 rounded-full bg-white/60 overflow-hidden w-full">
+                            <div
+                              className="h-full rounded-full transition-all"
+                              style={{ width: `${Math.max(pct > 0 ? pct : 0, pct > 0 ? 4 : 0)}%`, backgroundColor: b.accent }}
+                            />
+                          </div>
 
-                          <CollapsibleContent>
-                            <div className="mt-3 pt-3 border-t border-white/70 space-y-1.5">
-                              {data.txs.map(tx => (
-                                <div key={tx.id} className="flex items-center gap-2 text-xs bg-white/60 rounded-xl px-3 py-2">
-                                  <div className="flex-1 min-w-0">
-                                    <p className="truncate font-semibold text-slate-800">{tx.description}</p>
-                                    <p className="text-slate-500 text-[10px]">
-                                      {formatUkDate(tx.posted_at, 'd MMM')}
-                                      {tx.merchant && ` · ${tx.merchant}`}
-                                    </p>
-                                  </div>
-                                  <span className="font-display font-bold tabular-nums" style={{ color: GREEN_DEEP }}>
-                                    +{formatCurrency(tx.base_amount !== undefined && tx.base_amount !== null ? tx.base_amount : tx.amount, baseCurrency)}
-                                  </span>
-                                  {!tx.phantom && (
-                                    <Popover open={assigningTxId === tx.id} onOpenChange={o => setAssigningTxId(o ? tx.id : null)}>
-                                      <PopoverTrigger asChild>
-                                        <button className="p-1 rounded-lg hover:bg-white transition-colors text-slate-500 hover:text-slate-900" title="Move to source">
-                                          <Tag className="h-3.5 w-3.5" />
-                                        </button>
-                                      </PopoverTrigger>
-                                      <PopoverContent align="end" className="w-52 p-2 rounded-2xl border-2 border-[#FF7AD1]/30">
-                                        <p className="text-[10px] font-display font-bold uppercase tracking-widest text-slate-400 mb-1.5 px-1">Move to source</p>
-                                        <div className="space-y-0.5 max-h-48 overflow-y-auto pr-0.5">
-                                          {incomeCats.map(c => (
-                                            <button
-                                              key={c.id}
-                                              onClick={() => handleAssignTx(tx.id, c.id)}
-                                              className={`w-full text-left text-xs px-2 py-1.5 rounded-lg hover:bg-[#FFF5FA] flex items-center gap-2 ${
-                                                tx.category_id === c.id ? 'bg-[#FFF5FA] font-bold' : 'font-medium'
-                                              }`}
-                                            >
-                                              {c.color && <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: c.color }} />}
-                                              <span className="truncate">{c.name}</span>
+                          {data.count > 0 && (
+                            <>
+                              <CollapsibleTrigger asChild>
+                                <button className="text-[11px] font-display font-bold hover:underline transition-colors text-left pt-0.5" style={{ color: b.text }}>
+                                  View {data.count} transaction{data.count === 1 ? '' : 's'} ↓
+                                </button>
+                              </CollapsibleTrigger>
+
+                              <CollapsibleContent>
+                                <div className="mt-2 pt-2 border-t border-white/70 space-y-1.5">
+                                  {data.txs.map(tx => (
+                                    <div key={tx.id} className="flex items-center gap-2 text-xs bg-white/60 rounded-xl px-2.5 py-1.5">
+                                      <div className="flex-1 min-w-0">
+                                        <p className="truncate font-semibold text-slate-800 text-[11px]">{tx.description}</p>
+                                        <p className="text-slate-500 text-[9px]">
+                                          {formatUkDate(tx.posted_at, 'd MMM')}
+                                          {tx.merchant && ` · ${tx.merchant}`}
+                                        </p>
+                                      </div>
+                                      <span className="font-display font-bold text-[11px] tabular-nums shrink-0" style={{ color: GREEN_DEEP }}>
+                                        +{formatCurrency(tx.base_amount !== undefined && tx.base_amount !== null ? tx.base_amount : tx.amount, baseCurrency)}
+                                      </span>
+                                      {!tx.phantom && (
+                                        <Popover open={assigningTxId === tx.id} onOpenChange={o => setAssigningTxId(o ? tx.id : null)}>
+                                          <PopoverTrigger asChild>
+                                            <button className="p-1 rounded-lg hover:bg-white transition-colors text-slate-500 hover:text-slate-900 shrink-0" title="Move to source">
+                                              <Tag className="h-3 w-3" />
                                             </button>
-                                          ))}
-                                        </div>
+                                          </PopoverTrigger>
+                                          <PopoverContent align="end" className="w-52 p-2 rounded-2xl border-2 border-[#FF7AD1]/30">
+                                            <p className="text-[10px] font-display font-bold uppercase tracking-widest text-slate-400 mb-1.5 px-1">Move to source</p>
+                                            <div className="space-y-0.5 max-h-48 overflow-y-auto pr-0.5">
+                                              {incomeCats.map(c => (
+                                                <button
+                                                  key={c.id}
+                                                  onClick={() => handleAssignTx(tx.id, c.id)}
+                                                  className={`w-full text-left text-xs px-2 py-1.5 rounded-lg hover:bg-[#FFF5FA] flex items-center gap-2 ${
+                                                    tx.category_id === c.id ? 'bg-[#FFF5FA] font-bold' : 'font-medium'
+                                                  }`}
+                                                >
+                                                  {c.color && <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: c.color }} />}
+                                                  <span className="truncate">{c.name}</span>
+                                                </button>
+                                              ))}
+                                            </div>
 
-                                        <div className="border-t border-slate-100 my-1" />
-
-                                        {isAddingSource ? (
-                                          <div className="flex items-center gap-1 p-1">
-                                            <input
-                                              type="text"
-                                              placeholder="New source name..."
-                                              value={newSourceName}
-                                              onChange={e => setNewSourceName(e.target.value)}
-                                              className="w-full text-xs px-2 py-1 border rounded-lg focus:outline-none focus:border-[#FF2EB8]"
-                                              autoFocus
-                                              onKeyDown={e => {
-                                                if (e.key === 'Enter') handleCreateAndAssignSource(tx.id);
-                                              }}
-                                            />
-                                            <button
-                                              onClick={() => handleCreateAndAssignSource(tx.id)}
-                                              className="px-2 py-1 bg-[#FF2EB8] text-white text-xs font-bold rounded-lg hover:bg-[#db2777] shrink-0"
-                                            >
-                                              Add
-                                            </button>
-                                          </div>
-                                        ) : (
-                                          <button
-                                            onClick={() => setIsAddingSource(true)}
-                                            className="w-full text-left text-xs px-2 py-1.5 rounded-lg hover:bg-[#FFF5FA] text-slate-600 hover:text-slate-900 flex items-center gap-1.5 font-medium"
-                                          >
-                                            + Add New Source
-                                          </button>
-                                        )}
-
-                                        {tx.category_id && (
-                                          <>
                                             <div className="border-t border-slate-100 my-1" />
-                                            <button
-                                              onClick={() => handleAssignTx(tx.id, null)}
-                                              className="w-full text-left text-xs px-2 py-1.5 rounded-lg hover:bg-[#FFF5FA] text-[#FF2EB8] flex items-center gap-1.5 font-semibold"
-                                            >
-                                              <X className="h-3 w-3" /> Move to Other
-                                            </button>
-                                          </>
-                                        )}
-                                      </PopoverContent>
-                                    </Popover>
-                                  )}
+
+                                            {isAddingSource ? (
+                                              <div className="flex items-center gap-1 p-1">
+                                                <input
+                                                  type="text"
+                                                  placeholder="New source name..."
+                                                  value={newSourceName}
+                                                  onChange={e => setNewSourceName(e.target.value)}
+                                                  className="w-full text-xs px-2 py-1 border rounded-lg focus:outline-none focus:border-[#FF2EB8]"
+                                                  autoFocus
+                                                  onKeyDown={e => {
+                                                    if (e.key === 'Enter') handleCreateAndAssignSource(tx.id);
+                                                  }}
+                                                />
+                                                <button
+                                                  onClick={() => handleCreateAndAssignSource(tx.id)}
+                                                  className="px-2 py-1 bg-[#FF2EB8] text-white text-xs font-bold rounded-lg hover:bg-[#db2777] shrink-0"
+                                                >
+                                                  Add
+                                                </button>
+                                              </div>
+                                            ) : (
+                                              <button
+                                                onClick={() => setIsAddingSource(true)}
+                                                className="w-full text-left text-xs px-2 py-1.5 rounded-lg hover:bg-[#FFF5FA] text-slate-600 hover:text-slate-900 flex items-center gap-1.5 font-medium"
+                                              >
+                                                + Add New Source
+                                              </button>
+                                            )}
+
+                                            {tx.category_id && (
+                                              <>
+                                                <div className="border-t border-slate-100 my-1" />
+                                                <button
+                                                  onClick={() => handleAssignTx(tx.id, null)}
+                                                  className="w-full text-left text-xs px-2 py-1.5 rounded-lg hover:bg-[#FFF5FA] text-[#FF2EB8] flex items-center gap-1.5 font-semibold"
+                                                >
+                                                  <X className="h-3 w-3" /> Move to Other
+                                                </button>
+                                              </>
+                                            )}
+                                          </PopoverContent>
+                                        </Popover>
+                                      )}
+                                    </div>
+                                  ))}
                                 </div>
-                              ))}
+                              </CollapsibleContent>
+                            </>
+                          )}
+                        </div>
+                      ) : (
+                        /* --- HALF PILL CARD (>= 20) --- */
+                        <div>
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-3 flex-wrap">
+                                <div className="w-11 h-11 rounded-2xl bg-white/60 flex items-center justify-center shrink-0" style={{ color: b.text }}>
+                                  <Icon className="w-5 h-5" strokeWidth={2.4} />
+                                </div>
+                                <div className="min-w-0">
+                                  <h3 className="font-display font-bold text-lg truncate" style={{ color: b.text }}>{b.label}</h3>
+                                  <p className="text-xs font-medium mt-0.5" style={{ color: b.text, opacity: 0.75 }}>
+                                    {data.count} {data.count === 1 ? 'payment' : 'payments'} · {pct.toFixed(0)}% of month
+                                  </p>
+                                </div>
+                                {b.key === 'other' && data.count > 0 && (
+                                  <Badge variant="outline" className="text-[10px] font-display font-bold px-2 py-0.5 rounded-full border-white/70 bg-white/60" style={{ color: b.text }}>
+                                    Needs tagging
+                                  </Badge>
+                                )}
+                              </div>
                             </div>
-                          </CollapsibleContent>
-                        </>
+                            <div className="text-right shrink-0">
+                              <p className="text-2xl md:text-3xl font-display font-black tabular-nums leading-none" style={{ color: b.text }}>
+                                {formatCurrency(data.total, baseCurrency)}
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Progress bar */}
+                          <div className="mt-4 h-2 rounded-full bg-white/60 overflow-hidden">
+                            <div
+                              className="h-full rounded-full transition-all"
+                              style={{ width: `${pct}%`, backgroundColor: b.accent }}
+                            />
+                          </div>
+
+                          {data.count > 0 && (
+                            <>
+                              <CollapsibleTrigger asChild>
+                                <button className="mt-3 text-xs font-display font-bold hover:underline transition-colors" style={{ color: b.text }}>
+                                  View {data.count} transaction{data.count === 1 ? '' : 's'} ↓
+                                </button>
+                              </CollapsibleTrigger>
+
+                              <CollapsibleContent>
+                                <div className="mt-3 pt-3 border-t border-white/70 space-y-1.5">
+                                  {data.txs.map(tx => (
+                                    <div key={tx.id} className="flex items-center gap-2 text-xs bg-white/60 rounded-xl px-3 py-2">
+                                      <div className="flex-1 min-w-0">
+                                        <p className="truncate font-semibold text-slate-800">{tx.description}</p>
+                                        <p className="text-slate-500 text-[10px]">
+                                          {formatUkDate(tx.posted_at, 'd MMM')}
+                                          {tx.merchant && ` · ${tx.merchant}`}
+                                        </p>
+                                      </div>
+                                      <span className="font-display font-bold tabular-nums" style={{ color: GREEN_DEEP }}>
+                                        +{formatCurrency(tx.base_amount !== undefined && tx.base_amount !== null ? tx.base_amount : tx.amount, baseCurrency)}
+                                      </span>
+                                      {!tx.phantom && (
+                                        <Popover open={assigningTxId === tx.id} onOpenChange={o => setAssigningTxId(o ? tx.id : null)}>
+                                          <PopoverTrigger asChild>
+                                            <button className="p-1 rounded-lg hover:bg-white transition-colors text-slate-500 hover:text-slate-900" title="Move to source">
+                                              <Tag className="h-3.5 w-3.5" />
+                                            </button>
+                                          </PopoverTrigger>
+                                          <PopoverContent align="end" className="w-52 p-2 rounded-2xl border-2 border-[#FF7AD1]/30">
+                                            <p className="text-[10px] font-display font-bold uppercase tracking-widest text-slate-400 mb-1.5 px-1">Move to source</p>
+                                            <div className="space-y-0.5 max-h-48 overflow-y-auto pr-0.5">
+                                              {incomeCats.map(c => (
+                                                <button
+                                                  key={c.id}
+                                                  onClick={() => handleAssignTx(tx.id, c.id)}
+                                                  className={`w-full text-left text-xs px-2 py-1.5 rounded-lg hover:bg-[#FFF5FA] flex items-center gap-2 ${
+                                                    tx.category_id === c.id ? 'bg-[#FFF5FA] font-bold' : 'font-medium'
+                                                  }`}
+                                                >
+                                                  {c.color && <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: c.color }} />}
+                                                  <span className="truncate">{c.name}</span>
+                                                </button>
+                                              ))}
+                                            </div>
+
+                                            <div className="border-t border-slate-100 my-1" />
+
+                                            {isAddingSource ? (
+                                              <div className="flex items-center gap-1 p-1">
+                                                <input
+                                                  type="text"
+                                                  placeholder="New source name..."
+                                                  value={newSourceName}
+                                                  onChange={e => setNewSourceName(e.target.value)}
+                                                  className="w-full text-xs px-2 py-1 border rounded-lg focus:outline-none focus:border-[#FF2EB8]"
+                                                  autoFocus
+                                                  onKeyDown={e => {
+                                                    if (e.key === 'Enter') handleCreateAndAssignSource(tx.id);
+                                                  }}
+                                                />
+                                                <button
+                                                  onClick={() => handleCreateAndAssignSource(tx.id)}
+                                                  className="px-2 py-1 bg-[#FF2EB8] text-white text-xs font-bold rounded-lg hover:bg-[#db2777] shrink-0"
+                                                >
+                                                  Add
+                                                </button>
+                                              </div>
+                                            ) : (
+                                              <button
+                                                onClick={() => setIsAddingSource(true)}
+                                                className="w-full text-left text-xs px-2 py-1.5 rounded-lg hover:bg-[#FFF5FA] text-slate-600 hover:text-slate-900 flex items-center gap-1.5 font-medium"
+                                              >
+                                                + Add New Source
+                                              </button>
+                                            )}
+
+                                            {tx.category_id && (
+                                              <>
+                                                <div className="border-t border-slate-100 my-1" />
+                                                <button
+                                                  onClick={() => handleAssignTx(tx.id, null)}
+                                                  className="w-full text-left text-xs px-2 py-1.5 rounded-lg hover:bg-[#FFF5FA] text-[#FF2EB8] flex items-center gap-1.5 font-semibold"
+                                                >
+                                                  <X className="h-3 w-3" /> Move to Other
+                                                </button>
+                                              </>
+                                            )}
+                                          </PopoverContent>
+                                        </Popover>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              </CollapsibleContent>
+                            </>
+                          )}
+                        </div>
                       )}
                     </div>
                   </Collapsible>
