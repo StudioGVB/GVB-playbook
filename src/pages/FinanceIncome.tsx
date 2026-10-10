@@ -83,18 +83,30 @@ export default function FinanceIncome() {
   const monthEnd = useMemo(() => endOfMonth(monthStart), [monthStart]);
   const monthLabel = format(monthStart, 'MMMM yyyy');
 
-  // Dynamic income sources: one bucket per user-defined income category.
+  // Dynamic income sources: active categories always shown; archived shown only if month has transactions
   const incomeCats = useMemo(() => {
     const seen = new Set<string>();
+    const monthTxCategoryIds = new Set(
+      transactions
+        .filter(t => {
+          const d = new Date(t.posted_at);
+          return d >= monthStart && d <= monthEnd;
+        })
+        .map(t => t.category_id)
+    );
+
     return categories
       .filter(c => c.type === 'income')
       .filter(c => {
+        if (c.is_archived && !monthTxCategoryIds.has(c.id)) {
+          return false;
+        }
         const k = c.name.trim().toLowerCase();
         if (seen.has(k)) return false;
         seen.add(k);
         return true;
       });
-  }, [categories]);
+  }, [categories, transactions, monthStart, monthEnd]);
 
   const BUCKETS: Bucket[] = useMemo(() => {
     const sourceBuckets: Bucket[] = incomeCats.map((c, i) => {

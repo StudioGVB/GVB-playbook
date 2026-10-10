@@ -31,6 +31,7 @@ export interface FinanceCategory {
   weekly_target: number | null;
   exclude_from_reports: boolean;
   color: string | null;
+  is_archived?: boolean;
 }
 
 export interface FinanceTransaction {
@@ -678,9 +679,20 @@ export function useFinanceDataState() {
     return data as FinanceCategory;
   };
 
-  const updateCategory = async (id: string, updates: Partial<Pick<FinanceCategory, 'name' | 'type' | 'is_cuttable' | 'is_essential' | 'exclude_from_reports' | 'color'>>) => {
-    const { error } = await supabase.from('finance_categories').update(updates).eq('id', id);
-    if (error) { toast.error('Update failed'); return; }
+  const updateCategory = async (id: string, updates: Partial<Pick<FinanceCategory, 'name' | 'type' | 'is_cuttable' | 'is_essential' | 'exclude_from_reports' | 'color' | 'is_archived'>>) => {
+    const { error } = await supabase.from('finance_categories').update(updates as any).eq('id', id);
+    if (error) {
+      if (error.message?.includes('is_archived')) {
+        const fallback = { ...updates };
+        delete (fallback as any).is_archived;
+        if (Object.keys(fallback).length > 0) {
+          await supabase.from('finance_categories').update(fallback as any).eq('id', id);
+        }
+      } else {
+        toast.error(`Update failed: ${error.message}`);
+        return;
+      }
+    }
     fetchAll();
   };
 

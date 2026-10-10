@@ -7,7 +7,8 @@ import { Label } from '@/components/ui/label';
 import { Slider } from '@/components/ui/slider';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { ArrowUpRight, Wallet, Sparkles, Settings2, TrendingUp, Plus, Trash2, Briefcase } from 'lucide-react';
+import { ArrowUpRight, Wallet, Sparkles, Settings2, TrendingUp, Plus, Trash2, Briefcase, Pencil, Archive, ArchiveRestore, Check, X } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
 import { useFinanceData } from '@/hooks/useFinanceData';
 import { useFinanceAssumptions } from '@/hooks/useFinanceAssumptions';
 import { formatCurrency } from '@/lib/financeUtils';
@@ -60,6 +61,9 @@ export default function FinanceAccountsPage({ defaultTab }: { defaultTab?: strin
   const [expectedIncome, setExpectedIncome] = useState('');
   const [jobStartDate, setJobStartDate] = useState('');
   const [newIncomeName, setNewIncomeName] = useState('');
+  const [editingSourceId, setEditingSourceId] = useState<string | null>(null);
+  const [editingSourceName, setEditingSourceName] = useState<string>('');
+  const [showArchived, setShowArchived] = useState<boolean>(true);
 
   useEffect(() => {
     if (assumptions) {
@@ -77,22 +81,56 @@ export default function FinanceAccountsPage({ defaultTab }: { defaultTab?: strin
     } as any);
   };
 
-  const incomeCats = finance.categories.filter(c => c.type === 'income');
+  const activeIncomeCats = useMemo(() => {
+    return finance.categories.filter(c => c.type === 'income' && !c.is_archived);
+  }, [finance.categories]);
+
+  const archivedIncomeCats = useMemo(() => {
+    return finance.categories.filter(c => c.type === 'income' && c.is_archived);
+  }, [finance.categories]);
 
   const handleAddIncomeSource = async () => {
     const name = newIncomeName.trim();
     if (!name) return;
-    if (incomeCats.some(c => c.name.trim().toLowerCase() === name.toLowerCase())) {
+    if (finance.categories.some(c => c.type === 'income' && c.name.trim().toLowerCase() === name.toLowerCase())) {
       toast.error('That source already exists');
       return;
     }
-    const color = INCOME_COLORS[incomeCats.length % INCOME_COLORS.length];
+    const color = INCOME_COLORS[finance.categories.filter(c => c.type === 'income').length % INCOME_COLORS.length];
     try {
       await finance.addCategory({ name, type: 'income', color });
       setNewIncomeName('');
       toast.success(`Added ${name}`);
     } catch (e: any) {
       toast.error(e?.message || 'Failed to add source');
+    }
+  };
+
+  const handleStartRename = (c: { id: string; name: string }) => {
+    setEditingSourceId(c.id);
+    setEditingSourceName(c.name);
+  };
+
+  const handleSaveRename = async (id: string) => {
+    const name = editingSourceName.trim();
+    if (!name) return;
+    try {
+      await finance.updateCategory(id, { name });
+      toast.success(`Renamed to "${name}"`);
+      setEditingSourceId(null);
+      setEditingSourceName('');
+    } catch (e: any) {
+      toast.error('Failed to rename source');
+    }
+  };
+
+  const handleToggleArchive = async (c: { id: string; name: string; is_archived?: boolean }) => {
+    const willArchive = !c.is_archived;
+    try {
+      await finance.updateCategory(c.id, { is_archived: willArchive } as any);
+      toast.success(willArchive ? `"${c.name}" archived` : `"${c.name}" unarchived`);
+    } catch (e: any) {
+      toast.error('Failed to update source');
     }
   };
 
@@ -375,14 +413,15 @@ export default function FinanceAccountsPage({ defaultTab }: { defaultTab?: strin
                 </Button>
               </div>
 
-              {incomeCats.length === 0 ? (
-                <p className="text-sm text-slate-500 italic">No income sources yet.</p>
+              {/* Active Income Sources */}
+              {activeIncomeCats.length === 0 ? (
+                <p className="text-sm text-slate-500 italic">No active income sources.</p>
               ) : (
                 <ul className="space-y-2">
-                  {incomeCats.map((c) => (
+                  {activeIncomeCats.map((c) => (
                     <li
                       key={c.id}
-                      className="flex items-center gap-3 px-3 py-2.5 rounded-xl border border-slate-100 hover:bg-[#FFF5FA]/50 transition-colors"
+                      className="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-slate-100 hover:bg-[#FFF5FA]/50 transition-colors"
                     >
                       <Popover>
                         <PopoverTrigger asChild>
@@ -406,19 +445,194 @@ export default function FinanceAccountsPage({ defaultTab }: { defaultTab?: strin
                           </div>
                         </PopoverContent>
                       </Popover>
-                      <span className="flex-1 font-display font-semibold text-slate-800 text-sm truncate">{c.name}</span>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleDeleteIncomeSource(c.id, c.name)}
-                        className="h-8 w-8 p-0 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg"
-                        aria-label={`Delete ${c.name}`}
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
+
+                      {editingSourceId === c.id ? (
+                        <div className="flex-1 flex items-center gap-2">
+                          <Input
+                            value={editingSourceName}
+                            onChange={(e) => setEditingSourceName(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') handleSaveRename(c.id);
+                              if (e.key === 'Escape') setEditingSourceId(null);
+                            }}
+                            className="h-8 text-sm rounded-lg border-[#FF2EB8]"
+                            autoFocus
+                          />
+                          <Button
+                            size="sm"
+                            onClick={() => handleSaveRename(c.id)}
+                            className="h-8 px-2.5 bg-[#FF2EB8] text-white hover:bg-[#e5299f] rounded-lg"
+                            title="Save title"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => setEditingSourceId(null)}
+                            className="h-8 px-2 text-slate-400 hover:text-slate-600 rounded-lg"
+                            title="Cancel"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <>
+                          <span className="flex-1 font-display font-semibold text-slate-800 text-sm truncate">{c.name}</span>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleStartRename(c)}
+                            className="h-8 w-8 p-0 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg"
+                            title="Rename pot title"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleToggleArchive(c)}
+                            className="h-8 w-8 p-0 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg"
+                            title="Archive source"
+                          >
+                            <Archive className="w-3.5 h-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleDeleteIncomeSource(c.id, c.name)}
+                            className="h-8 w-8 p-0 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg"
+                            aria-label={`Delete ${c.name}`}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </>
+                      )}
                     </li>
                   ))}
                 </ul>
+              )}
+
+              {/* Archived Income Sources Section */}
+              {archivedIncomeCats.length > 0 && (
+                <div className="mt-6 border-t border-slate-100 pt-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <h4 className="text-xs font-display font-bold uppercase tracking-wider text-slate-400">Archived Sources</h4>
+                      <Badge variant="secondary" className="text-[10px] px-1.5 py-0 bg-slate-100 text-slate-600 border border-slate-200">
+                        {archivedIncomeCats.length}
+                      </Badge>
+                    </div>
+                    <button
+                      onClick={() => setShowArchived(prev => !prev)}
+                      className="text-xs font-semibold text-slate-500 hover:text-slate-800"
+                    >
+                      {showArchived ? 'Hide' : 'Show'}
+                    </button>
+                  </div>
+
+                  {showArchived && (
+                    <ul className="space-y-2">
+                      {archivedIncomeCats.map((c) => (
+                        <li
+                          key={c.id}
+                          className="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-slate-100 bg-slate-50/70 hover:bg-slate-100/70 transition-colors"
+                        >
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <button
+                                className="w-3.5 h-3.5 rounded-full shrink-0 border border-slate-200 cursor-pointer hover:ring-2 hover:ring-pink-400 hover:ring-offset-1 transition-all opacity-60"
+                                style={{ backgroundColor: c.color || '#94a3b8' }}
+                                title="Change color"
+                              />
+                            </PopoverTrigger>
+                            <PopoverContent className="w-52 p-3 rounded-2xl border-2 border-[#FF7AD1]/30" align="start">
+                              <p className="text-[10px] font-display font-bold uppercase tracking-widest text-slate-400 mb-2">Change Source Color</p>
+                              <div className="grid grid-cols-5 gap-1.5">
+                                {PRESET_COLORS.map(color => (
+                                  <button
+                                    key={color}
+                                    onClick={() => finance.updateCategory(c.id, { color })}
+                                    className={`w-7 h-7 rounded-full border-2 transition-all ${c.color === color ? 'border-slate-800 scale-110' : 'border-transparent hover:scale-105'}`}
+                                    style={{ backgroundColor: color }}
+                                  />
+                                ))}
+                              </div>
+                            </PopoverContent>
+                          </Popover>
+
+                          {editingSourceId === c.id ? (
+                            <div className="flex-1 flex items-center gap-2">
+                              <Input
+                                value={editingSourceName}
+                                onChange={(e) => setEditingSourceName(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') handleSaveRename(c.id);
+                                  if (e.key === 'Escape') setEditingSourceId(null);
+                                }}
+                                className="h-8 text-sm rounded-lg border-[#FF2EB8]"
+                                autoFocus
+                              />
+                              <Button
+                                size="sm"
+                                onClick={() => handleSaveRename(c.id)}
+                                className="h-8 px-2.5 bg-[#FF2EB8] text-white hover:bg-[#e5299f] rounded-lg"
+                                title="Save title"
+                              >
+                                <Check className="w-3.5 h-3.5" />
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => setEditingSourceId(null)}
+                                className="h-8 px-2 text-slate-400 hover:text-slate-600 rounded-lg"
+                                title="Cancel"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </Button>
+                            </div>
+                          ) : (
+                            <>
+                              <span className="flex-1 font-display font-semibold text-slate-500 text-sm truncate">
+                                {c.name}
+                              </span>
+                              <Badge variant="outline" className="text-[9px] px-1.5 py-0 bg-slate-100 text-slate-500 border-slate-200">
+                                Archived
+                              </Badge>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleStartRename(c)}
+                                className="h-8 w-8 p-0 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg"
+                                title="Rename pot title"
+                              >
+                                <Pencil className="w-3.5 h-3.5" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleToggleArchive(c)}
+                                className="h-8 w-8 p-0 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg"
+                                title="Unarchive source"
+                              >
+                                <ArchiveRestore className="w-3.5 h-3.5" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleDeleteIncomeSource(c.id, c.name)}
+                                className="h-8 w-8 p-0 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg"
+                                aria-label={`Delete ${c.name}`}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
+                            </>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
               )}
             </div>
 
