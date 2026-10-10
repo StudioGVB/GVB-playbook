@@ -324,7 +324,8 @@ export default function FinancePoolsPage() {
   const unassignedCashAmount = Math.max(0, totalCash - assignedOtherGoalsTotal - currentEmergencyFunded);
 
   const emergencyMonthsCovered = actualMonthlySurvival > 0 ? (currentEmergencyFunded / actualMonthlySurvival) : 0;
-  const emergencySegColor = emergencyMonthsCovered < 2 ? '#f43f5e' : emergencyMonthsCovered < 3 ? '#f59e0b' : '#10b981';
+  const isEmergencyShort = emergencyShortfallAmt > 0.01;
+  const emergencySegColor = (isEmergencyShort || emergencyMonthsCovered < 2) ? '#f43f5e' : emergencyMonthsCovered < 3 ? '#f59e0b' : '#10b981';
 
   const segments = [
     ...(currentEmergencyFunded > 0 ? [{ label: 'Emergency Reserve', amount: currentEmergencyFunded, color: emergencySegColor }] : []),
@@ -867,8 +868,8 @@ export default function FinancePoolsPage() {
           const monthsCovered = actualMonthlySurvival > 0 ? (currentFunded / actualMonthlySurvival) : 0;
 
           // Color tier logic:
-          // < 2 months: Red background & border
-          // 2 to < 3 months: Orange background & border
+          // Short of target floor / < 2 months: Red background & border
+          // Fully funded for target floor, but < 3 months: Orange background & border
           // >= 3 months: Green background & border
           let cardStyle = 'bg-emerald-50/80 border-emerald-300 shadow-[4px_4px_0px_0px_rgba(16,185,129,0.15)]';
           let iconStyle = 'bg-emerald-100 text-emerald-600';
@@ -876,7 +877,7 @@ export default function FinancePoolsPage() {
           let badgeStyle = 'bg-emerald-100 text-emerald-700 border-emerald-200';
           let alertTextStyle = 'text-emerald-700';
 
-          if (monthsCovered < 2) {
+          if (isShort || monthsCovered < 2) {
             cardStyle = 'bg-rose-50/80 border-rose-300 shadow-[4px_4px_0px_0px_rgba(244,63,94,0.15)]';
             iconStyle = 'bg-rose-100 text-rose-600';
             barStyle = 'bg-rose-500';

@@ -8,8 +8,8 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Search, Check, Sparkles, Loader2, X, ArrowLeftRight, Target, Receipt, Undo2, DollarSign, Briefcase, RefreshCw, Wallet, Plus, Trash2 } from 'lucide-react';
-import { formatCurrency, formatUkDate } from '@/lib/financeUtils';
-import { format } from 'date-fns';
+import { formatCurrency, formatUkDate, baseAmt } from '@/lib/financeUtils';
+import { format, isToday, isYesterday, startOfWeek, endOfWeek, subWeeks } from 'date-fns';
 import { toast } from 'sonner';
 import type { useFinanceData } from '@/hooks/useFinanceData';
 import type { FixedExpense } from '@/hooks/useFixedExpenses';
@@ -268,6 +268,66 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
     if (transferFilter === 'reimbursable_only' && !tx.is_reimbursable) return false;
     return true;
   });
+
+  const getTxGroupHeader = useCallback((dateStr: string) => {
+    const d = new Date(dateStr);
+    const now = new Date();
+
+    if (isToday(d)) {
+      return { key: 'today', label: 'Today' };
+    }
+    if (isYesterday(d)) {
+      return { key: 'yesterday', label: 'Yesterday' };
+    }
+
+    const startThisWeek = startOfWeek(now, { weekStartsOn: 1 });
+    const endThisWeek = endOfWeek(now, { weekStartsOn: 1 });
+    if (d >= startThisWeek && d <= endThisWeek) {
+      return {
+        key: `week-${format(startThisWeek, 'yyyy-MM-dd')}`,
+        label: `This Week (${format(startThisWeek, 'd MMM')} – ${format(endThisWeek, 'd MMM')})`,
+      };
+    }
+
+    const startLastWeek = startOfWeek(subWeeks(now, 1), { weekStartsOn: 1 });
+    const endLastWeek = endOfWeek(subWeeks(now, 1), { weekStartsOn: 1 });
+    if (d >= startLastWeek && d <= endLastWeek) {
+      return {
+        key: `week-${format(startLastWeek, 'yyyy-MM-dd')}`,
+        label: `Last Week (${format(startLastWeek, 'd MMM')} – ${format(endLastWeek, 'd MMM')})`,
+      };
+    }
+
+    const monthKey = format(d, 'yyyy-MM');
+    const monthLabel = format(d, 'MMMM yyyy');
+    return { key: monthKey, label: monthLabel };
+  }, []);
+
+  const baseCurrency = finance.settings?.base_currency || 'GBP';
+
+  const groupedTransactions = useMemo(() => {
+    const paginated = filtered.slice(0, page * PAGE_SIZE);
+    const groups: { key: string; label: string; txs: typeof filtered; totalSpent: number; totalIncome: number }[] = [];
+    const map = new Map<string, typeof groups[0]>();
+
+    for (const tx of paginated) {
+      const header = getTxGroupHeader(tx.posted_at);
+      let g = map.get(header.key);
+      if (!g) {
+        g = { key: header.key, label: header.label, txs: [], totalSpent: 0, totalIncome: 0 };
+        map.set(header.key, g);
+        groups.push(g);
+      }
+      g.txs.push(tx);
+      const isTransfer = tx.is_transfer || (tx as any).transfer_status === 'confirmed';
+      if (!isTransfer) {
+        const amt = baseAmt(tx);
+        if (amt > 0) g.totalIncome += amt;
+        else g.totalSpent += Math.abs(amt);
+      }
+    }
+    return groups;
+  }, [filtered, page, getTxGroupHeader]);
 
   const handleCategorize = async () => {
     setCategorizing(true);
@@ -624,7 +684,7 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
       </div>
 
       {/* Transaction List */}
-      <div className="space-y-1">
+      <div className="space-y-5">
         {filtered.length === 0 ? (
           <Card>
             <CardContent className="p-6 text-center text-muted-foreground text-sm">
@@ -632,306 +692,334 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
             </CardContent>
           </Card>
         ) : (
-          filtered.slice(0, page * PAGE_SIZE).map(tx => {
-            const cat = categories.find(c => c.id === tx.category_id);
-            const isTransfer = tx.is_transfer || !!tx.transfer_group_id;
-            const transferStatus = (tx as any).transfer_status as string | null;
-            const isConfirmedTransfer = transferStatus === 'confirmed' || transferStatus === 'auto_confirmed';
-            const isIncomeTransaction = tx.amount > 0 && !isTransfer && !isConfirmedTransfer && !(tx as any).is_refund;
-            const displayCat = cat;
-            const catColor = displayCat ? (CATEGORY_TYPE_COLORS[displayCat.type] || CATEGORY_TYPE_COLORS.variable) : '';
-
-            const assignedGoal = (tx as any).goal_id ? goals.find(g => g.id === (tx as any).goal_id) : null;
-            const assignedFixedExpense = (tx as any).fixed_expense_id ? fixedExpenses.find(e => e.id === (tx as any).fixed_expense_id) : null;
-            const suggestedBill = assignedFixedExpense ? null : suggestBillFor(tx);
-
-            const getTransferBadge = () => {
-              if (!isTransfer && !transferStatus) return null;
-              if (transferStatus === 'auto_confirmed') return (
-                <Badge variant="secondary" className="text-[9px] px-1.5 py-0 shrink-0 bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
-                  <ArrowLeftRight className="w-2.5 h-2.5 mr-0.5" />Auto Transfer
-                </Badge>
-              );
-              if (transferStatus === 'confirmed') return (
-                <Badge variant="secondary" className="text-[9px] px-1.5 py-0 shrink-0 bg-[hsl(var(--success)/0.1)] text-[hsl(var(--success))]">
-                  <ArrowLeftRight className="w-2.5 h-2.5 mr-0.5" />Transfer
-                </Badge>
-              );
-              if (transferStatus === 'suggested') return (
-                <Badge variant="secondary" className="text-[9px] px-1.5 py-0 shrink-0 bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
-                  <ArrowLeftRight className="w-2.5 h-2.5 mr-0.5" />Suggested
-                </Badge>
-              );
-              if (isTransfer) return (
-                <Badge variant="secondary" className="text-[9px] px-1.5 py-0 shrink-0 bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
-                  <ArrowLeftRight className="w-2.5 h-2.5 mr-0.5" />Unmatched
-                </Badge>
-              );
-              return null;
-            };
-
-            const txAccount = accountMap.get(tx.account_id);
-            const accent = getRowAccent(tx, cat);
-            const isBillCategorized = (tx.is_fixed || cat?.type === 'fixed') && !assignedFixedExpense;
-
-            const isIncome = tx.amount > 0;
-
-            return (
-              <div
-                key={tx.id}
-                className={`relative flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-4 py-2.5 px-4 rounded-2xl border transition-all overflow-hidden ${
-                  isIncome
-                    ? 'bg-emerald-50/70 hover:bg-emerald-100/70 border-emerald-200/80 dark:bg-emerald-950/25 dark:border-emerald-900/40'
-                    : 'bg-white hover:bg-slate-50/80 border-slate-100'
-                }`}
-                style={{ boxShadow: `inset 4px 0 0 0 ${accent}` }}
-              >
-                {/* Left: Description & Metadata */}
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <p className="text-sm font-display font-bold text-slate-900 truncate">{tx.description}</p>
-                    {getTransferBadge()}
-                    {assignedGoal && (
-                      <Badge variant="secondary" className="text-[9px] px-1.5 py-0 shrink-0 bg-primary/10 text-primary">
-                        <Target className="w-2.5 h-2.5 mr-0.5" />{assignedGoal.name}
-                      </Badge>
-                    )}
-                    {assignedFixedExpense && (
-                      <Badge variant="secondary" className="text-[9px] px-1.5 py-0 shrink-0 bg-destructive/10 text-destructive">
-                        <Receipt className="w-2.5 h-2.5 mr-0.5" />{assignedFixedExpense.name}
-                      </Badge>
-                    )}
-                    {tx.is_reimbursable && (
-                      <Badge variant="secondary" className={`text-[9px] px-1.5 py-0 shrink-0 ${
-                        tx.reimbursement_status === 'reimbursed'
-                          ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
-                          : 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300'
-                      }`}>
-                        <Briefcase className="w-2.5 h-2.5 mr-0.5" />
-                        {tx.reimbursement_status === 'reimbursed' ? 'Work Reimbursed' : 'Work Claim Pending'}
-                      </Badge>
-                    )}
-                    {suggestedBill && (
-                      <button
-                        onClick={() => handleFixedExpenseAssign(tx.id, suggestedBill.id)}
-                        className="inline-flex items-center gap-0.5 text-[9px] px-1.5 py-0 rounded border border-dashed border-amber-500/50 text-amber-700 dark:text-amber-400 hover:bg-amber-500/10 transition-colors"
-                        title={`Looks like your "${suggestedBill.name}" bill — click to link`}
-                      >
-                        <Receipt className="w-2.5 h-2.5" />Link to {suggestedBill.name}?
-                      </button>
-                    )}
-                  </div>
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    {formatUkDate(tx.posted_at, 'dd MMM yyyy')}
-                    {tx.merchant && ` · ${tx.merchant}`}
-                    {tx.transfer_side && ` · ${tx.transfer_side === 'out' ? '→ Out' : '← In'}`}
-                  </p>
+          groupedTransactions.map(group => (
+            <div key={group.key} className="space-y-1.5">
+              {/* Group Section Heading */}
+              <div className="sticky top-0 z-10 flex items-center justify-between px-3.5 py-1.5 bg-slate-100/95 dark:bg-slate-800/95 backdrop-blur-md rounded-xl text-xs font-display font-bold text-slate-700 dark:text-slate-200 border border-slate-200/80 dark:border-slate-700/80 shadow-xs">
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-[#FF2EB8]" />
+                  <span>{group.label}</span>
+                  <span className="text-[10px] text-slate-400 font-medium">({group.txs.length})</span>
                 </div>
-
-                {/* Right: Category, Amount & Actions in clean aligned columns */}
-                <div className="flex items-center gap-3 sm:gap-4 shrink-0 ml-auto">
-                  {/* Category pill (Fixed width container starting at exact same point) */}
-                  <div className="w-28 sm:w-36 flex justify-start shrink-0">
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        {displayCat ? (
-                          <button className="cursor-pointer shrink-0 max-w-full">
-                            <Badge variant="secondary" className={`text-[10px] px-2.5 py-1 font-semibold truncate max-w-full hover:opacity-80 transition-opacity ${!displayCat.color ? catColor : ''}`}
-                              style={getCategoryBadgeStyle(displayCat)}
-                            >
-                              <span className="truncate">{displayCat.name}</span>
-                            </Badge>
-                          </button>
-                        ) : (
-                          <button className="cursor-pointer shrink-0">
-                            <Badge variant="outline" className="text-[10px] px-2.5 py-1 text-muted-foreground hover:opacity-80">
-                              Uncategorised
-                            </Badge>
-                          </button>
-                        )}
-                      </PopoverTrigger>
-                      <PopoverContent className="w-48 p-2" align="end">
-                        <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1.5 px-1">
-                          {tx.amount > 0 ? 'Assign Income Stream' : 'Assign Expense Category'}
-                        </p>
-                        <div className="space-y-0.5 max-h-48 overflow-y-auto">
-                          {(tx.amount > 0 ? incomeCategoryOptions : expenseCategoryOptions).map(c => (
-                            <button
-                              key={c.id}
-                              onClick={() => handleCategoryChange(tx.id, tx.category_id, c.id)}
-                              className={`w-full text-left text-xs px-2 py-1.5 rounded hover:bg-muted/50 transition-colors flex items-center gap-2 ${
-                                tx.category_id === c.id ? 'bg-muted font-bold' : ''
-                              }`}
-                            >
-                              {c.color && <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: c.color }} />}
-                              <span className="truncate">{c.name}</span>
-                            </button>
-                          ))}
-                        </div>
-                        {tx.category_id && (
-                          <>
-                            <div className="border-t my-1.5" />
-                            <button
-                              onClick={() => handleCategoryChange(tx.id, tx.category_id, null)}
-                              className="w-full text-left text-xs px-2 py-1.5 rounded hover:bg-destructive/10 text-destructive flex items-center gap-1.5"
-                            >
-                              <X className="w-3 h-3" /> Clear category
-                            </button>
-                          </>
-                        )}
-                      </PopoverContent>
-                    </Popover>
-                  </div>
-
-                  {/* Amount (Fixed width, left aligned so all amounts start at the exact same point vertically down the page) */}
-                  <div className="w-24 sm:w-28 text-left shrink-0">
-                    <p className={`text-sm font-display font-bold tabular-nums ${tx.amount >= 0 ? 'text-[hsl(var(--success))]' : 'text-slate-900'}`}>
-                      {formatCurrency(tx.base_amount !== undefined && tx.base_amount !== null ? tx.base_amount : tx.amount, finance.settings?.base_currency || 'GBP')}
-                    </p>
-                  </div>
-
-                  {/* Action Icons Toolbar */}
-                  <div className="w-20 sm:w-24 flex items-center justify-end gap-0.5 shrink-0">
-                    {/* Pool assignment / refund flag */}
-                    {tx.amount < 0 && goals.length > 0 ? (
-                      <Popover>
-                        <PopoverTrigger asChild>
-                          <button
-                            className={`p-1 rounded transition-colors ${assignedGoal ? 'text-primary' : 'text-slate-300 hover:text-slate-600'}`}
-                            title={assignedGoal ? `Pool: ${assignedGoal.name} (click to change)` : 'Assign to pool'}
-                          >
-                            <Target className="w-4 h-4" />
-                          </button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-44 p-2" align="end">
-                          <p className="text-[10px] font-medium text-muted-foreground mb-1.5 px-1">Assign to pool</p>
-                          <div className="space-y-0.5 max-h-48 overflow-y-auto">
-                            {goals.map(g => (
-                              <button
-                                key={g.id}
-                                onClick={() => handlePoolAssign(tx.id, g.id)}
-                                className={`w-full text-left text-xs px-2 py-1.5 rounded hover:bg-muted/50 transition-colors flex items-center gap-2 ${
-                                  (tx as any).goal_id === g.id ? 'bg-muted font-medium' : ''
-                                }`}
-                              >
-                                {g.color && <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: g.color }} />}
-                                {g.name}
-                              </button>
-                            ))}
-                          </div>
-                          {(tx as any).goal_id && (
-                            <>
-                              <div className="border-t my-1.5" />
-                              <button
-                                onClick={() => handlePoolAssign(tx.id, null)}
-                                className="w-full text-left text-xs px-2 py-1.5 rounded hover:bg-destructive/10 text-destructive flex items-center gap-1.5"
-                              >
-                                <X className="w-3 h-3" /> Remove from pool
-                              </button>
-                            </>
-                          )}
-                        </PopoverContent>
-                      </Popover>
-                    ) : tx.amount > 0 && !tx.is_transfer ? (
-                      <button
-                        onClick={() => {
-                          const newIsRefund = !(tx as any).is_refund;
-                          updateTransaction(tx.id, { is_refund: newIsRefund } as any);
-                          toast(newIsRefund ? 'Marked as refund — added back to this week\'s Fun Money' : 'Refund flag removed');
-                        }}
-                        className={`p-1 rounded transition-colors ${(tx as any).is_refund ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-300 hover:text-slate-600'}`}
-                        title={(tx as any).is_refund ? 'Refund (boosts Fun Money) — click to unmark' : 'Mark as refund (adds to Fun Money this week)'}
-                      >
-                        <Undo2 className="w-4 h-4" />
-                      </button>
-                    ) : null}
-
-                    {/* Fixed expense / bill assignment */}
-                    {tx.amount < 0 && fixedExpenses.length > 0 && (
-                      <Popover>
-                        <PopoverTrigger asChild>
-                          <button
-                            className={`p-1 rounded transition-colors ${assignedFixedExpense ? 'text-destructive' : 'text-slate-300 hover:text-slate-600'}`}
-                            title={assignedFixedExpense ? `Bill: ${assignedFixedExpense.name} (click to change)` : 'Mark as bill payment'}
-                          >
-                            <Receipt className="w-4 h-4" />
-                          </button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-44 p-2" align="end">
-                          <p className="text-[10px] font-medium text-muted-foreground mb-1.5 px-1">Mark as bill</p>
-                          <div className="space-y-0.5 max-h-48 overflow-y-auto">
-                            {fixedExpenses.map(e => (
-                              <button
-                                key={e.id}
-                                onClick={() => handleFixedExpenseAssign(tx.id, e.id)}
-                                className={`w-full text-left text-xs px-2 py-1.5 rounded hover:bg-muted/50 transition-colors flex items-center gap-2 ${
-                                  (tx as any).fixed_expense_id === e.id ? 'bg-muted font-medium' : ''
-                                }`}
-                              >
-                                {e.name}
-                                <span className="ml-auto text-muted-foreground text-[10px]">{formatCurrency(e.amount, e.currency)}/{e.frequency}</span>
-                              </button>
-                            ))}
-                          </div>
-                          {(tx as any).fixed_expense_id && (
-                            <>
-                              <div className="border-t my-1.5" />
-                              <button
-                                onClick={() => handleFixedExpenseAssign(tx.id, null)}
-                                className="w-full text-left text-xs px-2 py-1.5 rounded hover:bg-destructive/10 text-destructive flex items-center gap-1.5"
-                              >
-                                <X className="w-3 h-3" /> Remove bill tag
-                              </button>
-                            </>
-                          )}
-                        </PopoverContent>
-                      </Popover>
-                    )}
-
-                    {/* Work Travel Reimbursement flag */}
-                    <button
-                      onClick={() => {
-                        const newIsReimbursable = !tx.is_reimbursable;
-                        updateTransaction(tx.id, {
-                          is_reimbursable: newIsReimbursable,
-                          reimbursement_status: newIsReimbursable ? 'pending' : null,
-                        } as any);
-                        toast(newIsReimbursable ? '💼 Marked as Work Travel Reimbursement — excluded from personal spend' : 'Removed Work Reimbursement flag');
-                      }}
-                      className={`p-1 rounded transition-colors ${tx.is_reimbursable ? 'text-sky-600 font-bold' : 'text-slate-300 hover:text-slate-600'}`}
-                      title={tx.is_reimbursable ? 'Work Travel Claim (click to unmark)' : 'Mark as Work Travel Reimbursement'}
-                    >
-                      <Briefcase className="w-4 h-4" />
-                    </button>
-
-                    {/* Transfer flag */}
-                    <button
-                      onClick={() => {
-                        const isCurrentlyTransfer = tx.is_transfer || isConfirmedTransfer || transferStatus === 'suggested';
-                        if (isCurrentlyTransfer) {
-                          updateTransaction(tx.id, {
-                            is_transfer: false,
-                            transfer_status: null,
-                            transfer_side: null,
-                            matched_transaction_id: null,
-                            transfer_group_id: null,
-                          } as any);
-                          toast('Unmarked as transfer — now counts as income/spending');
-                        } else {
-                          updateTransaction(tx.id, { is_transfer: true } as any);
-                          toast('Marked as transfer — excluded from income/spending');
-                        }
-                      }}
-                      className={`p-1 rounded transition-colors ${(tx.is_transfer || isConfirmedTransfer) ? 'text-purple-600' : 'text-slate-300 hover:text-slate-600'}`}
-                      title={(tx.is_transfer || isConfirmedTransfer) ? 'Transfer (click to unmark and treat as income/spending)' : 'Mark as transfer'}
-                    >
-                      <ArrowLeftRight className="w-4 h-4" />
-                    </button>
-                  </div>
+                <div className="flex items-center gap-3 text-[11px] font-semibold tabular-nums">
+                  {group.totalSpent > 0 && (
+                    <span className="text-slate-600 dark:text-slate-300">
+                      Spent: <strong className="text-slate-900 dark:text-white font-bold">{formatCurrency(group.totalSpent, baseCurrency)}</strong>
+                    </span>
+                  )}
+                  {group.totalIncome > 0 && (
+                    <span className="text-emerald-600 font-bold">
+                      + {formatCurrency(group.totalIncome, baseCurrency)}
+                    </span>
+                  )}
                 </div>
               </div>
-            );
-          })
+
+              {/* Transactions in this group */}
+              <div className="space-y-1">
+                {group.txs.map(tx => {
+                  const cat = categories.find(c => c.id === tx.category_id);
+                  const isTransfer = tx.is_transfer || !!tx.transfer_group_id;
+                  const transferStatus = (tx as any).transfer_status as string | null;
+                  const isConfirmedTransfer = transferStatus === 'confirmed' || transferStatus === 'auto_confirmed';
+                  const isIncomeTransaction = tx.amount > 0 && !isTransfer && !isConfirmedTransfer && !(tx as any).is_refund;
+                  const displayCat = cat;
+                  const catColor = displayCat ? (CATEGORY_TYPE_COLORS[displayCat.type] || CATEGORY_TYPE_COLORS.variable) : '';
+
+                  const assignedGoal = (tx as any).goal_id ? goals.find(g => g.id === (tx as any).goal_id) : null;
+                  const assignedFixedExpense = (tx as any).fixed_expense_id ? fixedExpenses.find(e => e.id === (tx as any).fixed_expense_id) : null;
+                  const suggestedBill = assignedFixedExpense ? null : suggestBillFor(tx);
+
+                  const getTransferBadge = () => {
+                    if (!isTransfer && !transferStatus) return null;
+                    if (transferStatus === 'auto_confirmed') return (
+                      <Badge variant="secondary" className="text-[9px] px-1.5 py-0 shrink-0 bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
+                        <ArrowLeftRight className="w-2.5 h-2.5 mr-0.5" />Auto Transfer
+                      </Badge>
+                    );
+                    if (transferStatus === 'confirmed') return (
+                      <Badge variant="secondary" className="text-[9px] px-1.5 py-0 shrink-0 bg-[hsl(var(--success)/0.1)] text-[hsl(var(--success))]">
+                        <ArrowLeftRight className="w-2.5 h-2.5 mr-0.5" />Transfer
+                      </Badge>
+                    );
+                    if (transferStatus === 'suggested') return (
+                      <Badge variant="secondary" className="text-[9px] px-1.5 py-0 shrink-0 bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
+                        <ArrowLeftRight className="w-2.5 h-2.5 mr-0.5" />Suggested
+                      </Badge>
+                    );
+                    if (isTransfer) return (
+                      <Badge variant="secondary" className="text-[9px] px-1.5 py-0 shrink-0 bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
+                        <ArrowLeftRight className="w-2.5 h-2.5 mr-0.5" />Unmatched
+                      </Badge>
+                    );
+                    return null;
+                  };
+
+                  const txAccount = accountMap.get(tx.account_id);
+                  const accent = getRowAccent(tx, cat);
+                  const isBillCategorized = (tx.is_fixed || cat?.type === 'fixed') && !assignedFixedExpense;
+
+                  const isIncome = tx.amount > 0;
+
+                  return (
+                    <div
+                      key={tx.id}
+                      className={`relative flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-4 py-2.5 px-4 rounded-2xl border transition-all overflow-hidden ${
+                        isIncome
+                          ? 'bg-emerald-50/70 hover:bg-emerald-100/70 border-emerald-200/80 dark:bg-emerald-950/25 dark:border-emerald-900/40'
+                          : 'bg-white hover:bg-slate-50/80 border-slate-100'
+                      }`}
+                      style={{ boxShadow: `inset 4px 0 0 0 ${accent}` }}
+                    >
+                      {/* Left: Description & Metadata */}
+                      <div className="min-w-0 flex-1 pr-2">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="text-sm font-display font-bold text-slate-900 truncate">{tx.description}</p>
+                          {getTransferBadge()}
+                          {assignedGoal && (
+                            <Badge variant="secondary" className="text-[9px] px-1.5 py-0 shrink-0 bg-primary/10 text-primary">
+                              <Target className="w-2.5 h-2.5 mr-0.5" />{assignedGoal.name}
+                            </Badge>
+                          )}
+                          {assignedFixedExpense && (
+                            <Badge variant="secondary" className="text-[9px] px-1.5 py-0 shrink-0 bg-destructive/10 text-destructive">
+                              <Receipt className="w-2.5 h-2.5 mr-0.5" />{assignedFixedExpense.name}
+                            </Badge>
+                          )}
+                          {tx.is_reimbursable && (
+                            <Badge variant="secondary" className={`text-[9px] px-1.5 py-0 shrink-0 ${
+                              tx.reimbursement_status === 'reimbursed'
+                                ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
+                                : 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300'
+                            }`}>
+                              <Briefcase className="w-2.5 h-2.5 mr-0.5" />
+                              {tx.reimbursement_status === 'reimbursed' ? 'Work Reimbursed' : 'Work Claim Pending'}
+                            </Badge>
+                          )}
+                          {suggestedBill && (
+                            <button
+                              onClick={() => handleFixedExpenseAssign(tx.id, suggestedBill.id)}
+                              className="inline-flex items-center gap-0.5 text-[9px] px-1.5 py-0 rounded border border-dashed border-amber-500/50 text-amber-700 dark:text-amber-400 hover:bg-amber-500/10 transition-colors"
+                              title={`Looks like your "${suggestedBill.name}" bill — click to link`}
+                            >
+                              <Receipt className="w-2.5 h-2.5" />Link to {suggestedBill.name}?
+                            </button>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-400 mt-0.5">
+                          {formatUkDate(tx.posted_at, 'dd MMM yyyy')}
+                          {tx.merchant && ` · ${tx.merchant}`}
+                          {tx.transfer_side && ` · ${tx.transfer_side === 'out' ? '→ Out' : '← In'}`}
+                        </p>
+                      </div>
+
+                      {/* Right: Category, Amount & Actions in clean aligned columns */}
+                      <div className="flex items-center gap-2 sm:gap-3 shrink-0 ml-auto">
+                        {/* Category pill */}
+                        <div className="w-24 sm:w-28 flex justify-start shrink-0 min-w-0">
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              {displayCat ? (
+                                <button className="cursor-pointer shrink-0 max-w-full">
+                                  <Badge variant="secondary" className={`text-[10px] px-2 py-0.5 font-semibold truncate max-w-full hover:opacity-80 transition-opacity ${!displayCat.color ? catColor : ''}`}
+                                    style={getCategoryBadgeStyle(displayCat)}
+                                  >
+                                    <span className="truncate">{displayCat.name}</span>
+                                  </Badge>
+                                </button>
+                              ) : (
+                                <button className="cursor-pointer shrink-0">
+                                  <Badge variant="outline" className="text-[10px] px-2 py-0.5 text-muted-foreground hover:opacity-80">
+                                    Uncategorised
+                                  </Badge>
+                                </button>
+                              )}
+                            </PopoverTrigger>
+                            <PopoverContent className="w-48 p-2" align="end">
+                              <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1.5 px-1">
+                                {tx.amount > 0 ? 'Assign Income Stream' : 'Assign Expense Category'}
+                              </p>
+                              <div className="space-y-0.5 max-h-48 overflow-y-auto">
+                                {(tx.amount > 0 ? incomeCategoryOptions : expenseCategoryOptions).map(c => (
+                                  <button
+                                    key={c.id}
+                                    onClick={() => handleCategoryChange(tx.id, tx.category_id, c.id)}
+                                    className={`w-full text-left text-xs px-2 py-1.5 rounded hover:bg-muted/50 transition-colors flex items-center gap-2 ${
+                                      tx.category_id === c.id ? 'bg-muted font-bold' : ''
+                                    }`}
+                                  >
+                                    {c.color && <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: c.color }} />}
+                                    <span className="truncate">{c.name}</span>
+                                  </button>
+                                ))}
+                              </div>
+                              {tx.category_id && (
+                                <>
+                                  <div className="border-t my-1.5" />
+                                  <button
+                                    onClick={() => handleCategoryChange(tx.id, tx.category_id, null)}
+                                    className="w-full text-left text-xs px-2 py-1.5 rounded hover:bg-destructive/10 text-destructive flex items-center gap-1.5"
+                                  >
+                                    <X className="w-3 h-3" /> Clear category
+                                  </button>
+                                </>
+                              )}
+                            </PopoverContent>
+                          </Popover>
+                        </div>
+
+                        {/* Amount (Fixed width, left aligned) */}
+                        <div className="w-20 sm:w-24 text-left shrink-0">
+                          <p className={`text-xs sm:text-sm font-display font-bold tabular-nums ${tx.amount >= 0 ? 'text-[hsl(var(--success))]' : 'text-slate-900'}`}>
+                            {formatCurrency(tx.base_amount !== undefined && tx.base_amount !== null ? tx.base_amount : tx.amount, finance.settings?.base_currency || 'GBP')}
+                          </p>
+                        </div>
+
+                        {/* Action Icons Toolbar */}
+                        <div className="w-14 sm:w-16 flex items-center justify-end gap-0.5 shrink-0">
+                          {/* Pool assignment / refund flag */}
+                          {tx.amount < 0 && goals.length > 0 ? (
+                            <Popover>
+                              <PopoverTrigger asChild>
+                                <button
+                                  className={`p-1 rounded transition-colors ${assignedGoal ? 'text-primary' : 'text-slate-300 hover:text-slate-600'}`}
+                                  title={assignedGoal ? `Pool: ${assignedGoal.name} (click to change)` : 'Assign to pool'}
+                                >
+                                  <Target className="w-4 h-4" />
+                                </button>
+                              </PopoverTrigger>
+                              <PopoverContent className="w-44 p-2" align="end">
+                                <p className="text-[10px] font-medium text-muted-foreground mb-1.5 px-1">Assign to pool</p>
+                                <div className="space-y-0.5 max-h-48 overflow-y-auto">
+                                  {goals.map(g => (
+                                    <button
+                                      key={g.id}
+                                      onClick={() => handlePoolAssign(tx.id, g.id)}
+                                      className={`w-full text-left text-xs px-2 py-1.5 rounded hover:bg-muted/50 transition-colors flex items-center gap-2 ${
+                                        (tx as any).goal_id === g.id ? 'bg-muted font-medium' : ''
+                                      }`}
+                                    >
+                                      {g.color && <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: g.color }} />}
+                                      {g.name}
+                                    </button>
+                                  ))}
+                                </div>
+                                {(tx as any).goal_id && (
+                                  <>
+                                    <div className="border-t my-1.5" />
+                                    <button
+                                      onClick={() => handlePoolAssign(tx.id, null)}
+                                      className="w-full text-left text-xs px-2 py-1.5 rounded hover:bg-destructive/10 text-destructive flex items-center gap-1.5"
+                                    >
+                                      <X className="w-3 h-3" /> Remove from pool
+                                    </button>
+                                  </>
+                                )}
+                              </PopoverContent>
+                            </Popover>
+                          ) : tx.amount > 0 && !tx.is_transfer ? (
+                            <button
+                              onClick={() => {
+                                const newIsRefund = !(tx as any).is_refund;
+                                updateTransaction(tx.id, { is_refund: newIsRefund } as any);
+                                toast(newIsRefund ? 'Marked as refund — added back to this week\'s Fun Money' : 'Refund flag removed');
+                              }}
+                              className={`p-1 rounded transition-colors ${(tx as any).is_refund ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-300 hover:text-slate-600'}`}
+                              title={(tx as any).is_refund ? 'Refund (boosts Fun Money) — click to unmark' : 'Mark as refund (adds to Fun Money this week)'}
+                            >
+                              <Undo2 className="w-4 h-4" />
+                            </button>
+                          ) : null}
+
+                          {/* Fixed expense / bill assignment */}
+                          {tx.amount < 0 && fixedExpenses.length > 0 && (
+                            <Popover>
+                              <PopoverTrigger asChild>
+                                <button
+                                  className={`p-1 rounded transition-colors ${assignedFixedExpense ? 'text-destructive' : 'text-slate-300 hover:text-slate-600'}`}
+                                  title={assignedFixedExpense ? `Bill: ${assignedFixedExpense.name} (click to change)` : 'Mark as bill payment'}
+                                >
+                                  <Receipt className="w-4 h-4" />
+                                </button>
+                              </PopoverTrigger>
+                              <PopoverContent className="w-44 p-2" align="end">
+                                <p className="text-[10px] font-medium text-muted-foreground mb-1.5 px-1">Mark as bill</p>
+                                <div className="space-y-0.5 max-h-48 overflow-y-auto">
+                                  {fixedExpenses.map(e => (
+                                    <button
+                                      key={e.id}
+                                      onClick={() => handleFixedExpenseAssign(tx.id, e.id)}
+                                      className={`w-full text-left text-xs px-2 py-1.5 rounded hover:bg-muted/50 transition-colors flex items-center gap-2 ${
+                                        (tx as any).fixed_expense_id === e.id ? 'bg-muted font-medium' : ''
+                                      }`}
+                                    >
+                                      {e.name}
+                                      <span className="ml-auto text-muted-foreground text-[10px]">{formatCurrency(e.amount, e.currency)}/{e.frequency}</span>
+                                    </button>
+                                  ))}
+                                </div>
+                                {(tx as any).fixed_expense_id && (
+                                  <>
+                                    <div className="border-t my-1.5" />
+                                    <button
+                                      onClick={() => handleFixedExpenseAssign(tx.id, null)}
+                                      className="w-full text-left text-xs px-2 py-1.5 rounded hover:bg-destructive/10 text-destructive flex items-center gap-1.5"
+                                    >
+                                      <X className="w-3 h-3" /> Remove bill tag
+                                    </button>
+                                  </>
+                                )}
+                              </PopoverContent>
+                            </Popover>
+                          )}
+
+                          {/* Work Travel Reimbursement flag */}
+                          <button
+                            onClick={() => {
+                              const newIsReimbursable = !tx.is_reimbursable;
+                              updateTransaction(tx.id, {
+                                is_reimbursable: newIsReimbursable,
+                                reimbursement_status: newIsReimbursable ? 'pending' : null,
+                              } as any);
+                              toast(newIsReimbursable ? '💼 Marked as Work Travel Reimbursement — excluded from personal spend' : 'Removed Work Reimbursement flag');
+                            }}
+                            className={`p-1 rounded transition-colors ${tx.is_reimbursable ? 'text-sky-600 font-bold' : 'text-slate-300 hover:text-slate-600'}`}
+                            title={tx.is_reimbursable ? 'Work Travel Claim (click to unmark)' : 'Mark as Work Travel Reimbursement'}
+                          >
+                            <Briefcase className="w-4 h-4" />
+                          </button>
+
+                          {/* Transfer flag */}
+                          <button
+                            onClick={() => {
+                              const isCurrentlyTransfer = tx.is_transfer || isConfirmedTransfer || transferStatus === 'suggested';
+                              if (isCurrentlyTransfer) {
+                                updateTransaction(tx.id, {
+                                  is_transfer: false,
+                                  transfer_status: null,
+                                  transfer_side: null,
+                                  matched_transaction_id: null,
+                                  transfer_group_id: null,
+                                } as any);
+                                toast('Unmarked as transfer — now counts as income/spending');
+                              } else {
+                                updateTransaction(tx.id, { is_transfer: true } as any);
+                                toast('Marked as transfer — excluded from income/spending');
+                              }
+                            }}
+                            className={`p-1 rounded transition-colors ${(tx.is_transfer || isConfirmedTransfer) ? 'text-purple-600' : 'text-slate-300 hover:text-slate-600'}`}
+                            title={(tx.is_transfer || isConfirmedTransfer) ? 'Transfer (click to unmark and treat as income/spending)' : 'Mark as transfer'}
+                          >
+                            <ArrowLeftRight className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))
         )}
         {filtered.length > page * PAGE_SIZE && (
           <div className="text-center py-3 space-y-1">
