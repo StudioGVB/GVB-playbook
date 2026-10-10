@@ -728,65 +728,69 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                   </p>
                 </div>
 
-                {/* Right: Category, Amount & Actions in 1 single flex row */}
-                <div className="flex items-center gap-3 shrink-0 ml-auto">
-                  {/* Category pill */}
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      {displayCat ? (
-                        <button className="cursor-pointer shrink-0">
-                          <Badge variant="secondary" className={`text-[10px] px-2.5 py-1 font-semibold hover:opacity-80 transition-opacity ${!displayCat.color ? catColor : ''}`}
-                            style={getCategoryBadgeStyle(displayCat)}
-                          >
-                            {displayCat.name}
-                          </Badge>
-                        </button>
-                      ) : (
-                        <button className="cursor-pointer shrink-0">
-                          <Badge variant="outline" className="text-[10px] px-2.5 py-1 text-muted-foreground hover:opacity-80">
-                            Uncategorised
-                          </Badge>
-                        </button>
-                      )}
-                    </PopoverTrigger>
-                    <PopoverContent className="w-48 p-2" align="end">
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1.5 px-1">
-                        {tx.amount > 0 ? 'Assign Income Stream' : 'Assign Expense Category'}
-                      </p>
-                      <div className="space-y-0.5 max-h-48 overflow-y-auto">
-                        {(tx.amount > 0 ? incomeCategoryOptions : expenseCategoryOptions).map(c => (
-                          <button
-                            key={c.id}
-                            onClick={() => handleCategoryChange(tx.id, tx.category_id, c.id)}
-                            className={`w-full text-left text-xs px-2 py-1.5 rounded hover:bg-muted/50 transition-colors flex items-center gap-2 ${
-                              tx.category_id === c.id ? 'bg-muted font-bold' : ''
-                            }`}
-                          >
-                            {c.color && <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: c.color }} />}
-                            <span className="truncate">{c.name}</span>
+                {/* Right: Category, Amount & Actions in clean aligned columns */}
+                <div className="flex items-center gap-3 sm:gap-4 shrink-0 ml-auto">
+                  {/* Category pill (Fixed width container so amount column aligns perfectly) */}
+                  <div className="w-28 sm:w-36 flex justify-end shrink-0">
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        {displayCat ? (
+                          <button className="cursor-pointer shrink-0 max-w-full">
+                            <Badge variant="secondary" className={`text-[10px] px-2.5 py-1 font-semibold truncate max-w-full hover:opacity-80 transition-opacity ${!displayCat.color ? catColor : ''}`}
+                              style={getCategoryBadgeStyle(displayCat)}
+                            >
+                              <span className="truncate">{displayCat.name}</span>
+                            </Badge>
                           </button>
-                        ))}
-                      </div>
-                      {tx.category_id && (
-                        <>
-                          <div className="border-t my-1.5" />
-                          <button
-                            onClick={() => handleCategoryChange(tx.id, tx.category_id, null)}
-                            className="w-full text-left text-xs px-2 py-1.5 rounded hover:bg-destructive/10 text-destructive flex items-center gap-1.5"
-                          >
-                            <X className="w-3 h-3" /> Clear category
+                        ) : (
+                          <button className="cursor-pointer shrink-0">
+                            <Badge variant="outline" className="text-[10px] px-2.5 py-1 text-muted-foreground hover:opacity-80">
+                              Uncategorised
+                            </Badge>
                           </button>
-                        </>
-                      )}
-                    </PopoverContent>
-                  </Popover>
+                        )}
+                      </PopoverTrigger>
+                      <PopoverContent className="w-48 p-2" align="end">
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1.5 px-1">
+                          {tx.amount > 0 ? 'Assign Income Stream' : 'Assign Expense Category'}
+                        </p>
+                        <div className="space-y-0.5 max-h-48 overflow-y-auto">
+                          {(tx.amount > 0 ? incomeCategoryOptions : expenseCategoryOptions).map(c => (
+                            <button
+                              key={c.id}
+                              onClick={() => handleCategoryChange(tx.id, tx.category_id, c.id)}
+                              className={`w-full text-left text-xs px-2 py-1.5 rounded hover:bg-muted/50 transition-colors flex items-center gap-2 ${
+                                tx.category_id === c.id ? 'bg-muted font-bold' : ''
+                              }`}
+                            >
+                              {c.color && <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: c.color }} />}
+                              <span className="truncate">{c.name}</span>
+                            </button>
+                          ))}
+                        </div>
+                        {tx.category_id && (
+                          <>
+                            <div className="border-t my-1.5" />
+                            <button
+                              onClick={() => handleCategoryChange(tx.id, tx.category_id, null)}
+                              className="w-full text-left text-xs px-2 py-1.5 rounded hover:bg-destructive/10 text-destructive flex items-center gap-1.5"
+                            >
+                              <X className="w-3 h-3" /> Clear category
+                            </button>
+                          </>
+                        )}
+                      </PopoverContent>
+                    </Popover>
+                  </div>
 
-                  {/* Amount */}
-                  <p className={`text-sm font-display font-bold shrink-0 tabular-nums ${tx.amount >= 0 ? 'text-[hsl(var(--success))]' : 'text-slate-900'}`}>
-                    {formatCurrency(tx.base_amount !== undefined && tx.base_amount !== null ? tx.base_amount : tx.amount, finance.settings?.base_currency || 'GBP')}
-                  </p>
+                  {/* Amount (Fixed width, right aligned so all numbers are 100% aligned vertically down the page) */}
+                  <div className="w-20 sm:w-24 text-right shrink-0">
+                    <p className={`text-sm font-display font-bold tabular-nums ${tx.amount >= 0 ? 'text-[hsl(var(--success))]' : 'text-slate-900'}`}>
+                      {formatCurrency(tx.base_amount !== undefined && tx.base_amount !== null ? tx.base_amount : tx.amount, finance.settings?.base_currency || 'GBP')}
+                    </p>
+                  </div>
 
-                  {/* Action Icons Toolbar (single non-wrapping flex row) */}
+                  {/* Action Icons Toolbar */}
                   <div className="flex items-center gap-0.5 shrink-0">
                     {/* Pool assignment / refund flag */}
                     {tx.amount < 0 && goals.length > 0 ? (
@@ -922,29 +926,6 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                       title={(tx.is_transfer || isConfirmedTransfer) ? 'Transfer (click to unmark and treat as income/spending)' : 'Mark as transfer'}
                     >
                       <ArrowLeftRight className="w-4 h-4" />
-                    </button>
-
-                    {/* Review status */}
-                    <button
-                      onClick={() => updateTransaction(tx.id, { is_reviewed: !tx.is_reviewed } as any)}
-                      className={`p-1 rounded ${tx.is_reviewed ? 'text-emerald-500 font-bold' : 'text-slate-300 hover:text-slate-600'}`}
-                      title={tx.is_reviewed ? 'Reviewed' : 'Mark as reviewed'}
-                    >
-                      <Check className="w-4 h-4" />
-                    </button>
-
-                    {/* Delete transaction */}
-                    <button
-                      onClick={async () => {
-                        if (confirm(`Delete transaction "${tx.description}"?`)) {
-                          await deleteTransaction(tx.id);
-                          toast.success('Transaction deleted');
-                        }
-                      }}
-                      className="p-1 rounded text-slate-300 hover:text-rose-600 transition-colors"
-                      title="Delete transaction"
-                    >
-                      <Trash2 className="w-4 h-4" />
                     </button>
                   </div>
                 </div>

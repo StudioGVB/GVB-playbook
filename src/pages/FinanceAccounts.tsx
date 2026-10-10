@@ -179,10 +179,13 @@ export default function FinanceAccountsPage({ defaultTab }: { defaultTab?: strin
   const includedAccounts = finance.accounts.filter(a => !a.exclude_from_totals && a.provider !== 'external');
   const activeCount = includedAccounts.length;
 
-  // Cost-of-living quick summary (very rough — sum of survival + buffer feed)
-  const survivalMonthly = assumptions?.future_monthly_survival_cost || 0;
+  // Dynamic Cost of Living & Runway calculation
+  const survivalMonthly = (assumptions?.future_monthly_survival_cost && assumptions.future_monthly_survival_cost > 0)
+    ? assumptions.future_monthly_survival_cost
+    : (snapshot?.emergencySurvivalMonthly ?? snapshot?.survivalCostMonthly ?? (fixedMonthlyTotal + 100));
+
   const bufferMonths = assumptions?.buffer_months || 3;
-  const runwayMonths = survivalMonthly > 0 ? totalLiquidity / survivalMonthly : 0;
+  const runwayMonths = survivalMonthly > 0 ? totalLiquidity / survivalMonthly : (snapshot ? snapshot.runwayWeeks / 4.33 : 0);
   const runwayPct = Math.min(100, Math.round((runwayMonths / bufferMonths) * 100));
   const runwayOnTrack = runwayMonths >= bufferMonths;
 
@@ -273,22 +276,29 @@ export default function FinanceAccountsPage({ defaultTab }: { defaultTab?: strin
                 <div className="absolute -bottom-8 -left-8 w-24 h-24 bg-[#86EFAC]/20 rounded-full" />
               </div>
 
-              {/* Cost of Living summary tile */}
+              {/* Cost of Living / Runway summary tile */}
               <div className="md:col-span-2 bg-[#86EFAC] rounded-[2rem] p-6 border-2 border-[#22C55E] flex flex-col justify-between min-h-[160px]">
                 <div className="flex justify-between items-start">
                   <div className="bg-white/50 p-3 rounded-2xl">
                     <TrendingUp className="w-6 h-6 text-[#166534]" />
                   </div>
-                  <span className="bg-[#166534] text-white px-3 py-1 rounded-full text-xs font-bold uppercase font-display tracking-wide">
+                  <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase font-display tracking-wide ${
+                    runwayOnTrack ? 'bg-[#166534] text-white' : 'bg-amber-600 text-white'
+                  }`}>
                     {runwayOnTrack ? 'On Track' : 'Watch'}
                   </span>
                 </div>
                 <div>
-                  <h3 className="text-xl font-display font-bold text-[#166534]">Runway</h3>
-                  <div className="mt-3 w-full bg-white/50 rounded-full h-3 overflow-hidden">
+                  <div className="flex items-baseline justify-between flex-wrap gap-1">
+                    <h3 className="text-xl font-display font-bold text-[#166534]">Runway</h3>
+                    <span className="text-xs font-semibold text-[#166534]/90">
+                      {formatCurrency(survivalMonthly, baseCurrency)}/mo survival
+                    </span>
+                  </div>
+                  <div className="mt-2.5 w-full bg-white/50 rounded-full h-3 overflow-hidden">
                     <div
                       className="h-full transition-all duration-500"
-                      style={{ width: `${runwayPct}%`, backgroundColor: GREEN }}
+                      style={{ width: `${Math.max(runwayPct > 0 ? runwayPct : 0, 4)}%`, backgroundColor: runwayOnTrack ? GREEN : '#f59e0b' }}
                     />
                   </div>
                   <p className="mt-2 text-sm text-[#166534]/90 font-medium tabular-nums">
