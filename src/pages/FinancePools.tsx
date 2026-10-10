@@ -27,6 +27,8 @@ import WeeklyPoolSavingsCard from '@/components/finance/WeeklyPoolSavingsCard';
 import { format, startOfMonth, endOfMonth } from 'date-fns';
 import { detectPaycheck, calculatePaycheckWaterfall, isPaycheckProcessed, markPaycheckProcessed, unmarkPaycheckProcessed, savePaycheckAllocationMeta, getPaycheckAllocationMeta } from '@/lib/paycheckEngine';
 import { baseAmt } from '@/lib/financeUtils';
+import { evaluatePoolFeasibility } from '@/lib/feasibilityEngine';
+import FeasibilityAlert from '@/components/finance/FeasibilityAlert';
 import { toast } from 'sonner';
 
 
@@ -211,6 +213,43 @@ export default function FinancePoolsPage() {
   const emergencyGoal = useMemo(() => {
     return finance.goals.find(g => (g as any).is_emergency === true || g.name.toLowerCase().includes('emergency'));
   }, [finance.goals]);
+
+  // Real-time feasibility assessments for Create & Edit Pool dialogs
+  const createFeasibility = useMemo(() => {
+    const targetVal = finance.convertToBase(parseFloat(newName ? newAmount : '0') || 0, newCurrency);
+    return evaluatePoolFeasibility({
+      targetAmount: targetVal,
+      currentAssigned: 0,
+      deadline: newDeadline || null,
+      startDate: newStartDate || null,
+      existingGoals: finance.goals,
+      transactions: finance.transactions,
+      categories: finance.categories,
+      fixedMonthlyExpenses: fixedMonthlyTotal,
+      weeklyVariableBudget: (assumptions?.weekly_fun_budget || 100) + (assumptions?.weekly_essential_budget || 50),
+      convertToBase: finance.convertToBase,
+    });
+  }, [newAmount, newCurrency, newDeadline, newStartDate, newName, finance.goals, finance.transactions, finance.categories, fixedMonthlyTotal, assumptions, finance.convertToBase]);
+
+  const editFeasibility = useMemo(() => {
+    const targetVal = finance.convertToBase(parseFloat(editTarget) || 0, editCurrency);
+    const goal = editGoalId ? finance.goals.find(g => g.id === editGoalId) : null;
+    const assignedVal = goal ? finance.convertToBase(goal.assigned_amount || 0, goal.currency) : 0;
+
+    return evaluatePoolFeasibility({
+      targetAmount: targetVal,
+      currentAssigned: assignedVal,
+      deadline: editDeadline || null,
+      startDate: editStartDate || null,
+      existingGoals: finance.goals,
+      evaluatingGoalId: editGoalId,
+      transactions: finance.transactions,
+      categories: finance.categories,
+      fixedMonthlyExpenses: fixedMonthlyTotal,
+      weeklyVariableBudget: (assumptions?.weekly_fun_budget || 100) + (assumptions?.weekly_essential_budget || 50),
+      convertToBase: finance.convertToBase,
+    });
+  }, [editTarget, editCurrency, editDeadline, editStartDate, editGoalId, finance.goals, finance.transactions, finance.categories, fixedMonthlyTotal, assumptions, finance.convertToBase]);
 
   const emergencyGoalAssigned = useMemo(() => {
     if (!emergencyGoal) return 0;
@@ -1004,11 +1043,34 @@ export default function FinancePoolsPage() {
                       </PopoverContent>
                     </Popover>
                     <div className="min-w-0 flex flex-col">
-                      <div className="flex items-center gap-1.5">
-                        <h3 className="text-sm font-bold text-slate-900 truncate">{goal.name}</h3>
-                        {(goal as any).is_stash && <Badge variant="secondary" className="text-[9px] px-1.5 py-0 bg-slate-100 text-slate-600 border border-slate-200">Stash</Badge>}
-                        {tripInfo && <Badge variant="outline" className="text-[9px] px-1.5 py-0 border-sky-200 text-sky-600 bg-sky-50">Trip</Badge>}
-                      </div>
+                      {(() => {
+                        const cardFeasibility = goal.deadline ? evaluatePoolFeasibility({
+                          targetAmount: finance.convertToBase(goal.target_amount || 0, goal.currency),
+                          currentAssigned: finance.convertToBase(goal.assigned_amount || 0, goal.currency),
+                          deadline: goal.deadline || null,
+                          startDate: goal.start_date || null,
+                          existingGoals: finance.goals,
+                          evaluatingGoalId: goal.id,
+                          transactions: finance.transactions,
+                          categories: finance.categories,
+                          fixedMonthlyExpenses: fixedMonthlyTotal,
+                          weeklyVariableBudget: (assumptions?.weekly_fun_budget || 100) + (assumptions?.weekly_essential_budget || 50),
+                          convertToBase: finance.convertToBase,
+                        }) : null;
+
+                        return (
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <h3 className="text-sm font-bold text-slate-900 truncate">{goal.name}</h3>
+                            {(goal as any).is_stash && <Badge variant="secondary" className="text-[9px] px-1.5 py-0 bg-slate-100 text-slate-600 border border-slate-200">Stash</Badge>}
+                            {tripInfo && <Badge variant="outline" className="text-[9px] px-1.5 py-0 border-sky-200 text-sky-600 bg-sky-50">Trip</Badge>}
+                            {cardFeasibility && !cardFeasibility.isFeasible && cardFeasibility.requiredMonthlyPace > 0 && (
+                              <Badge variant="outline" className="text-[9px] px-1.5 py-0 bg-rose-50 text-rose-700 border-rose-200 font-bold">
+                                ⚠️ Unfeasible
+                              </Badge>
+                            )}
+                          </div>
+                        );
+                      })()}
                       {goal.description && (
                         <p className="text-[11px] text-slate-500 font-normal mt-0.5 line-clamp-2 leading-tight">
                           {goal.description}
@@ -1260,6 +1322,14 @@ export default function FinancePoolsPage() {
                 ))}
               </div>
             </div>
+            {newDeadline && parseFloat(newAmount) > 0 && (
+              <FeasibilityAlert
+                assessment={createFeasibility}
+                currency={newCurrency}
+                onApplyRecommendedDate={d => setNewDeadline(d)}
+                onApplyRecommendedTarget={t => setNewAmount(String(t))}
+              />
+            )}
             <Button onClick={handleCreate} className="w-full">Create Pool</Button>
           </div>
         </DialogContent>
@@ -1336,6 +1406,14 @@ export default function FinancePoolsPage() {
               </div>
               <Switch checked={editIsStash} onCheckedChange={setEditIsStash} />
             </div>
+            {editDeadline && parseFloat(editTarget) > 0 && (
+              <FeasibilityAlert
+                assessment={editFeasibility}
+                currency={editCurrency}
+                onApplyRecommendedDate={d => setEditDeadline(d)}
+                onApplyRecommendedTarget={t => setEditTarget(String(t))}
+              />
+            )}
             <Button onClick={handleEditGoal} className="w-full">Save Changes</Button>
           </div>
         </DialogContent>
