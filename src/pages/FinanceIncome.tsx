@@ -383,150 +383,88 @@ export default function FinanceIncome() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            {/* Main view toggle */}
-            <div className="bg-white/80 backdrop-blur-md p-1 rounded-2xl border border-[#FF7AD1]/30 flex items-center gap-1 shadow-sm">
-              <button
-                onClick={() => setActiveTab('income')}
-                className={`px-4 py-2 rounded-xl text-xs font-display font-bold transition-all flex items-center gap-1.5 ${
-                  activeTab === 'income'
-                    ? 'bg-[#FF2EB8] text-white shadow-sm'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-[#FFF5FA]'
-                }`}
+            {/* Month Switcher */}
+            <div className="flex items-center gap-1 bg-white/80 backdrop-blur-md rounded-2xl p-1.5 shadow-sm border border-[#FF7AD1]/30">
+              <Button size="sm" variant="ghost" onClick={() => setMonthOffset(m => m - 1)} className="h-9 w-9 p-0 rounded-xl text-[#FF2EB8] hover:bg-[#FFF5FA]">
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <div className="px-3 font-display font-bold text-sm text-[#FF2EB8] min-w-[120px] text-center">{monthLabel}</div>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setMonthOffset(m => Math.min(0, m + 1))}
+                disabled={monthOffset >= 0}
+                className="h-9 w-9 p-0 rounded-xl text-[#FF2EB8] hover:bg-[#FFF5FA]"
               >
-                <DollarSign className="w-3.5 h-3.5" />
-                Earned Income
-              </button>
-              <button
-                onClick={() => setActiveTab('reimbursements')}
-                className={`px-4 py-2 rounded-xl text-xs font-display font-bold transition-all flex items-center gap-1.5 ${
-                  activeTab === 'reimbursements'
-                    ? 'bg-[#0284C7] text-white shadow-sm'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-[#FFF5FA]'
-                }`}
-              >
-                <Briefcase className="w-3.5 h-3.5" />
-                Work Reimbursements
-                {pendingReimbursements.length > 0 && (
-                  <span className="ml-1 bg-white/20 text-white px-1.5 py-0.5 rounded-full text-[10px]">
-                    {pendingReimbursements.length}
-                  </span>
-                )}
-              </button>
+                <ChevronRight className="h-4 w-4" />
+              </Button>
             </div>
-
-            {/* Month Switcher (Income tab) */}
-            {activeTab === 'income' && (
-              <div className="flex items-center gap-1 bg-white/80 backdrop-blur-md rounded-2xl p-1.5 shadow-sm border border-[#FF7AD1]/30">
-                <Button size="sm" variant="ghost" onClick={() => setMonthOffset(m => m - 1)} className="h-9 w-9 p-0 rounded-xl text-[#FF2EB8] hover:bg-[#FFF5FA]">
-                  <ChevronLeft className="h-4 w-4" />
-                </Button>
-                <div className="px-3 font-display font-bold text-sm text-[#FF2EB8] min-w-[120px] text-center">{monthLabel}</div>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => setMonthOffset(m => Math.min(0, m + 1))}
-                  disabled={monthOffset >= 0}
-                  className="h-9 w-9 p-0 rounded-xl text-[#FF2EB8] hover:bg-[#FFF5FA]"
-                >
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
-              </div>
-            )}
           </div>
         </div>
 
-        {/* --- VIEW TAB 1: EARNED INCOME --- */}
+        {/* --- VIEW: EARNED INCOME --- */}
         {activeTab === 'income' && (
           <div className="space-y-6">
-            {/* Bento hero */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              {/* Total earned hero */}
-              <div
-                className="md:col-span-2 md:row-span-2 bg-white rounded-[2rem] p-7 border-2 border-[#FF2EB8] relative overflow-hidden flex flex-col justify-between min-h-[220px]"
-                style={{ boxShadow: `8px 8px 0px 0px ${PINK}` }}
-              >
-                <div className="relative z-10">
-                  <p className="text-[#FF2EB8] font-display font-bold uppercase tracking-widest text-xs mb-2">
-                    Total earned · {monthLabel}
-                  </p>
-                  <h2 className="text-4xl sm:text-5xl font-display font-black text-slate-900 tabular-nums leading-none">
-                    {formatCurrency(grandTotalWithReimbursements, baseCurrency)}
-                  </h2>
-                  <div className="mt-4 inline-flex items-center gap-1.5 bg-[#86EFAC] px-3 py-1 rounded-full text-[#166534] text-sm font-bold">
-                    <TrendingUp className="w-4 h-4" />
+          {/* Bento hero (Condensed Single-Row Grid) */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            {/* Total earned hero */}
+            <div
+              className="md:col-span-2 bg-white rounded-[2rem] p-6 border-2 border-[#FF2EB8] relative overflow-hidden flex flex-col justify-between min-h-[140px]"
+              style={{ boxShadow: `6px 6px 0px 0px ${PINK}` }}
+            >
+              <div className="relative z-10">
+                <p className="text-[#FF2EB8] font-display font-bold uppercase tracking-widest text-xs mb-1">
+                  Total earned · {monthLabel}
+                </p>
+                <h2 className="text-3xl sm:text-4xl font-display font-black text-slate-900 tabular-nums leading-none">
+                  {formatCurrency(grandTotalWithReimbursements, baseCurrency)}
+                </h2>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <div className="inline-flex items-center gap-1.5 bg-[#86EFAC] px-3 py-1 rounded-full text-[#166534] text-xs font-bold">
+                    <TrendingUp className="w-3.5 h-3.5" />
                     {incomeTxs.length} payment{incomeTxs.length === 1 ? '' : 's'} · {BUCKETS.length} sources
                     {reimbursementTotal > 0 && <span className="ml-1 opacity-80">· incl. {formatCurrency(reimbursementTotal, baseCurrency)} reimb.</span>}
                   </div>
-                </div>
-                {/* Bar viz of buckets */}
-                <div className="mt-8 flex items-end gap-2 h-20">
-                  {sortedBuckets.map(b => {
-                    const v = bucketed[b.key]?.total || 0;
-                    const max = Math.max(1, ...sortedBuckets.map(x => bucketed[x.key]?.total || 0));
-                    return (
-                      <div key={b.key} className="flex-1 flex flex-col items-center gap-1">
-                        <div
-                          className="w-full rounded-t-lg transition-all"
-                          style={{ height: `${Math.max(8, (v / max) * 100)}%`, backgroundColor: b.accent, opacity: v > 0 ? 1 : 0.25 }}
-                        />
-                      </div>
-                    );
-                  })}
-                </div>
-                <div className="absolute -top-12 -right-12 w-40 h-40 bg-[#FF7AD1]/15 rounded-full" />
-                <div className="absolute -bottom-8 -left-8 w-24 h-24 bg-[#86EFAC]/20 rounded-full" />
-              </div>
-
-              {/* Top source tile */}
-              <div className="md:col-span-2 bg-[#86EFAC] rounded-[2rem] p-6 border-2 border-[#22C55E] flex flex-col justify-between min-h-[160px]">
-                <div className="flex justify-between items-start">
-                  <div className="bg-white/50 p-3 rounded-2xl">
-                    <TrendingUp className="w-6 h-6 text-[#166534]" />
-                  </div>
-                  <span className="bg-white px-3 py-1 rounded-full text-[#166534] text-xs font-bold uppercase font-display tracking-wide">
-                    Top source
-                  </span>
-                </div>
-                <div>
-                  <h3 className="text-xl font-display font-bold text-[#166534]">{topBucket?.label || '—'}</h3>
-                  <div className="mt-3 w-full bg-white/50 rounded-full h-3 overflow-hidden">
-                    <div
-                      className="h-full transition-all duration-500"
-                      style={{ width: `${topShare}%`, backgroundColor: GREEN }}
-                    />
-                  </div>
-                  <p className="mt-2 text-sm text-[#166534]/90 font-medium tabular-nums">
-                    {formatCurrency(topBucket ? bucketed[topBucket.key]?.total || 0 : 0, baseCurrency)} · {topShare.toFixed(0)}% of month
-                  </p>
+                  {(bucketed.other?.count || 0) > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => document.getElementById('bucket-other')?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+                      className="inline-flex items-center gap-1 bg-[#FF7AD1] text-white px-3 py-1 rounded-full text-xs font-bold hover:bg-[#FF2EB8] transition-colors"
+                    >
+                      <HelpCircle className="w-3.5 h-3.5" />
+                      {bucketed.other?.count} in Other · Tap to tag
+                    </button>
+                  )}
                 </div>
               </div>
+              <div className="absolute -top-12 -right-12 w-32 h-32 bg-[#FF7AD1]/15 rounded-full" />
+              <div className="absolute -bottom-8 -left-8 w-20 h-20 bg-[#86EFAC]/20 rounded-full" />
+            </div>
 
-              {/* Untagged nudge / Other summary tile */}
-              <button
-                type="button"
-                onClick={() => {
-                  document.getElementById('bucket-other')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                }}
-                className="bg-[#FF7AD1] rounded-[2rem] p-6 border-2 border-[#FF2EB8] text-white flex flex-col items-center justify-center gap-2 group cursor-pointer hover:scale-[1.02] active:scale-[0.98] transition-transform min-h-[160px]"
-              >
-                <div className="w-12 h-12 rounded-2xl bg-white/25 flex items-center justify-center group-hover:rotate-12 transition-transform">
-                  <HelpCircle className="w-6 h-6" />
+            {/* Top source tile */}
+            <div className="md:col-span-2 bg-[#86EFAC] rounded-[2rem] p-6 border-2 border-[#22C55E] flex flex-col justify-between min-h-[140px]">
+              <div className="flex justify-between items-start">
+                <div className="bg-white/50 p-2.5 rounded-xl">
+                  <TrendingUp className="w-5 h-5 text-[#166534]" />
                 </div>
-                <span className="font-display font-bold text-sm">
-                  {bucketed.other?.count || 0} in Other
+                <span className="bg-white px-3 py-1 rounded-full text-[#166534] text-xs font-bold uppercase font-display tracking-wide">
+                  Top source
                 </span>
-                <span className="text-white/80 text-xs">Tap to tag them</span>
-              </button>
-
-              {/* Payments count tile */}
-              <div className="bg-white rounded-[2rem] p-6 border-2 border-slate-200 flex flex-col items-center justify-center gap-2 min-h-[160px]">
-                <div className="w-12 h-12 rounded-2xl bg-[#FFF5FA] flex items-center justify-center text-[#FF2EB8]">
-                  <DollarSign className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-lg font-display font-bold text-[#166534]">{topBucket?.label || '—'}</h3>
+                <div className="mt-2 w-full bg-white/50 rounded-full h-2.5 overflow-hidden">
+                  <div
+                    className="h-full transition-all duration-500"
+                    style={{ width: `${topShare}%`, backgroundColor: GREEN }}
+                  />
                 </div>
-                <span className="font-display font-black text-2xl text-slate-900 tabular-nums">{incomeTxs.length}</span>
-                <span className="text-slate-400 text-xs font-medium">payments this month</span>
+                <p className="mt-1.5 text-xs text-[#166534]/90 font-semibold tabular-nums">
+                  {formatCurrency(topBucket ? bucketed[topBucket.key]?.total || 0 : 0, baseCurrency)} · {topShare.toFixed(0)}% of month
+                </p>
               </div>
             </div>
+          </div>
 
             {/* Income Breakdown Pie Chart Card */}
             <div className="bg-white rounded-[2rem] p-6 sm:p-7 border-2 border-[#FF7AD1]/30 shadow-sm relative overflow-hidden">
