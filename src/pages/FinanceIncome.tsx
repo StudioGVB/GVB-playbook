@@ -383,22 +383,42 @@ export default function FinanceIncome() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            {/* Month Switcher */}
-            <div className="flex items-center gap-1 bg-white/80 backdrop-blur-md rounded-2xl p-1.5 shadow-sm border border-[#FF7AD1]/30">
-              <Button size="sm" variant="ghost" onClick={() => setMonthOffset(m => m - 1)} className="h-9 w-9 p-0 rounded-xl text-[#FF2EB8] hover:bg-[#FFF5FA]">
-                <ChevronLeft className="h-4 w-4" />
-              </Button>
-              <div className="px-3 font-display font-bold text-sm text-[#FF2EB8] min-w-[120px] text-center">{monthLabel}</div>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => setMonthOffset(m => Math.min(0, m + 1))}
-                disabled={monthOffset >= 0}
-                className="h-9 w-9 p-0 rounded-xl text-[#FF2EB8] hover:bg-[#FFF5FA]"
-              >
-                <ChevronRight className="h-4 w-4" />
-              </Button>
-            </div>
+            {/* Month Switcher (Income tab) */}
+            {activeTab === 'income' && (
+              <div className="flex items-center gap-1 bg-white/80 backdrop-blur-md rounded-2xl p-1.5 shadow-sm border border-[#FF7AD1]/30">
+                <Button size="sm" variant="ghost" onClick={() => setMonthOffset(m => m - 1)} className="h-9 w-9 p-0 rounded-xl text-[#FF2EB8] hover:bg-[#FFF5FA]">
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <div className="px-3 font-display font-bold text-sm text-[#FF2EB8] min-w-[120px] text-center">{monthLabel}</div>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setMonthOffset(m => Math.min(0, m + 1))}
+                  disabled={monthOffset >= 0}
+                  className="h-9 w-9 p-0 rounded-xl text-[#FF2EB8] hover:bg-[#FFF5FA]"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            )}
+
+            {/* Work Reimbursements Link */}
+            <button
+              onClick={() => setActiveTab(activeTab === 'reimbursements' ? 'income' : 'reimbursements')}
+              className={`px-4 py-2.5 rounded-2xl text-xs font-display font-bold transition-all flex items-center gap-1.5 shadow-sm border ${
+                activeTab === 'reimbursements'
+                  ? 'bg-[#0284C7] text-white border-[#0284C7]'
+                  : 'bg-white/80 backdrop-blur-md text-slate-700 hover:text-slate-900 border-[#FF7AD1]/30 hover:bg-white'
+              }`}
+            >
+              <Briefcase className={`w-3.5 h-3.5 ${activeTab === 'reimbursements' ? 'text-white' : 'text-[#0284C7]'}`} />
+              {activeTab === 'reimbursements' ? '← Back to Earned Income' : 'Work Reimbursements'}
+              {pendingReimbursements.length > 0 && activeTab !== 'reimbursements' && (
+                <span className="ml-1 bg-[#0284C7] text-white px-1.5 py-0.5 rounded-full text-[10px]">
+                  {pendingReimbursements.length}
+                </span>
+              )}
+            </button>
           </div>
         </div>
 
