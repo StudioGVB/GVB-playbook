@@ -730,8 +730,8 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
 
                 {/* Right: Category, Amount & Actions in clean aligned columns */}
                 <div className="flex items-center gap-3 sm:gap-4 shrink-0 ml-auto">
-                  {/* Category pill (Fixed width container so amount column aligns perfectly) */}
-                  <div className="w-28 sm:w-36 flex justify-end shrink-0">
+                  {/* Category pill (Fixed width container starting at exact same point) */}
+                  <div className="w-28 sm:w-36 flex justify-start shrink-0">
                     <Popover>
                       <PopoverTrigger asChild>
                         {displayCat ? (
@@ -783,15 +783,15 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                     </Popover>
                   </div>
 
-                  {/* Amount (Fixed width, right aligned so all numbers are 100% aligned vertically down the page) */}
-                  <div className="w-20 sm:w-24 text-right shrink-0">
+                  {/* Amount (Fixed width, left aligned so all amounts start at the exact same point vertically down the page) */}
+                  <div className="w-24 sm:w-28 text-left shrink-0">
                     <p className={`text-sm font-display font-bold tabular-nums ${tx.amount >= 0 ? 'text-[hsl(var(--success))]' : 'text-slate-900'}`}>
                       {formatCurrency(tx.base_amount !== undefined && tx.base_amount !== null ? tx.base_amount : tx.amount, finance.settings?.base_currency || 'GBP')}
                     </p>
                   </div>
 
                   {/* Action Icons Toolbar */}
-                  <div className="flex items-center gap-0.5 shrink-0">
+                  <div className="w-20 sm:w-24 flex items-center justify-end gap-0.5 shrink-0">
                     {/* Pool assignment / refund flag */}
                     {tx.amount < 0 && goals.length > 0 ? (
                       <Popover>
