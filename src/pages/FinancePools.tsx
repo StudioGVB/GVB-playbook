@@ -267,6 +267,47 @@ export default function FinancePoolsPage() {
       }));
   }, [finance.goals, finance.convertToBase]);
 
+  const sortedNonEmergencyGoals = useMemo(() => {
+    const nonEmergency = finance.goals.filter(
+      g => !(g as any).is_emergency && !g.name.toLowerCase().includes('emergency')
+    );
+    return [...nonEmergency].sort((a, b) => {
+      const aAssigned = a.assigned_amount || 0;
+      const aTripInfo = goalTripSpent.get(a.id);
+      const aSpent = aTripInfo?.spent || 0;
+      const aRemaining = Math.max(0, aAssigned - aSpent);
+      const aHit = a.target_amount > 0 && (aTripInfo ? aRemaining : aAssigned) >= a.target_amount;
+
+      const bAssigned = b.assigned_amount || 0;
+      const bTripInfo = goalTripSpent.get(b.id);
+      const bSpent = bTripInfo?.spent || 0;
+      const bRemaining = Math.max(0, bAssigned - bSpent);
+      const bHit = b.target_amount > 0 && (bTripInfo ? bRemaining : bAssigned) >= b.target_amount;
+
+      // 1. Completed / Fully funded goals go to the bottom (last)
+      if (aHit !== bHit) {
+        return aHit ? 1 : -1;
+      }
+
+      // 2. Soonest due date first
+      const aHasDeadline = !!a.deadline;
+      const bHasDeadline = !!b.deadline;
+
+      if (aHasDeadline && bHasDeadline) {
+        const aDate = new Date(String(a.deadline).split('T')[0] + 'T00:00:00').getTime();
+        const bDate = new Date(String(b.deadline).split('T')[0] + 'T00:00:00').getTime();
+        return aDate - bDate;
+      }
+
+      // Pools with deadlines come before pools without deadlines
+      if (aHasDeadline !== bHasDeadline) {
+        return aHasDeadline ? -1 : 1;
+      }
+
+      return (a.priority || 99) - (b.priority || 99);
+    });
+  }, [finance.goals, goalTripSpent]);
+
   const assignedOtherGoalsTotal = otherGoalSegments.reduce((s, seg) => s + seg.amount, 0);
   const unassignedCash = Math.max(0, totalCash - assignedOtherGoalsTotal);
 
@@ -994,22 +1035,27 @@ export default function FinancePoolsPage() {
 
 
         {/* Goal Pool Cards */}
-        {finance.goals.filter(g => !(g as any).is_emergency && !g.name.toLowerCase().includes('emergency')).map(goal => {
+        {sortedNonEmergencyGoals.map(goal => {
           const assigned = goal.assigned_amount || 0;
           const tripInfo = goalTripSpent.get(goal.id);
           const tripSpent = tripInfo?.spent || 0;
           const remaining = Math.max(0, assigned - tripSpent);
           const displayAmount = tripInfo ? remaining : assigned;
-          const pct = Math.min((displayAmount / goal.target_amount) * 100, 100);
-          const goalColor = goal.color || '#4558ff';
+          const pct = goal.target_amount > 0 ? Math.min((displayAmount / goal.target_amount) * 100, 100) : 0;
+          const isHit = goal.target_amount > 0 && displayAmount >= goal.target_amount;
+          const goalColor = isHit ? '#10b981' : (goal.color || '#4558ff');
           const GoalIcon = getPoolIcon(goal.name);
           return (
             <div
               key={goal.id}
-              className="bg-white rounded-2xl border-2 p-5 transition-all hover:scale-[1.01] flex flex-col justify-between"
+              className={`rounded-2xl border-2 p-5 transition-all hover:scale-[1.01] flex flex-col justify-between ${
+                isHit
+                  ? 'bg-emerald-50/80 border-emerald-300 dark:bg-emerald-950/30 dark:border-emerald-800'
+                  : 'bg-white'
+              }`}
               style={{
-                borderColor: `${goalColor}45`,
-                boxShadow: `4px 4px 0px 0px ${goalColor}12`,
+                borderColor: isHit ? '#10b981' : `${goalColor}45`,
+                boxShadow: isHit ? '4px 4px 0px 0px rgba(16,185,129,0.2)' : `4px 4px 0px 0px ${goalColor}12`,
               }}
             >
               <div className="space-y-4 w-full">
@@ -1062,9 +1108,10 @@ export default function FinancePoolsPage() {
                         return (
                           <div className="flex items-center gap-1.5 flex-wrap">
                             <h3 className="text-sm font-bold text-slate-900 truncate">{goal.name}</h3>
+                            {isHit && <Badge variant="outline" className="text-[9px] px-1.5 py-0 border-emerald-300 text-emerald-800 bg-emerald-100 font-bold">✓ Goal Hit!</Badge>}
                             {(goal as any).is_stash && <Badge variant="secondary" className="text-[9px] px-1.5 py-0 bg-slate-100 text-slate-600 border border-slate-200">Stash</Badge>}
                             {tripInfo && <Badge variant="outline" className="text-[9px] px-1.5 py-0 border-sky-200 text-sky-600 bg-sky-50">Trip</Badge>}
-                            {cardFeasibility && !cardFeasibility.isFeasible && cardFeasibility.requiredMonthlyPace > 0 && (
+                            {cardFeasibility && !cardFeasibility.isFeasible && cardFeasibility.requiredMonthlyPace > 0 && !isHit && (
                               <Badge variant="outline" className="text-[9px] px-1.5 py-0 bg-rose-50 text-rose-700 border-rose-200 font-bold">
                                 ⚠️ Unfeasible
                               </Badge>

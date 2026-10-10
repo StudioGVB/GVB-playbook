@@ -95,6 +95,34 @@ export default function WeeklyPoolSavingsCard({ finance, spendablePool = 0, funM
     });
   }, [finance.goals, finance.convertToBase]);
 
+  const sortedPoolBreakdown = useMemo(() => {
+    return [...poolBreakdown].sort((a, b) => {
+      const aIsComplete = a.remainingBase <= 0.01;
+      const bIsComplete = b.remainingBase <= 0.01;
+
+      // 1. Completed goals go to bottom
+      if (aIsComplete !== bIsComplete) {
+        return aIsComplete ? 1 : -1;
+      }
+
+      // 2. Deadlines: soonest due date first
+      const aHasDeadline = !!a.goal.deadline;
+      const bHasDeadline = !!b.goal.deadline;
+
+      if (aHasDeadline && bHasDeadline) {
+        const aDate = new Date(a.goal.deadline!).getTime();
+        const bDate = new Date(b.goal.deadline!).getTime();
+        return aDate - bDate;
+      }
+
+      if (aHasDeadline !== bHasDeadline) {
+        return aHasDeadline ? -1 : 1;
+      }
+
+      return (a.goal.priority || 99) - (b.goal.priority || 99);
+    });
+  }, [poolBreakdown]);
+
   // Aggregate weekly totals
   const totalWeeklyRequired = poolBreakdown.reduce((sum, item) => sum + item.weeklyRequiredBase, 0);
   const totalMonthlyRequired = totalWeeklyRequired * 4.33;
@@ -261,11 +289,11 @@ export default function WeeklyPoolSavingsCard({ finance, spendablePool = 0, funM
             Active Pools & Required Weekly Contributions
           </h4>
 
-          {poolBreakdown.length === 0 ? (
+          {sortedPoolBreakdown.length === 0 ? (
             <p className="text-xs text-slate-500 italic py-4">No active pools created yet.</p>
           ) : (
             <div className="space-y-2">
-              {poolBreakdown.map(({ goal, remainingBase, weeklyRequiredBase, futureWeeklyPace, daysRemaining, status, isFutureStart, isStash }) => {
+              {sortedPoolBreakdown.map(({ goal, remainingBase, weeklyRequiredBase, futureWeeklyPace, daysRemaining, status, isFutureStart, isStash }) => {
                 const goalColor = goal.color || '#4558ff';
                 const isComplete = remainingBase <= 0.01;
 
