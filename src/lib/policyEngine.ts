@@ -311,20 +311,17 @@ export function computePolicySnapshot(
   const ventureSideMonthly = (70 * 52) / 12;
   const baseNetIncome = salaryTakeHome > 0 ? salaryTakeHome + ventureSideMonthly : 0;
   
-  // If assumptions don't define expected income or salary, infer from recent income streams
-  let streamEstimatedIncome = 0;
-  if (!assumptions.expected_monthly_income && !salaryTakeHome) {
-    const streamRes = calculateStreamIncomeEstimates(transactions, categories, now);
-    const hasVentureStream = streamRes.streamEstimates.some(s =>
-      s.name.toLowerCase().includes('venture') || s.name.toLowerCase().includes('batchbase')
-    );
-    const ventureAddition = hasVentureStream ? 0 : ventureSideMonthly;
-    streamEstimatedIncome = streamRes.totalEstimatedMonthlyIncome + ventureAddition;
-  }
+  // Calculate stream-based income from recent cleared income
+  const streamRes = calculateStreamIncomeEstimates(transactions, categories, now);
+  const hasVentureStream = streamRes.streamEstimates.some(s =>
+    s.name.toLowerCase().includes('venture') || s.name.toLowerCase().includes('batchbase')
+  );
+  const ventureAddition = hasVentureStream ? 0 : ventureSideMonthly;
+  const streamEstimatedIncome = streamRes.totalEstimatedMonthlyIncome + ventureAddition;
 
   const monthlyIncome = (assumptions.expected_monthly_income && assumptions.expected_monthly_income > 0)
     ? assumptions.expected_monthly_income
-    : (baseNetIncome > 0 ? baseNetIncome : streamEstimatedIncome);
+    : Math.max(baseNetIncome, streamEstimatedIncome);
   const isDrawdownMode = monthlyIncome === 0;
 
   // Core pools
@@ -357,7 +354,8 @@ export function computePolicySnapshot(
       monthlyIncome: 0,
     };
   } else {
-    split = computeMoneySplit(assumptions, transactions, categories, goals, convertToBase, fixedExpensesMonthlyAll ?? fixedMonthly, monthlyIncome);
+    // For cashflow split of incoming salary, only deduct internal bills paid from this income (not external rent)
+    split = computeMoneySplit(assumptions, transactions, categories, goals, convertToBase, fixedMonthly, monthlyIncome);
     baseWeeklyFun = split.weeklyFunAmount;
     weeklyGross = split.monthlyIncome / 4.33;
   }
@@ -683,21 +681,19 @@ export function computeMoneySplit(
   const ventureSideMonthly = (70 * 52) / 12; // ~£303.33/mo
   const baseNetIncome = salaryTakeHome > 0 ? salaryTakeHome + ventureSideMonthly : 0;
   
-  let streamEstimatedIncome = 0;
-  if (!assumptions.expected_monthly_income && !salaryTakeHome) {
-    const streamRes = calculateStreamIncomeEstimates(transactions, categories, new Date());
-    const hasVentureStream = streamRes.streamEstimates.some(s =>
-      s.name.toLowerCase().includes('venture') || s.name.toLowerCase().includes('batchbase')
-    );
-    const ventureAddition = hasVentureStream ? 0 : ventureSideMonthly;
-    streamEstimatedIncome = streamRes.totalEstimatedMonthlyIncome + ventureAddition;
-  }
+  // Calculate stream-based income from recent cleared income
+  const streamRes = calculateStreamIncomeEstimates(transactions, categories, new Date());
+  const hasVentureStream = streamRes.streamEstimates.some(s =>
+    s.name.toLowerCase().includes('venture') || s.name.toLowerCase().includes('batchbase')
+  );
+  const ventureAddition = hasVentureStream ? 0 : ventureSideMonthly;
+  const streamEstimatedIncome = streamRes.totalEstimatedMonthlyIncome + ventureAddition;
 
   const monthlyIncome = (overrideMonthlyIncome && overrideMonthlyIncome > 0)
     ? overrideMonthlyIncome
     : ((assumptions.expected_monthly_income && assumptions.expected_monthly_income > 0)
       ? assumptions.expected_monthly_income
-      : (baseNetIncome > 0 ? baseNetIncome : streamEstimatedIncome));
+      : Math.max(baseNetIncome, streamEstimatedIncome));
 
   // 2. Committed fixed bills (use passed fixed expenses if provided, else historic average)
   let monthlyMandatory = fixedExpensesMonthly ?? 0;
