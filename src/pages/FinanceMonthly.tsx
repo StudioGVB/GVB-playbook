@@ -137,6 +137,7 @@ export default function FinanceMonthly() {
   const autoTotalBudget = monthlyEssentialBudget + monthlyFunBudget + fixedMonthly;
   const budgetOverride = (assumptions as any)?.monthly_budget_override;
   const monthlyTotalBudget = (budgetOverride != null && budgetOverride !== '') ? Number(budgetOverride) : autoTotalBudget;
+  const expectedIncomeVal = snapshot?.split.monthlyIncome ?? (assumptions?.expected_monthly_income || 0);
 
   // Filter transactions for selected month
   const monthTxns = useMemo(() => {
@@ -299,12 +300,22 @@ export default function FinanceMonthly() {
 
   // Previous month totals for comparison
   const prevTotals = useMemo(() => {
-    let essential = 0, fun = 0, fixed = 0;
+    let essential = 0, fun = 0, fixed = 0, income = 0;
     const catTotals = new Map<string, number>();
     for (const tx of prevMonthTxns) {
+      const cat = catMap.get(tx.category_id || '');
+      const rawText = `${tx.merchant || ''} ${tx.description || ''}`.toLowerCase();
+      const isIncomeCategory = cat?.type === 'income';
+      const isIncomeKeyword = rawText.includes('batchbase') || rawText.includes('batch base') || rawText.includes('payroll') || rawText.includes('salary') || rawText.includes('venture') || rawText.includes('etsy');
+      if (tx.amount > 0 && (!tx.is_transfer || isIncomeCategory || isIncomeKeyword)) {
+        if (!tx.is_reimbursable && cat?.type !== 'transfer') {
+          income += baseAmt(tx);
+          continue;
+        }
+      }
+
       if (tx.amount >= 0 || tx.is_transfer) continue;
       if ((tx as any).goal_id) continue;
-      const cat = catMap.get(tx.category_id || '');
       if (cat?.exclude_from_reports) continue;
       const amt = Math.abs(baseAmt(tx));
       if (isFixedTx(tx)) { 
@@ -324,8 +335,11 @@ export default function FinanceMonthly() {
         fun += amt;
       }
     }
-    return { essential, fun, fixed, total: essential + fun + fixed, catTotals };
-  }, [prevMonthTxns, catMap, essentialCatIds, isFixedTx]);
+    const prevMonthIso = format(prevMonthStart, 'yyyy-MM-dd');
+    for (const r of reimbursementsOn(prevMonthIso)) income += r.amount;
+
+    return { essential, fun, fixed, income, total: essential + fun + fixed, catTotals };
+  }, [prevMonthTxns, catMap, essentialCatIds, isFixedTx, prevMonthStart, reimbursementsOn]);
 
   const netBudget = monthlyTotalBudget - totalSpent;
 
@@ -341,6 +355,7 @@ export default function FinanceMonthly() {
       fun: prevTotals.fun * proRateFactor,
       fixed: prevTotals.fixed * proRateFactor,
       total: prevTotals.total * proRateFactor,
+      income: prevTotals.income * proRateFactor,
     };
   }, [prevTotals, proRateFactor]);
 
@@ -361,7 +376,12 @@ export default function FinanceMonthly() {
     setBudgetDialogOpen(false);
   };
 
-  const trendIcon = (current: number, previous: number) => {
+  const trendIcon = (current: number, previous: number, invert = false) => {
+    if (invert) {
+      if (current > previous * 1.05) return <TrendingUp className="w-3 h-3 text-emerald-500" />;
+      if (current < previous * 0.95) return <TrendingDown className="w-3 h-3 text-destructive" />;
+      return <Minus className="w-3 h-3 text-muted-foreground" />;
+    }
     if (current > previous * 1.05) return <TrendingUp className="w-3 h-3 text-destructive" />;
     if (current < previous * 0.95) return <TrendingDown className="w-3 h-3 text-emerald-500" />;
     return <Minus className="w-3 h-3 text-muted-foreground" />;
@@ -611,14 +631,14 @@ export default function FinanceMonthly() {
         </div>
 
         <TabsContent value="overview" className="mt-4 space-y-6 focus-visible:outline-none">
-          {/* KPI Cards — candy bento style */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+          {/* KPI Cards — candy bento style (5 across condensed on one line) */}
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 sm:gap-3">
             {([
               {
                 label: 'Total Spent',
                 value: fmt(totalSpent),
                 icon: DollarSign,
-                sub: <span className="flex items-center gap-1">{trendIcon(totalSpent, prevTotalsProrated.total)} {trendPercent(totalSpent, prevTotalsProrated.total)} vs last month {isCurrentMonth ? `(day ${daysElapsed})` : ''}</span>,
+                sub: <span className="flex items-center gap-1">{trendIcon(totalSpent, prevTotalsProrated.total)} {trendPercent(totalSpent, prevTotalsProrated.total)} vs last mo {isCurrentMonth ? `(d${daysElapsed})` : ''}</span>,
                 meta: `Budget: ${fmt(monthlyTotalBudget)}`,
                 border: '#FF2EB8',
                 shadow: 'rgba(255,46,184,0.20)',
@@ -631,7 +651,7 @@ export default function FinanceMonthly() {
                 label: 'Essentials',
                 value: fmt(essentialSpent),
                 icon: ShoppingCart,
-                sub: <span className="flex items-center gap-1">{trendIcon(essentialSpent, prevTotalsProrated.essential)} {trendPercent(essentialSpent, prevTotalsProrated.essential)} vs last month {isCurrentMonth ? `(day ${daysElapsed})` : ''}</span>,
+                sub: <span className="flex items-center gap-1">{trendIcon(essentialSpent, prevTotalsProrated.essential)} {trendPercent(essentialSpent, prevTotalsProrated.essential)} vs last mo {isCurrentMonth ? `(d${daysElapsed})` : ''}</span>,
                 meta: `Budget: ${fmt(monthlyEssentialBudget)}`,
                 border: '#A855F7',
                 shadow: 'rgba(168,85,247,0.20)',
@@ -644,7 +664,7 @@ export default function FinanceMonthly() {
                 label: 'Fun Money',
                 value: fmt(funSpent),
                 icon: PartyPopper,
-                sub: <span className="flex items-center gap-1">{trendIcon(funSpent, prevTotalsProrated.fun)} {trendPercent(funSpent, prevTotalsProrated.fun)} vs last month {isCurrentMonth ? `(day ${daysElapsed})` : ''}</span>,
+                sub: <span className="flex items-center gap-1">{trendIcon(funSpent, prevTotalsProrated.fun)} {trendPercent(funSpent, prevTotalsProrated.fun)} vs last mo {isCurrentMonth ? `(d${daysElapsed})` : ''}</span>,
                 meta: `Budget: ${fmt(monthlyFunBudget)}`,
                 border: '#22C55E',
                 shadow: 'rgba(34,197,94,0.22)',
@@ -657,13 +677,34 @@ export default function FinanceMonthly() {
                 label: 'Fixed Bills',
                 value: fmt(fixedMonthly),
                 icon: Lock,
-                sub: <span className="text-slate-500">{fmt(fixedSpent)} paid · {fmt(Math.max(0, fixedMonthly - fixedSpent))} remaining</span>,
-                meta: `Committed monthly total`,
+                sub: <span className="text-slate-500">{fmt(fixedSpent)} paid · {fmt(Math.max(0, fixedMonthly - fixedSpent))} left</span>,
+                meta: `Committed monthly`,
                 border: '#FF7AD1',
                 shadow: 'rgba(255,122,209,0.22)',
                 iconBg: '#FFF0F8',
                 iconColor: '#FF2EB8',
                 valueColor: '#FF7AD1',
+                over: false,
+              },
+              {
+                label: 'Income (to date)',
+                value: fmt(incomeTotal),
+                icon: TrendingUp,
+                sub: prevTotalsProrated.income > 0 ? (
+                  <span className="flex items-center gap-1">
+                    {trendIcon(incomeTotal, prevTotalsProrated.income, true)}{' '}
+                    {trendPercent(incomeTotal, prevTotalsProrated.income)} vs last mo{' '}
+                    {isCurrentMonth ? `(d${daysElapsed})` : ''}
+                  </span>
+                ) : (
+                  <span className="text-slate-500">Earned this month</span>
+                ),
+                meta: expectedIncomeVal > 0 ? `Expected: ${fmt(expectedIncomeVal)}` : 'Earned to date',
+                border: '#0284C7',
+                shadow: 'rgba(2,132,199,0.20)',
+                iconBg: '#E0F2FE',
+                iconColor: '#0284C7',
+                valueColor: '#0284C7',
                 over: false,
               },
             ] as const).map((c) => {
@@ -672,34 +713,36 @@ export default function FinanceMonthly() {
               return (
                 <div
                   key={c.label}
-                  className="rounded-2xl border-2 bg-white p-4 sm:p-5 flex flex-col gap-2 transition-transform hover:-translate-y-0.5"
+                  className="rounded-2xl border-2 bg-white p-3.5 sm:p-4 lg:p-4 flex flex-col justify-between gap-1.5 transition-transform hover:-translate-y-0.5 min-w-0"
                   style={{
                     borderColor: isOver ? '#DC2626' : c.border,
                     boxShadow: `4px 4px 0 ${isOver ? 'rgba(220,38,38,0.20)' : c.shadow}`,
                   }}
                 >
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5 min-w-0">
                     <div
-                      className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
+                      className="w-6 h-6 sm:w-7 sm:h-7 rounded-lg flex items-center justify-center shrink-0"
                       style={{ background: c.iconBg }}
                     >
-                      <Icon className="w-4 h-4" style={{ color: c.iconColor }} />
+                      <Icon className="w-3.5 h-3.5 sm:w-4 sm:h-4" style={{ color: c.iconColor }} />
                     </div>
                     <p
-                      className="text-[10px] font-display font-bold uppercase tracking-[0.14em]"
+                      className="text-[10px] font-display font-bold uppercase tracking-[0.1em] truncate"
                       style={{ color: isOver ? '#DC2626' : c.iconColor }}
                     >
                       {c.label}
                     </p>
                   </div>
-                  <div
-                    className="font-display font-black tabular-nums text-2xl sm:text-3xl leading-none"
-                    style={{ color: isOver ? '#DC2626' : c.valueColor }}
-                  >
-                    {c.value}
+                  <div className="min-w-0">
+                    <div
+                      className="font-display font-black tabular-nums text-xl sm:text-2xl lg:text-[1.65rem] leading-none truncate"
+                      style={{ color: isOver ? '#DC2626' : c.valueColor }}
+                    >
+                      {c.value}
+                    </div>
+                    <p className="text-[11px] font-semibold text-slate-700 mt-1 truncate">{c.meta}</p>
+                    <div className="text-[11px] text-slate-500 mt-0.5 truncate">{c.sub}</div>
                   </div>
-                  <p className="text-[11px] font-semibold text-slate-700">{c.meta}</p>
-                  <div className="text-[11px] text-slate-500">{c.sub}</div>
                 </div>
               );
             })}
@@ -1276,7 +1319,6 @@ export default function FinanceMonthly() {
           {/* Super Clear Cash Flow Breakdown Card */}
           {(() => {
             const poolSavingsMonthly = snapshot?.split.goalSavingsAmount ?? 0;
-            const expectedIncomeVal = snapshot?.split.monthlyIncome ?? (assumptions?.expected_monthly_income || 0);
 
             return (
               <MonthlyCashFlowBreakdown
