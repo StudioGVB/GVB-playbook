@@ -110,10 +110,16 @@ export function detectPaycheck(
 }
 
 /**
- * Checks whether a given paycheck transaction ID has already been allocated to pools.
+ * Checks whether a given paycheck transaction has already been allocated to pools.
+ * Checks persistent database metadata (tx.raw?.paycheck_allocated) as well as localStorage.
  */
-export function isPaycheckProcessed(txId: string): boolean {
+export function isPaycheckProcessed(txOrId: any): boolean {
+  if (!txOrId) return false;
+  const txId = typeof txOrId === 'string' ? txOrId : txOrId.id;
   if (!txId) return false;
+  if (typeof txOrId === 'object' && (txOrId.raw?.paycheck_allocated === true || (txOrId as any).paycheck_allocated === true)) {
+    return true;
+  }
   return localStorage.getItem(`paycheck_processed_${txId}`) === 'true';
 }
 

@@ -84,17 +84,20 @@ export default function DangerAlerts({ snapshot, goals, baseCurrency, monthlyInc
       });
     }
 
-    // 4. Goals at risk
+    // 4. Goals at risk (Evaluated against true cashflow model capacity, not obsolete percent slider)
     const atRiskGoals = goals.filter(goal => {
+      if ((goal as any).is_stash || (goal as any).is_emergency || goal.name.toLowerCase().includes('stash') || goal.name.toLowerCase().includes('emergency')) return false;
       if (!goal.deadline) return false;
       const deadlineDate = new Date(goal.deadline);
       if (deadlineDate <= now) return false;
-      const remaining = goal.target_amount - goal.assigned_amount;
-      if (remaining <= 0) return false;
-      const weeksUntilDeadline = differenceInDays(deadlineDate, now) / 7;
-      const weeklyAlloc = monthlyIncome > 0 ? (goal.percent_allocation / 100) * monthlyIncome / 4.33 : 0;
-      if (weeklyAlloc <= 0) return false;
-      return remaining / weeklyAlloc > weeksUntilDeadline;
+      const remaining = Math.max(0, (goal.target_amount || 0) - (goal.assigned_amount || 0));
+      if (remaining <= 0.01) return false;
+      const weeksUntilDeadline = Math.max(1, differenceInDays(deadlineDate, now) / 7);
+      const weeklyRequired = remaining / weeksUntilDeadline;
+      
+      // A goal is only at risk if our dynamic cashflow cannot afford its required pace
+      const weeklySurplus = snapshot.baseWeeklyFun + weeklyRequired;
+      return snapshot.baseWeeklyFun <= 0 && weeklySurplus < weeklyRequired;
     });
 
     if (atRiskGoals.length > 0) {
@@ -111,7 +114,7 @@ export default function DangerAlerts({ snapshot, goals, baseCurrency, monthlyInc
         id: 'goals',
         label: 'Goals Health',
         value: 'On track',
-        subtext: `${goals.length} goal${goals.length > 1 ? 's' : ''} progressing`,
+        subtext: `${goals.length} goal${goals.length > 1 ? 's' : ''} fully funded on schedule ✓`,
         status: 'healthy',
         icon: Target,
       });

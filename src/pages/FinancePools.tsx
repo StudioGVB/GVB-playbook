@@ -389,8 +389,19 @@ export default function FinancePoolsPage() {
 
   useEffect(() => {
     if (!paycheckTx) return;
-    const isProc = isPaycheckProcessed(paycheckTx.id);
+    const isProc = isPaycheckProcessed(paycheckTx);
     setPaycheckAllocated(isProc);
+
+    // If marked processed locally, sync to database so mobile sees it as already sorted
+    if (localStorage.getItem(`paycheck_processed_${paycheckTx.id}`) === 'true' && !paycheckTx.raw?.paycheck_allocated) {
+      finance.updateTransaction(paycheckTx.id, {
+        raw: {
+          ...((paycheckTx.raw as any) || {}),
+          paycheck_allocated: true,
+          allocated_at: Date.now(),
+        }
+      });
+    }
 
     if (isProc) {
       const meta = getPaycheckAllocationMeta(paycheckTx.id);
@@ -477,6 +488,13 @@ export default function FinancePoolsPage() {
       // 3. Save allocation metadata (for revert) & mark processed
       savePaycheckAllocationMeta(paycheckTx.id, waterfallBreakdown);
       markPaycheckProcessed(paycheckTx.id);
+      await finance.updateTransaction(paycheckTx.id, {
+        raw: {
+          ...((paycheckTx.raw as any) || {}),
+          paycheck_allocated: true,
+          allocated_at: Date.now(),
+        }
+      });
       setPaycheckAllocated(true);
       setRevertSecondsLeft(120);
 
@@ -849,13 +867,33 @@ export default function FinancePoolsPage() {
                       )}
                     </div>
                   ) : (
-                    <Button
-                      onClick={handleExecutePaycheckAllocation}
-                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-display font-extrabold text-sm px-5 py-2.5 rounded-xl shadow-lg shadow-emerald-600/25 flex items-center gap-2 cursor-pointer transition-all hover:scale-105"
-                    >
-                      <Sparkles className="w-4 h-4" />
-                      Auto-Allocate to Pools
-                    </Button>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        variant="outline"
+                        onClick={async () => {
+                          markPaycheckProcessed(paycheckTx.id);
+                          setPaycheckAllocated(true);
+                          await finance.updateTransaction(paycheckTx.id, {
+                            raw: {
+                              ...((paycheckTx.raw as any) || {}),
+                              paycheck_allocated: true,
+                              allocated_at: Date.now(),
+                            }
+                          });
+                          toast.success('Marked paycheck as already sorted! ✓');
+                        }}
+                        className="border-slate-300 text-slate-700 hover:bg-slate-100 text-xs font-semibold px-3 py-2 rounded-xl"
+                      >
+                        Already Sorted ✓
+                      </Button>
+                      <Button
+                        onClick={handleExecutePaycheckAllocation}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-display font-extrabold text-sm px-5 py-2.5 rounded-xl shadow-lg shadow-emerald-600/25 flex items-center gap-2 cursor-pointer transition-all hover:scale-105"
+                      >
+                        <Sparkles className="w-4 h-4" />
+                        Auto-Allocate to Pools
+                      </Button>
+                    </div>
                   )}
                 </div>
               </CardContent>
