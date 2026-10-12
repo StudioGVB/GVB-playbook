@@ -878,8 +878,8 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                           </Popover>
                         </div>
 
-                        {/* Amount (Clean right-aligned column aligning decimal places and preventing any overlap with icons) */}
-                        <div className="w-24 sm:w-28 text-right shrink-0 pr-1">
+                        {/* Amount (Clean left-aligned column with generous width so amounts never touch the action icons) */}
+                        <div className="w-28 sm:w-36 text-left shrink-0">
                           <p className={`text-xs sm:text-sm font-display font-bold tabular-nums ${isRealIncome ? 'text-[hsl(var(--success))]' : 'text-slate-900'}`}>
                             {(() => {
                               const rawAmt = tx.base_amount !== undefined && tx.base_amount !== null ? tx.base_amount : tx.amount;
@@ -889,8 +889,8 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                           </p>
                         </div>
 
-                        {/* Action Icons Toolbar (Comfortable width container with explicit left padding preventing any collision with amount) */}
-                        <div className="w-[124px] sm:w-[136px] flex items-center justify-end gap-1.5 shrink-0 pl-2">
+                        {/* Action Icons Toolbar (Comfortable fixed-width container ensuring all 4 action buttons sit cleanly on the right) */}
+                        <div className="w-28 sm:w-32 flex items-center justify-end gap-1.5 shrink-0">
                           {/* Pool assignment / refund flag */}
                           {tx.amount < 0 && goals.length > 0 ? (
                             <Popover>
