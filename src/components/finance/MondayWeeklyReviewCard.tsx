@@ -3,10 +3,11 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { PartyPopper, AlertTriangle, Sparkles, X, Calendar, ChevronRight, Eye } from 'lucide-react';
-import { formatCurrency, baseAmt } from '@/lib/financeUtils';
+import { parseUkDate, formatCurrency, baseAmt } from '@/lib/financeUtils';
 import type { useFinanceData } from '@/hooks/useFinanceData';
 import type { FinanceAssumptions } from '@/hooks/useFinanceAssumptions';
 import type { FinanceTrip } from '@/hooks/useFinanceTrips';
+import type { PolicySnapshot } from '@/lib/policyEngine';
 import { startOfWeek, subWeeks, format } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
 
@@ -15,9 +16,10 @@ interface Props {
   assumptions: FinanceAssumptions | null;
   trips?: FinanceTrip[];
   forceShow?: boolean;
+  snapshot?: PolicySnapshot | null;
 }
 
-export function MondayWeeklyReviewCard({ finance, assumptions, trips = [], forceShow = false }: Props) {
+export function MondayWeeklyReviewCard({ finance, assumptions, trips = [], forceShow = false, snapshot }: Props) {
   const navigate = useNavigate();
   const now = new Date();
   const isMonday = now.getDay() === 1;
@@ -52,7 +54,7 @@ export function MondayWeeklyReviewCard({ finance, assumptions, trips = [], force
       const cat = finance.categories.find(c => c.id === tx.category_id);
       if (cat?.exclude_from_reports || cat?.type === 'transfer') continue;
 
-      const txDate = new Date(tx.posted_at);
+      const txDate = parseUkDate(tx.posted_at);
       if (txDate < lastWeekStart || txDate >= lastWeekEnd) continue;
 
       // Check if refund
@@ -76,8 +78,8 @@ export function MondayWeeklyReviewCard({ finance, assumptions, trips = [], force
       }
     }
 
-    const weeklyFunBudget = assumptions?.weekly_fun_budget ?? 100;
-    const weeklyEssentialBudget = (assumptions?.estimated_essential_variable ?? 300);
+    const weeklyFunBudget = snapshot?.baseWeeklyFun ?? assumptions?.weekly_fun_budget ?? 100;
+    const weeklyEssentialBudget = snapshot?.weeklyEssentialBudget ?? ((assumptions?.estimated_essential_variable ?? 300) / 4.33);
     
     // Fun spend comparison (discretionary)
     const funDiff = weeklyFunBudget - funSpent;

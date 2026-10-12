@@ -484,6 +484,7 @@ export function FinanceDashboard() {
       <MondayWeeklyReviewCard
         finance={finance}
         assumptions={assumptions}
+        snapshot={snapshot}
         forceShow={showMondayPreview}
       />
 

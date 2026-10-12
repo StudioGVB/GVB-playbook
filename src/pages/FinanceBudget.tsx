@@ -217,7 +217,7 @@ export default function FinanceBudget() {
     for (const tx of finance.transactions) {
       if (tx.amount >= 0 || tx.is_transfer || tx.is_fixed || tx.is_reimbursable) continue;
       if ((tx as any).goal_id) continue;
-      const d = new Date(tx.posted_at);
+      const d = parseUkDate(tx.posted_at);
       if (d < prevWeekStart || d > prevWeekEnd) continue;
       const cat = catMap.get(tx.category_id || '');
       if (cat?.exclude_from_reports || cat?.type === 'fixed' || cat?.type === 'income' || cat?.type === 'transfer') continue;
@@ -229,7 +229,8 @@ export default function FinanceBudget() {
       }
     }
 
-    const prevWeekAllowance = assumptions?.weekly_fun_budget || snapshot.baseWeeklyFun;
+    // Strictly match live weekly budget: dynamic Fun Money from cashflow model + Essentials (no legacy hardcoded overrides)
+    const prevWeekAllowance = snapshot.baseWeeklyFun;
     const totalBudget = snapshot.weeklyEssentialBudget + prevWeekAllowance;
     const totalSpent = prevEssentialSpent + prevFunSpent;
     const netDifference = totalBudget - totalSpent;

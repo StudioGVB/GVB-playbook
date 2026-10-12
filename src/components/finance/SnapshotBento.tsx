@@ -72,7 +72,7 @@ export default function SnapshotBento({
   const projectedMonthEnd = netMonth - committedBills - projectedVariable;
 
   const essentialAvgMonthly = snapshot?.computedEssentialVariable || 0;
-  const funCapMonthly = (assumptions?.weekly_fun_budget || 100) * 4.33;
+  const funCapMonthly = (snapshot?.baseWeeklyFun ?? (assumptions?.weekly_fun_budget || 100)) * 4.33;
   const savingsCapacity = netMonth - committedBills - essentialAvgMonthly - funCapMonthly;
   const savingsRate = netMonth > 0 ? savingsCapacity / netMonth : 0;
 

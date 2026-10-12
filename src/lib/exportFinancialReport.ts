@@ -117,23 +117,30 @@ export function generate3MonthReportData({ finance, assumptions, fixedExpenses, 
     }
   ];
 
-  // Also check for any other income categories or transactions
-  const otherIncomeCategories = new Map<string, number>();
+  // Also check for any other income categories or transactions (e.g. ElevenLabs, Etsy, Back Pocket Games)
+  const otherIncomeCategories = new Map<string, { total: number; months: Set<string> }>();
   for (const tx of incomeTxns) {
     const desc = (tx.merchant || tx.description || '').toLowerCase();
     if (desc.includes('gamma') || desc.includes('salary') || desc.includes('venture')) continue;
     const cat = catMap.get(tx.category_id || '')?.name || (tx.merchant || tx.description || 'Other Income');
     const amt = Math.abs(baseAmt(tx));
-    otherIncomeCategories.set(cat, (otherIncomeCategories.get(cat) || 0) + amt);
+    const txDate = parseUkDate(tx.posted_at);
+    const monthKey = format(txDate, 'yyyy-MM');
+
+    const existing = otherIncomeCategories.get(cat) || { total: 0, months: new Set<string>() };
+    existing.total += amt;
+    existing.months.add(monthKey);
+    otherIncomeCategories.set(cat, existing);
   }
 
-  for (const [catName, total3Mo] of otherIncomeCategories.entries()) {
-    const avgMo = total3Mo / 3;
+  for (const [catName, item] of otherIncomeCategories.entries()) {
+    const activeMonths = Math.max(1, item.months.size);
+    const avgMo = item.total / activeMonths;
     streams.push({
-      source: `${catName} (Side / Project Income)`,
+      source: `${catName} (Sporadic / Side Income)`,
       amount: avgMo,
-      frequency: 'Variable',
-      scheduleNote: `Total over last 3 months: ${fmt(total3Mo)} (${fmt(avgMo)}/mo avg)`,
+      frequency: 'Sporadic / Ad-Hoc',
+      scheduleNote: `Total over last 3 months: ${fmt(item.total)} across ${activeMonths} active month${activeMonths > 1 ? 's' : ''} (${fmt(avgMo)}/mo avg)`,
       monthlyEquivalent: avgMo,
     });
   }
@@ -156,8 +163,9 @@ export function generate3MonthReportData({ finance, assumptions, fixedExpenses, 
     formattedText: `Gross Gamma: ${fmt(grossMonthlyGamma)}/mo → Tax & NI (-${fmt(totalMonthlyDeductions)}/mo) = Net Gamma: ${fmt(netMonthlyGamma)}/mo + Venture: ${fmt(ventureWeeklyAmt)}/wk (~${fmt(ventureMonthlyAmt)}/mo) → Total Net Monthly Cashflow: ~${fmt(totalNetExpectedMonthlyCashflow)}/month`,
   };
 
-  const gammaRuleNote = "Gamma salary is deposited on the LAST day of each calendar month.";
+  const gammaRuleNote = "Gamma salary is deposited on the LAST day of each calendar month. It is the primary income anchor covering 100% of fixed bills and core pool targets.";
   const ventureRuleNote = "Venture income is deposited WEEKLY at £70.00/week (~£303.33/month).";
+  const sideIncomeRuleNote = "Secondary/sporadic income (ElevenLabs, Etsy, Back Pocket Games) is 100% uncommitted surplus / fun money, scaling your weekly spending room when received mid-month.";
   const rentRuleNote = "Rent is due on the 1ST day of each calendar month.";
   const taxRuleNote = `Tax & NI Deduction: UK PAYE 2025/26 (Income Tax: -${fmt(monthlyIncomeTax)}/mo, NI: -${fmt(monthlyNI)}/mo, Student Loan: None). Net Gamma = ${fmt(netMonthlyGamma)}/month.`;
 
@@ -166,18 +174,44 @@ export function generate3MonthReportData({ finance, assumptions, fixedExpenses, 
   const actualEmergencySaved = emergencyGoal ? (emergencyGoal.assigned_amount || 0) : 0;
   const emergencyTargetFloor = snapshot?.emergencyFloor || 0;
   const emergencyShortfall = Math.max(0, emergencyTargetFloor - actualEmergencySaved);
+  const emergencyColorStatus = emergencyShortfall > 0.01 ? 'RED (Shortfall on Target Floor 🔴)' : 'GREEN (Fully Funded 🟢)';
 
-  // Active Goals & Pools with "Current Saved Balance" terminology
-  const activePools = finance.goals.map(g => ({
-    name: g.name,
-    description: g.description || '',
-    currentSavedBalance: g.assigned_amount || 0,
-    targetAmount: g.target_amount || 0,
-    targetDate: g.deadline ? format(new Date(g.deadline), 'MMM d, yyyy') : (g.target_date ? format(new Date(g.target_date), 'MMM d, yyyy') : 'No fixed date'),
-    startDate: g.start_date ? format(new Date(g.start_date), 'MMM d, yyyy') : null,
-    currency: g.currency || baseCurrency,
-    shortfall: Math.max(0, (g.target_amount || 0) - (g.assigned_amount || 0)),
-  }));
+  // Active Goals & Pools (Ordered by upcoming due date, with completed pools at bottom)
+  const nonEmergencyGoals = finance.goals.filter(g => !(g as any).is_emergency && !g.name.toLowerCase().includes('emergency'));
+  
+  const sortedPools = [...nonEmergencyGoals].sort((a, b) => {
+    const aRemaining = Math.max(0, (a.target_amount || 0) - (a.assigned_amount || 0));
+    const bRemaining = Math.max(0, (b.target_amount || 0) - (b.assigned_amount || 0));
+    const aHit = a.target_amount > 0 && aRemaining <= 0.01;
+    const bHit = b.target_amount > 0 && bRemaining <= 0.01;
+
+    if (aHit !== bHit) return aHit ? 1 : -1;
+
+    const aHasDeadline = !!a.deadline;
+    const bHasDeadline = !!b.deadline;
+    if (aHasDeadline && bHasDeadline) {
+      return new Date(a.deadline!).getTime() - new Date(b.deadline!).getTime();
+    }
+    if (aHasDeadline !== bHasDeadline) return aHasDeadline ? -1 : 1;
+    return (a.priority || 99) - (b.priority || 99);
+  });
+
+  const activePools = sortedPools.map(g => {
+    const isStash = (g as any).is_stash || g.name.toLowerCase().includes('stash');
+    const remaining = Math.max(0, (g.target_amount || 0) - (g.assigned_amount || 0));
+    return {
+      name: g.name,
+      description: g.description || '',
+      currentSavedBalance: g.assigned_amount || 0,
+      targetAmount: g.target_amount || 0,
+      targetDate: g.deadline ? format(new Date(g.deadline), 'MMM d, yyyy') : (g.target_date ? format(new Date(g.target_date), 'MMM d, yyyy') : 'No fixed date'),
+      startDate: g.start_date ? format(new Date(g.start_date), 'MMM d, yyyy') : null,
+      currency: g.currency || baseCurrency,
+      shortfall: remaining,
+      fundingMode: isStash ? 'Week-end Surplus Sweep (£0/wk fixed)' : (g.deadline ? 'Target Deadline Pace' : 'Proportional Allocation'),
+      isCompleted: remaining <= 0.01 && g.target_amount > 0,
+    };
+  });
 
   // Fixed Bills
   const formattedFixedBills = fixedExpenses.map(e => ({
@@ -234,9 +268,12 @@ export function generate3MonthReportData({ finance, assumptions, fixedExpenses, 
     actualEmergencySaved,
     emergencyTargetFloor,
     emergencyShortfall,
+    emergencyColorStatus,
     gammaRuleNote,
     ventureRuleNote,
+    sideIncomeRuleNote,
     rentRuleNote,
+    taxRuleNote,
     incomeTxns,
     expenseTxns,
     recentTxns: formattedTxns,
@@ -266,8 +303,10 @@ export function generateAIMasterPrompt(data: ReturnType<typeof generate3MonthRep
     actualEmergencySaved,
     emergencyTargetFloor,
     emergencyShortfall,
+    emergencyColorStatus,
     gammaRuleNote,
     ventureRuleNote,
+    sideIncomeRuleNote,
     rentRuleNote,
     taxRuleNote,
     categoryTotals,
@@ -287,10 +326,12 @@ Period: ${startDateStr} to ${endDateStr} | Base Currency: ${baseCurrency}
   - Estimated UK Tax & NI Deductions: -${fmt(predictedIncome.totalMonthlyDeductions)}/month (Income Tax: -${fmt(predictedIncome.monthlyIncomeTax)}/mo, NI: -${fmt(predictedIncome.monthlyNI)}/mo, Student Loan: £0)
   - Net Gamma Take-Home Paycheck: ${fmt(predictedIncome.netMonthlyGamma)}/month (Deposited last day of month)
   - Venture Advisory Side Income: ${fmt(predictedIncome.ventureWeeklyAmt)}/week (~${fmt(predictedIncome.ventureMonthlyAmt)}/month)
+${predictedIncome.streams.filter(s => !s.source.includes('Gamma') && !s.source.includes('Venture')).map(s => `  - ${s.source}: ${s.scheduleNote}`).join('\n')}
   - Total Net Expected Monthly Cashflow: ~${fmt(predictedIncome.totalNetExpectedMonthlyCashflow)}/month
-- Income Patterns & Tax Rules:
+- Income Patterns & Rules:
   - ${gammaRuleNote}
   - ${ventureRuleNote}
+  - ${sideIncomeRuleNote}
   - ${taxRuleNote}
 
 ## 2. EXECUTIVE FINANCIAL OVERVIEW
@@ -300,16 +341,17 @@ Period: ${startDateStr} to ${endDateStr} | Base Currency: ${baseCurrency}
 - Expected Net Monthly Incoming Cashflow: ${fmt(predictedIncome.totalNetExpectedMonthlyCashflow)}/month
 - Essential Spending (Bills, Groceries, Transport): ${fmt(essentialSpent3Mo)} (${Math.round((essentialSpent3Mo / (totalSpent3Mo || 1)) * 100)}%)
 - Fun / Discretionary Spending: ${fmt(funSpent3Mo)} (${Math.round((funSpent3Mo / (totalSpent3Mo || 1)) * 100)}%)
-- Weekly Fun Budget Allowance: ${fmt(snapshot?.weeklyFunBudget || 150)}/week
+- Weekly Spending Allowance: Calculated dynamically from live cashflow surplus (Unallocated Surplus / 4.33 weeks) with zero arbitrary caps.
 
 ## 3. EMERGENCY FUND STATUS
 - Actual Emergency Fund Saved: ${fmt(actualEmergencySaved)}
-- Target Emergency Cushion Floor (${assumptions?.buffer_months || 3} months): ${fmt(emergencyTargetFloor)}
-- Emergency Buffer Shortfall: ${fmt(emergencyShortfall)} (${actualEmergencySaved >= emergencyTargetFloor ? '100% Fully Funded ✅' : 'In Progress ⏳'})
+- Target Emergency Cushion Floor (${assumptions?.buffer_months || 2} months × 1.2 buffer): ${fmt(emergencyTargetFloor)}
+- Emergency Shortfall: ${fmt(emergencyShortfall)}
+- Card Color Status: ${emergencyColorStatus}
 
-## 4. UPCOMING SAVINGS POOLS & GOALS
+## 4. UPCOMING SAVINGS POOLS & GOALS (ORDERED BY UPCOMING DUE DATE)
 ${activePools.length === 0 ? "No active goals or pools." : activePools.map(p => 
-  `- Pool "${p.name}"${p.description ? ` (Purpose: ${p.description})` : ''}: Current Saved Balance ${fmt(p.currentSavedBalance)} of ${fmt(p.targetAmount)} target (Shortfall: ${fmt(p.shortfall)}, Target Date: ${p.targetDate}${p.startDate ? `, Savings Start Date: ${p.startDate}` : ''})`
+  `- Pool "${p.name}"${p.description ? ` (${p.description})` : ''}: Saved ${fmt(p.currentSavedBalance)} of ${fmt(p.targetAmount)} target (Shortfall: ${fmt(p.shortfall)}, Due Date: ${p.targetDate}, Mode: ${p.fundingMode}${p.isCompleted ? ' — FULLY FUNDED 🎉' : ''})`
 ).join('\n')}
 
 ## 5. FIXED EXPENSES & RECURRING BILLS
