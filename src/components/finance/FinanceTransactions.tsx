@@ -896,7 +896,7 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                             <Popover>
                               <PopoverTrigger asChild>
                                 <button
-                                  className={`p-1 rounded transition-colors ${assignedGoal ? 'text-primary' : 'text-slate-300 hover:text-slate-600'}`}
+                                  className={`p-1 rounded shrink-0 transition-colors ${assignedGoal ? 'text-primary' : 'text-slate-300 hover:text-slate-600'}`}
                                   title={assignedGoal ? `Pool: ${assignedGoal.name} (click to change)` : 'Assign to pool'}
                                 >
                                   <Target className="w-4 h-4" />
@@ -938,7 +938,7 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                                 updateTransaction(tx.id, { is_refund: newIsRefund } as any);
                                 toast(newIsRefund ? 'Marked as refund — added back to this week\'s Fun Money' : 'Refund flag removed');
                               }}
-                              className={`p-1 rounded transition-colors ${(tx as any).is_refund ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-300 hover:text-slate-600'}`}
+                              className={`p-1 rounded shrink-0 transition-colors ${(tx as any).is_refund ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-300 hover:text-slate-600'}`}
                               title={(tx as any).is_refund ? 'Refund (boosts Fun Money) — click to unmark' : 'Mark as refund (adds to Fun Money this week)'}
                             >
                               <Undo2 className="w-4 h-4" />
@@ -950,7 +950,7 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                             <Popover>
                               <PopoverTrigger asChild>
                                 <button
-                                  className={`p-1 rounded transition-colors ${assignedFixedExpense ? 'text-destructive' : 'text-slate-300 hover:text-slate-600'}`}
+                                  className={`p-1 rounded shrink-0 transition-colors ${assignedFixedExpense ? 'text-destructive' : 'text-slate-300 hover:text-slate-600'}`}
                                   title={assignedFixedExpense ? `Bill: ${assignedFixedExpense.name} (click to change)` : 'Mark as bill payment'}
                                 >
                                   <Receipt className="w-4 h-4" />
@@ -997,7 +997,7 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                               } as any);
                               toast(newIsReimbursable ? '💼 Marked as Work Travel Reimbursement — excluded from personal spend' : 'Removed Work Reimbursement flag');
                             }}
-                            className={`p-1 rounded transition-colors ${tx.is_reimbursable ? 'text-sky-600 font-bold' : 'text-slate-300 hover:text-slate-600'}`}
+                            className={`p-1 rounded shrink-0 transition-colors ${tx.is_reimbursable ? 'text-sky-600 font-bold' : 'text-slate-300 hover:text-slate-600'}`}
                             title={tx.is_reimbursable ? 'Work Travel Claim (click to unmark)' : 'Mark as Work Travel Reimbursement'}
                           >
                             <Briefcase className="w-4 h-4" />
@@ -1021,7 +1021,7 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                                 toast('Marked as transfer — excluded from income/spending');
                               }
                             }}
-                            className={`p-1 rounded transition-colors ${(tx.is_transfer || isConfirmedTransfer) ? 'text-purple-600' : 'text-slate-300 hover:text-slate-600'}`}
+                            className={`p-1 rounded shrink-0 transition-colors ${(tx.is_transfer || isConfirmedTransfer) ? 'text-purple-600' : 'text-slate-300 hover:text-slate-600'}`}
                             title={(tx.is_transfer || isConfirmedTransfer) ? 'Transfer (click to unmark and treat as income/spending)' : 'Mark as transfer'}
                           >
                             <ArrowLeftRight className="w-4 h-4" />
