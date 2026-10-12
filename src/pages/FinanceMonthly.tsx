@@ -15,7 +15,7 @@ import { useFinanceAssumptions } from '@/hooks/useFinanceAssumptions';
 import { useFixedExpenses } from '@/hooks/useFixedExpenses';
 import { useWeeklyBoosts } from '@/hooks/useWeeklyBoosts';
 import { useWeekTypes } from '@/hooks/useWeekTypes';
-import { computePolicySnapshot } from '@/lib/policyEngine';
+import { computePolicySnapshot, computeRequiredGoalSavingsMonthly } from '@/lib/policyEngine';
 import { formatCurrency, baseAmt, parseUkDate } from '@/lib/financeUtils';
 import { MetricCard } from '@/components/finance/MetricCard';
 import { MultiSegmentDonut } from '@/components/finance/MultiSegmentDonut';
@@ -1318,7 +1318,15 @@ export default function FinanceMonthly() {
         <TabsContent value="breakdown" className="mt-4 space-y-6 focus-visible:outline-none">
           {/* Super Clear Cash Flow Breakdown Card */}
           {(() => {
-            const poolSavingsMonthly = snapshot?.split.goalSavingsAmount ?? 0;
+            const directGoalSavings = computeRequiredGoalSavingsMonthly(
+              finance.goals,
+              finance.convertToBase,
+              monthDate,
+              incomeTotal || expectedIncomeVal
+            );
+            const poolSavingsMonthly = (snapshot?.split.goalSavingsAmount && snapshot.split.goalSavingsAmount > 0)
+              ? snapshot.split.goalSavingsAmount
+              : directGoalSavings;
 
             return (
               <MonthlyCashFlowBreakdown

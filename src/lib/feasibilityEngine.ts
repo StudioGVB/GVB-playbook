@@ -82,12 +82,20 @@ export function calculateStreamIncomeEstimates(
       const b = incomeCategories.find(c => c.name.toLowerCase().includes('pocket') || c.name.toLowerCase().includes('back'));
       if (b) return b.id;
     }
-    return null;
+    if (!streamMap['__other_income']) {
+      streamMap['__other_income'] = {
+        name: 'Other Cleared Income',
+        color: '#10B981',
+        total: 0,
+        months: new Set<string>(),
+      };
+    }
+    return '__other_income';
   };
 
   // Filter income transactions in the last 3 months window
   for (const tx of transactions) {
-    if (tx.amount <= 0 || tx.is_reimbursable) continue;
+    if (tx.amount <= 0 || tx.is_transfer || tx.is_reimbursable) continue;
 
     const txDate = parseUkDate(tx.posted_at);
     if (txDate < threeMonthsAgoStart || txDate > endOfCurrentMonth) continue;

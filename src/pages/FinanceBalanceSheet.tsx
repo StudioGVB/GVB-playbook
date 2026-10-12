@@ -11,7 +11,7 @@ import { Table, LayoutGrid } from 'lucide-react';
 import FinanceSpreadsheetTab from '@/components/finance/FinanceSpreadsheetTab';
 import MonthlyCashFlowBreakdown from '@/components/finance/MonthlyCashFlowBreakdown';
 import { calcTakeHome } from '@/lib/ukTakeHome';
-import { computePolicySnapshot } from '@/lib/policyEngine';
+import { computePolicySnapshot, computeRequiredGoalSavingsMonthly } from '@/lib/policyEngine';
 
 // Candy-jar palette (matches Accounts & Settings)
 const PINK = '#FF2EB8';
@@ -227,11 +227,25 @@ export default function FinanceBalanceSheet() {
     );
   }, [finance.assumptions, finance.accounts, finance.transactions, finance.categories, finance.goals, finance.convertToBase, fixedExpensesMonthlyInternal, finance.trips, fixedExpensesMonthlyAll]);
 
-  const poolSavingsMonthly = snapshot?.split.goalSavingsAmount ?? 0;
+  const expectedIncomeValue = snapshot?.split.monthlyIncome && snapshot.split.monthlyIncome > 0
+    ? snapshot.split.monthlyIncome
+    : (finance.assumptions?.expected_monthly_income || stats.income || 0);
+
+  const directGoalSavings = useMemo(() => {
+    return computeRequiredGoalSavingsMonthly(
+      finance.goals,
+      finance.convertToBase,
+      new Date(),
+      stats.income || expectedIncomeValue
+    );
+  }, [finance.goals, finance.convertToBase, stats.income, expectedIncomeValue]);
+
+  const poolSavingsMonthly = (snapshot?.split.goalSavingsAmount && snapshot.split.goalSavingsAmount > 0)
+    ? snapshot.split.goalSavingsAmount
+    : directGoalSavings;
   const essentialBudgetMonthly = snapshot 
     ? snapshot.weeklyEssentialBudget * 4.33 
     : (finance.assumptions?.estimated_essential_variable || 115) * 4.33;
-  const expectedIncomeValue = snapshot?.split.monthlyIncome ?? (finance.assumptions?.expected_monthly_income || 0);
 
   return (
     <div className="min-h-screen -mx-4 sm:-mx-6 -my-6 px-4 sm:px-6 py-6 bg-[#FFF5FA] font-body">

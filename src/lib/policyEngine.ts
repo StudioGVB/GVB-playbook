@@ -5,6 +5,7 @@ import { startOfWeek, subWeeks, format } from 'date-fns';
 import type { WeekType } from '@/hooks/useWeekTypes';
 import { isExcludedSpendDate, weekOverlapsExclusion, baseAmt, parseUkDate } from './financeUtils';
 import { calcTakeHome } from './ukTakeHome';
+import { calculateStreamIncomeEstimates } from './feasibilityEngine';
 
 
 // ---- Trip helpers ----
@@ -309,9 +310,17 @@ export function computePolicySnapshot(
   }).netMonthly;
   const ventureSideMonthly = (70 * 52) / 12;
   const baseNetIncome = salaryTakeHome > 0 ? salaryTakeHome + ventureSideMonthly : 0;
+  
+  // If assumptions don't define expected income or salary, infer from recent income streams
+  let streamEstimatedIncome = 0;
+  if (!assumptions.expected_monthly_income && !salaryTakeHome) {
+    const streamRes = calculateStreamIncomeEstimates(transactions, categories, now);
+    streamEstimatedIncome = streamRes.totalEstimatedMonthlyIncome;
+  }
+
   const monthlyIncome = (assumptions.expected_monthly_income && assumptions.expected_monthly_income > 0)
     ? assumptions.expected_monthly_income
-    : baseNetIncome;
+    : (baseNetIncome > 0 ? baseNetIncome : streamEstimatedIncome);
   const isDrawdownMode = monthlyIncome === 0;
 
   // Core pools
@@ -328,21 +337,23 @@ export function computePolicySnapshot(
   if (isDrawdownMode) {
     // Fun money is the user-configured weekly amount (default $100/wk)
     baseWeeklyFun = assumptions.weekly_fun_budget > 0 ? assumptions.weekly_fun_budget : 100;
+    // Calculate required goal savings even in drawdown mode so active goals with deadlines are not zeroed out
+    const drawdownGoalSavings = computeRequiredGoalSavingsMonthly(goals, convertToBase, now, 0);
     // Weekly gross = all weekly costs combined
-    weeklyGross = weeklyFixedCosts + weeklyEssentialBudget + baseWeeklyFun;
+    weeklyGross = weeklyFixedCosts + weeklyEssentialBudget + (drawdownGoalSavings / 4.33) + baseWeeklyFun;
     // Runway-based weeks (how long living pool lasts at this burn rate)
     weeksUntilIncome = weeklyGross > 0 ? spendablePool / weeklyGross : 0;
 
     split = {
       mandatoryPercent: 0, mandatoryAmount: fixedMonthly,
       baseSavingsPercent: 0, baseSavingsAmount: 0,
-      goalSavingsPercent: 0, goalSavingsAmount: 0,
+      goalSavingsPercent: 0, goalSavingsAmount: drawdownGoalSavings,
       funPercent: 100, funAmount: baseWeeklyFun * 4.33,
       weeklyFunAmount: baseWeeklyFun,
       monthlyIncome: 0,
     };
   } else {
-    split = computeMoneySplit(assumptions, transactions, categories, goals, convertToBase, fixedExpensesMonthlyAll ?? fixedMonthly);
+    split = computeMoneySplit(assumptions, transactions, categories, goals, convertToBase, fixedExpensesMonthlyAll ?? fixedMonthly, monthlyIncome);
     baseWeeklyFun = split.weeklyFunAmount;
     weeklyGross = split.monthlyIncome / 4.33;
   }
@@ -617,6 +628,39 @@ export interface MoneySplit {
   monthlyIncome: number;
 }
 
+/**
+ * Calculates the required monthly savings across all active goals/pools with deadlines or percentages.
+ */
+export function computeRequiredGoalSavingsMonthly(
+  goals: FinanceGoal[],
+  convertToBase: (amount: number, currency: string) => number,
+  now: Date = new Date(),
+  monthlyIncome: number = 0,
+): number {
+  let poolSavingsMonthly = 0;
+  for (const g of (goals || [])) {
+    if ((g as any)?.is_stash) continue;
+    if (g.start_date && new Date(g.start_date) > now) continue;
+    const targetBase = convertToBase ? convertToBase(g.target_amount || 0, g.currency) : (g.target_amount || 0);
+    const assignedBase = convertToBase ? convertToBase(g.assigned_amount || 0, g.currency) : (g.assigned_amount || 0);
+    const remainingBase = Math.max(0, targetBase - assignedBase);
+
+    // Rule: If pot has reached or exceeded target amount, it receives £0.00 even if deadline is upcoming
+    if (remainingBase <= 0.01) continue;
+
+    if (g.deadline) {
+      const dl = new Date(g.deadline);
+      const daysLeft = Math.max(1, Math.ceil((dl.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
+      const weeksLeft = Math.max(1, daysLeft / 7);
+      const weeklyRequired = Math.min(remainingBase, remainingBase / weeksLeft);
+      poolSavingsMonthly += weeklyRequired * 4.33;
+    } else if (g.percent_allocation && g.percent_allocation > 0 && monthlyIncome > 0) {
+      poolSavingsMonthly += Math.min(remainingBase, (g.percent_allocation / 100) * monthlyIncome);
+    }
+  }
+  return poolSavingsMonthly;
+}
+
 export function computeMoneySplit(
   assumptions: FinanceAssumptions,
   transactions: FinanceTransaction[],
@@ -624,6 +668,7 @@ export function computeMoneySplit(
   goals: FinanceGoal[],
   convertToBase: (amount: number, currency: string) => number,
   fixedExpensesMonthly?: number,
+  overrideMonthlyIncome?: number,
 ): MoneySplit {
   // 1. Calculate effective net monthly income (Net Salary via PAYE Tax/NI + Venture Advisory £70/wk)
   const salaryTakeHome = calcTakeHome({
@@ -633,9 +678,18 @@ export function computeMoneySplit(
   }).netMonthly;
   const ventureSideMonthly = (70 * 52) / 12; // ~£303.33/mo
   const baseNetIncome = salaryTakeHome > 0 ? salaryTakeHome + ventureSideMonthly : 0;
-  const monthlyIncome = assumptions.expected_monthly_income && assumptions.expected_monthly_income > 0
-    ? assumptions.expected_monthly_income
-    : baseNetIncome;
+  
+  let streamEstimatedIncome = 0;
+  if (!assumptions.expected_monthly_income && !salaryTakeHome) {
+    const streamRes = calculateStreamIncomeEstimates(transactions, categories, new Date());
+    streamEstimatedIncome = streamRes.totalEstimatedMonthlyIncome;
+  }
+
+  const monthlyIncome = (overrideMonthlyIncome && overrideMonthlyIncome > 0)
+    ? overrideMonthlyIncome
+    : ((assumptions.expected_monthly_income && assumptions.expected_monthly_income > 0)
+      ? assumptions.expected_monthly_income
+      : (baseNetIncome > 0 ? baseNetIncome : streamEstimatedIncome));
 
   // 2. Committed fixed bills (use passed fixed expenses if provided, else historic average)
   let monthlyMandatory = fixedExpensesMonthly ?? 0;
@@ -668,26 +722,7 @@ export function computeMoneySplit(
 
   // 4. Goal pool savings requirements
   const now = new Date();
-  let poolSavingsMonthly = 0;
-  for (const g of (goals || [])) {
-    if ((g as any)?.is_stash) continue;
-    if (g.start_date && new Date(g.start_date) > now) continue;
-    const targetBase = convertToBase ? convertToBase(g.target_amount || 0, g.currency) : (g.target_amount || 0);
-    const assignedBase = convertToBase ? convertToBase(g.assigned_amount || 0, g.currency) : (g.assigned_amount || 0);
-    const remainingBase = Math.max(0, targetBase - assignedBase);
-
-    // Rule: If pot has reached or exceeded target amount, it receives £0.00 even if deadline is upcoming
-    if (remainingBase <= 0.01) continue;
-
-    if (g.deadline) {
-      const daysLeft = Math.max(1, Math.ceil((new Date(g.deadline).getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
-      const weeksLeft = Math.max(1, daysLeft / 7);
-      const weeklyRequired = Math.min(remainingBase, remainingBase / weeksLeft);
-      poolSavingsMonthly += weeklyRequired * 4.33;
-    } else if (g.percent_allocation && g.percent_allocation > 0) {
-      poolSavingsMonthly += Math.min(remainingBase, (g.percent_allocation / 100) * effectiveIncome);
-    }
-  }
+  const poolSavingsMonthly = computeRequiredGoalSavingsMonthly(goals, convertToBase, now, effectiveIncome);
 
   const goalSavingsAmount = poolSavingsMonthly;
   const goalSavingsPercent = effectiveIncome > 0 ? (goalSavingsAmount / effectiveIncome) * 100 : 0;
