@@ -824,9 +824,9 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                       </div>
 
                       {/* Right: Category, Amount & Actions in clean aligned columns */}
-                      <div className="flex items-center gap-3 sm:gap-4 shrink-0 ml-auto">
+                      <div className="flex items-center gap-3 sm:gap-6 shrink-0 ml-auto">
                         {/* Category pill */}
-                        <div className="w-28 sm:w-36 flex justify-start shrink-0 min-w-0">
+                        <div className="w-24 sm:w-28 flex justify-start shrink-0 min-w-0">
                           <Popover>
                             <PopoverTrigger asChild>
                               {displayCat ? (
@@ -878,8 +878,8 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                           </Popover>
                         </div>
 
-                        {/* Amount (Fixed width left-aligned column with + sign for real income) */}
-                        <div className="w-24 sm:w-28 text-left shrink-0 pr-2">
+                        {/* Amount (Generous fixed width left-aligned column ensuring no collision with action icons) */}
+                        <div className="w-28 sm:w-32 text-left shrink-0 pr-2">
                           <p className={`text-xs sm:text-sm font-display font-bold tabular-nums ${isRealIncome ? 'text-[hsl(var(--success))]' : 'text-slate-900'}`}>
                             {(() => {
                               const rawAmt = tx.base_amount !== undefined && tx.base_amount !== null ? tx.base_amount : tx.amount;
@@ -889,8 +889,8 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                           </p>
                         </div>
 
-                        {/* Action Icons Toolbar (Fixed width container so amount column stays pixel-aligned across all income and expense rows) */}
-                        <div className="w-24 sm:w-28 flex items-center justify-end gap-1 shrink-0">
+                        {/* Action Icons Toolbar (Comfortable width container preventing any overflow onto amount) */}
+                        <div className="w-[124px] sm:w-[136px] flex items-center justify-end gap-1.5 shrink-0">
                           {/* Pool assignment / refund flag */}
                           {tx.amount < 0 && goals.length > 0 ? (
                             <Popover>
