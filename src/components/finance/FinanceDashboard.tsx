@@ -166,8 +166,10 @@ export function FinanceDashboard() {
       
       const desc = `${tx.merchant || ''} ${tx.description || ''}`.toLowerCase();
       const isBatchbase = desc.includes('batchbase') || desc.includes('batch base');
+      const isGabriellaIncome = desc.includes('gabriella') && tx.amount > 0 && !tx.transfer_group_id;
+      const isVentureIncome = isBatchbase || isGabriellaIncome || desc.includes('venture') || desc.includes('advisory');
 
-      if (tx.amount > 0 && (!tx.is_transfer || isBatchbase)) {
+      if (tx.amount > 0 && (!tx.is_transfer || isVentureIncome)) {
         totalIncome += baseAmt(tx);
         continue;
       }

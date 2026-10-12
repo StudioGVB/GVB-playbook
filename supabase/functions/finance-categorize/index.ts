@@ -239,14 +239,23 @@ serve(async (req) => {
       const fullText = `${descUpper} ${merchUpper}`
 
       const isBatchbase = fullText.includes('BATCHBASE') || fullText.includes('BATCH BASE')
-      if (isBatchbase && tx.amount > 0) {
+      const isGabriella = fullText.includes('GABRIELLA')
+      const absAmt = Math.abs(tx.amount || 0)
+      const isWeeklyPaycheck = tx.amount > 0 && (
+        (absAmt >= 60 && absAmt <= 90) ||
+        (absAmt >= 120 && absAmt <= 180) ||
+        Math.abs(absAmt - 72.8) < 0.5 ||
+        Math.abs(absAmt - 140) < 1.0
+      )
+      const isVentureIncome = (isBatchbase || (isGabriella && isWeeklyPaycheck)) && tx.amount > 0
+      if (isVentureIncome) {
         const ventureCat = categories.find((c: any) =>
           c.type === 'income' && (c.name.toLowerCase().includes('venture') || c.name.toLowerCase().includes('batchbase'))
         )
         const targetId = ventureCat?.id || incomeCat?.id
         if (targetId) {
           ruleResults.push({ id: tx.id, category_id: targetId })
-          if (tx.is_transfer) {
+          if (tx.is_transfer || tx.transfer_status || tx.transfer_side) {
             await supabase.from('finance_transactions').update({
               is_transfer: false,
               transfer_side: null,
@@ -257,8 +266,15 @@ serve(async (req) => {
         }
       }
 
-      // Other Gabriella / Up account transfers must remain in "Other" (uncategorized)
+      // Other Gabriella / Up account transfers: if positive and not matched, clear any transfer flags
       if (fullText.includes('GABRIELLA') || fullText.includes('UP ACCOUNT') || fullText.includes('UP BANK')) {
+        if (tx.amount > 0 && (tx.is_transfer || tx.transfer_status || tx.transfer_side)) {
+          await supabase.from('finance_transactions').update({
+            is_transfer: false,
+            transfer_side: null,
+            transfer_status: null,
+          }).eq('id', tx.id)
+        }
         continue
       }
 

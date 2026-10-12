@@ -405,7 +405,15 @@ serve(async (req) => {
 
       const fullText = `${description.toUpperCase()} ${(merchant || '').toUpperCase()}`
       const isBatchbase = fullText.includes('BATCHBASE') || fullText.includes('BATCH BASE')
-      const isSavingsTransfer = !isBatchbase && (
+      const isGabriella = fullText.includes('GABRIELLA')
+      const absAmt = Math.abs(rawAmount)
+      const isWeeklyPaycheck = rawAmount > 0 && (
+        (absAmt >= 60 && absAmt <= 90) ||
+        (absAmt >= 120 && absAmt <= 180) ||
+        Math.abs(absAmt - 72.8) < 0.5 ||
+        Math.abs(absAmt - 140) < 1.0
+      )
+      const isSavingsTransfer = !isBatchbase && !isGabriella && (
         fullText.includes('TRANSFER FROM SAVINGS') ||
         fullText.includes('SAVINGS TRANSFER') ||
         fullText.includes('TRANSFER TO SAVINGS')
@@ -414,7 +422,7 @@ serve(async (req) => {
       let targetCategoryId = null
       if (fullText.includes('GAMMA')) {
         targetCategoryId = gammaCatId || ventureCatId
-      } else if (fullText.includes('VENTURE') || fullText.includes('ADVISORY') || isBatchbase) {
+      } else if (fullText.includes('VENTURE') || fullText.includes('ADVISORY') || isBatchbase || (isGabriella && isWeeklyPaycheck)) {
         targetCategoryId = ventureCatId
       }
 

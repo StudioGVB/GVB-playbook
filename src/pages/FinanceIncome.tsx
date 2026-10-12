@@ -45,8 +45,10 @@ const LEGACY_MATCHERS: Record<string, string[]> = {
 
 function isInternalTransfer(tx: any): boolean {
   const text = `${tx.merchant || ''} ${tx.description || ''} ${tx.raw?.message || ''}`.toLowerCase();
-  // Batchbase is earned Venture Advisory income, never an internal transfer
+  // Batchbase / Venture Advisory or Gabriella external paycheck is earned income, never an internal transfer
   if (text.includes('batchbase') || text.includes('batch base')) return false;
+  if (text.includes('venture') || text.includes('advisory')) return false;
+  if (text.includes('gabriella') && tx.amount > 0 && !tx.transfer_group_id) return false;
 
   if (tx.is_transfer) return true;
   if (tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') return true;
@@ -189,6 +191,17 @@ export default function FinanceIncome() {
       if (hit) return hit.key;
     }
     const hay = `${(tx.merchant || '').toLowerCase()} ${(tx.description || '').toLowerCase()}`;
+    const numAmt = Math.abs(tx.amount || 0);
+    const isWeeklyPaycheck = (
+      (numAmt >= 60 && numAmt <= 90) ||
+      (numAmt >= 120 && numAmt <= 180) ||
+      Math.abs(numAmt - 72.8) < 0.5 ||
+      Math.abs(numAmt - 140) < 1.0
+    );
+    if (hay.includes('gabriella') && (isWeeklyPaycheck || hay.includes('batchbase'))) {
+      const ventureBucket = BUCKETS.find(b => b.key.includes('venture') || b.key.includes('batchbase') || b.label.toLowerCase().includes('venture'));
+      if (ventureBucket) return ventureBucket.key;
+    }
     for (const b of BUCKETS) {
       if (b.key === 'other' || b.key === 'reimbursement') continue;
       if (b.matchers.some(m => hay.includes(m))) return b.key;

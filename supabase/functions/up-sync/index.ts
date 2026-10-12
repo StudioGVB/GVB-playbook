@@ -153,12 +153,17 @@ serve(async (req) => {
 
       const fullText = `${description} ${rawText} ${message} ${tagIds.join(' ')}`.toLowerCase()
       const isBatchbase = fullText.includes('batchbase') || fullText.includes('batch base') || tagIds.includes('batchbase') || tagIds.includes('batch')
+      const isGabriella = description.toUpperCase().includes('GABRIELLA BLYTH') || description.toUpperCase().includes('GABRIELLA')
+      const isWeeklyPaycheck = rawAmount > 0 && (
+        (rawAmount >= 60 && rawAmount <= 90) ||
+        (rawAmount >= 120 && rawAmount <= 180) ||
+        Math.abs(rawAmount - 72.8) < 0.5 ||
+        Math.abs(rawAmount - 140) < 1.0
+      )
+      const isVentureIncome = (isBatchbase || (isGabriella && isWeeklyPaycheck)) && rawAmount > 0
 
       const fingerprint = await computeFingerprint(userId, dbAccountId, postedAt, rawAmount, description)
       const status = tx.attributes.status || null
-
-      // If it's batchbase, it is NEVER a transfer — it is earned Venture Advisory income from an external account
-      const isGabriella = !isBatchbase && description.toUpperCase().includes('GABRIELLA BLYTH') && rawAmount > 0
 
       return {
         user_id: userId,
@@ -169,10 +174,10 @@ serve(async (req) => {
         merchant: rawText || null,
         amount: rawAmount,
         currency: tx.attributes.amount?.currencyCode || 'AUD',
-        category_id: isBatchbase ? ventureCatId : undefined,
-        is_transfer: !isBatchbase && (hasTransferRelation || isGabriella),
-        transfer_side: !isBatchbase && isGabriella ? 'in' : undefined,
-        transfer_status: !isBatchbase && isGabriella ? 'auto_confirmed' : undefined,
+        category_id: isVentureIncome ? ventureCatId : undefined,
+        is_transfer: !isVentureIncome && hasTransferRelation,
+        transfer_side: undefined,
+        transfer_status: undefined,
         transaction_fingerprint: fingerprint,
         raw: {
           category: tx.relationships?.category?.data?.id || null,
@@ -264,51 +269,13 @@ serve(async (req) => {
       }
     }
 
-    // 7. Auto-transfer rule: GABRIELLA BLYTH → mirror to Travel Savings ONLY if not batchbase/income
-    const gabriellaRows = rowsToUpsert.filter(r => {
-      if (r.amount <= 0 || !r.is_transfer) return false
-      const rawText = `${r.description || ''} ${r.merchant || ''} ${(r.raw as any)?.message || ''} ${((r.raw as any)?.tags || []).join(' ')}`.toLowerCase()
-      if (rawText.includes('batchbase') || rawText.includes('batch base')) return false
-      return r.description.toUpperCase().includes('GABRIELLA BLYTH')
-    })
-
-    // Purge any fake mirror deductions previously created in Travel Savings for batchbase
+    // 7. Purge any fake mirror deductions previously created in Travel Savings for Gabriella Blyth / batchbase
     await supabase
       .from('finance_transactions')
       .delete()
       .eq('user_id', userId)
       .eq('account_id', TRAVEL_SAVINGS_ACCOUNT_ID)
-      .or('description.ilike.%batchbase%,description.ilike.%batch base%')
-
-    for (const gbRow of gabriellaRows) {
-      const mirrorFingerprint = await computeFingerprint(
-        userId, TRAVEL_SAVINGS_ACCOUNT_ID, gbRow.posted_at, -gbRow.amount, gbRow.description
-      )
-
-      const { data: existing } = await supabase
-        .from('finance_transactions')
-        .select('id')
-        .eq('user_id', userId)
-        .eq('transaction_fingerprint', mirrorFingerprint)
-        .maybeSingle()
-
-      if (!existing) {
-        await supabase.from('finance_transactions').insert({
-          user_id: userId,
-          account_id: TRAVEL_SAVINGS_ACCOUNT_ID,
-          posted_at: gbRow.posted_at,
-          description: `Transfer to Up – ${gbRow.description}`,
-          merchant: gbRow.description,
-          amount: -gbRow.amount,
-          currency: gbRow.currency,
-          is_transfer: true,
-          transfer_side: 'out',
-          transfer_status: 'auto_confirmed',
-          transaction_fingerprint: mirrorFingerprint,
-        })
-        console.log(`Auto-created mirror transfer for GABRIELLA BLYTH: -${gbRow.amount}`)
-      }
-    }
+      .or('description.ilike.%batchbase%,description.ilike.%batch base%,description.ilike.%Transfer to Up – GABRIELLA BLYTH%,description.ilike.%Transfer to Up - GABRIELLA BLYTH%,description.ilike.%GABRIELLA BLYTH%')
 
     return new Response(JSON.stringify({
       success: true,

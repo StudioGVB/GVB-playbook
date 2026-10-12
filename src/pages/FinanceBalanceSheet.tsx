@@ -78,7 +78,8 @@ export default function FinanceBalanceSheet() {
       const cat = categories.find(c => c.id === tx.category_id);
       const rawText = `${tx.merchant || ''} ${tx.description || ''}`.toLowerCase();
       const isIncomeCategory = cat?.type === 'income';
-      const isIncomeKeyword = rawText.includes('batchbase') || rawText.includes('batch base') || rawText.includes('payroll') || rawText.includes('salary') || rawText.includes('venture') || rawText.includes('etsy');
+      const isGabriellaIncome = rawText.includes('gabriella') && tx.amount > 0 && !tx.transfer_group_id;
+      const isIncomeKeyword = rawText.includes('batchbase') || rawText.includes('batch base') || rawText.includes('payroll') || rawText.includes('salary') || rawText.includes('venture') || rawText.includes('etsy') || isGabriellaIncome;
 
       if (tx.is_transfer && !isIncomeCategory && !isIncomeKeyword) continue;
       if ((tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') && !isIncomeCategory && !isIncomeKeyword) continue;

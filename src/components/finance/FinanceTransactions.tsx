@@ -719,12 +719,22 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
               <div className="space-y-1">
                 {group.txs.map(tx => {
                   const cat = categories.find(c => c.id === tx.category_id);
-                  const isTransfer = tx.is_transfer || !!tx.transfer_group_id;
-                  const transferStatus = (tx as any).transfer_status as string | null;
+                  const fullDesc = `${tx.description || ''} ${tx.merchant || ''}`.toLowerCase();
+                  const isVentureIncome = tx.amount > 0 && (
+                    fullDesc.includes('batchbase') ||
+                    fullDesc.includes('batch base') ||
+                    fullDesc.includes('venture') ||
+                    fullDesc.includes('advisory') ||
+                    (fullDesc.includes('gabriella') && !tx.transfer_group_id)
+                  );
+                  const ventureCategory = categories.find(c => c.type === 'income' && (c.name.toLowerCase().includes('venture') || c.name.toLowerCase().includes('batchbase')));
+                  const displayCat = cat || (isVentureIncome ? ventureCategory : null);
+                  const catColor = displayCat ? (CATEGORY_TYPE_COLORS[displayCat.type] || CATEGORY_TYPE_COLORS.variable) : '';
+
+                  const isTransfer = !isVentureIncome && (tx.is_transfer || !!tx.transfer_group_id);
+                  const transferStatus = isVentureIncome ? null : ((tx as any).transfer_status as string | null);
                   const isConfirmedTransfer = transferStatus === 'confirmed' || transferStatus === 'auto_confirmed';
                   const isIncomeTransaction = tx.amount > 0 && !isTransfer && !isConfirmedTransfer && !(tx as any).is_refund;
-                  const displayCat = cat;
-                  const catColor = displayCat ? (CATEGORY_TYPE_COLORS[displayCat.type] || CATEGORY_TYPE_COLORS.variable) : '';
 
                   const assignedGoal = (tx as any).goal_id ? goals.find(g => g.id === (tx as any).goal_id) : null;
                   const assignedFixedExpense = (tx as any).fixed_expense_id ? fixedExpenses.find(e => e.id === (tx as any).fixed_expense_id) : null;

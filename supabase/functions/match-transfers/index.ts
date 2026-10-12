@@ -201,20 +201,22 @@ Deno.serve(async (req) => {
     const flagUpdates: Array<{ id: string; is_transfer: boolean; transfer_side: string }> = [];
 
     for (const tx of allTxs) {
-      // Skip already confirmed/auto_confirmed
-      if (tx.transfer_status === "confirmed" || tx.transfer_status === "auto_confirmed") continue;
-      // Skip already in a group
-      if (tx.transfer_group_id) continue;
-      // Skip rejected (don't re-suggest)
-      if (tx.transfer_status === "rejected") continue;
-
       const descLower = (tx.description || "").toLowerCase();
       const merchantLower = (tx.merchant || "").toLowerCase();
       const isBatchbase = descLower.includes("batchbase") || descLower.includes("batch base") || merchantLower.includes("batchbase");
+      const isGabriella = descLower.includes("gabriella") || merchantLower.includes("gabriella");
+      const absAmt = Math.abs(tx.amount || 0);
+      const isWeeklyPaycheck = tx.amount > 0 && (
+        (absAmt >= 60 && absAmt <= 90) ||
+        (absAmt >= 120 && absAmt <= 180) ||
+        Math.abs(absAmt - 72.8) < 0.5 ||
+        Math.abs(absAmt - 140) < 1.0
+      );
+      const isVentureIncome = isBatchbase || (isGabriella && isWeeklyPaycheck);
 
-      // Batchbase is earned Venture Advisory income, never a transfer candidate
-      if (isBatchbase) {
-        if (tx.is_transfer || tx.transfer_status) {
+      // Venture Advisory paycheck / Batchbase or single-leg Gabriella deposit is earned income, never a transfer
+      if (isVentureIncome || (isGabriella && tx.amount > 0 && !tx.transfer_group_id)) {
+        if (tx.is_transfer || tx.transfer_status || tx.transfer_side) {
           await supabase.from("finance_transactions").update({
             is_transfer: false,
             transfer_side: null,
@@ -223,6 +225,13 @@ Deno.serve(async (req) => {
         }
         continue;
       }
+
+      // Skip already confirmed/auto_confirmed
+      if (tx.transfer_status === "confirmed" || tx.transfer_status === "auto_confirmed") continue;
+      // Skip already in a group
+      if (tx.transfer_group_id) continue;
+      // Skip rejected (don't re-suggest)
+      if (tx.transfer_status === "rejected") continue;
 
       const isCandidate =
         TRANSFER_KEYWORDS.some(kw => descLower.includes(kw)) ||
