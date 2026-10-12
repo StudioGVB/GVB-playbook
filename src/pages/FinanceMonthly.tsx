@@ -1321,7 +1321,7 @@ export default function FinanceMonthly() {
             const directGoalSavings = computeRequiredGoalSavingsMonthly(
               finance.goals,
               finance.convertToBase,
-              monthDate,
+              selectedMonth,
               incomeTotal || expectedIncomeVal
             );
             const poolSavingsMonthly = (snapshot?.split.goalSavingsAmount && snapshot.split.goalSavingsAmount > 0)
