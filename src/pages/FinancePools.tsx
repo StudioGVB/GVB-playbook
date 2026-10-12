@@ -18,7 +18,7 @@ import {
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Plus, ShoppingCart, Target, Wallet, Lock, ArrowRightLeft, Trash2, Palette, Plane, Car, Home, GraduationCap, Heart, Gift, Laptop, Baby, PiggyBank, Briefcase, UtensilsCrossed, Dumbbell, Music, Gamepad2, BookOpen, Sparkles, Pencil, AlertCircle, RotateCcw, AlertTriangle, ChevronRight, HelpCircle, type LucideIcon } from 'lucide-react';
+import { Plus, ShoppingCart, Target, Wallet, Lock, ArrowRightLeft, Trash2, Palette, Plane, Car, Home, GraduationCap, Heart, Gift, Laptop, Baby, PiggyBank, Briefcase, UtensilsCrossed, Dumbbell, Music, Gamepad2, BookOpen, Sparkles, Pencil, AlertCircle, RotateCcw, AlertTriangle, ChevronRight, HelpCircle, CheckCircle2, type LucideIcon } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import PriorMonthAllocator from '@/components/finance/PriorMonthAllocator';
@@ -94,7 +94,7 @@ interface CapOverflowInfo {
 
 export default function FinancePoolsPage() {
   const finance = useFinanceData();
-  const { assumptions, loading: assumptionsLoading } = useFinanceAssumptions();
+  const { assumptions, loading: assumptionsLoading, update: updateAssumptions } = useFinanceAssumptions();
   const { monthlyTotalInternal: fixedMonthlyTotal, monthlyTotal: fixedMonthlyTotalAll } = useFixedExpenses();
   const { weekTypeMap } = useWeekTypes();
   const { trips } = useFinanceTrips();
@@ -227,7 +227,27 @@ export default function FinancePoolsPage() {
   }, [finance.goals]);
 
   // Real-time feasibility assessments for Create & Edit Pool dialogs
-  const expectedMonthlyIncomeVal = snapshot?.split.monthlyIncome ?? assumptions?.expected_monthly_income;
+  const expectedMonthlyIncomeVal = (assumptions?.expected_monthly_income && assumptions.expected_monthly_income > 0)
+    ? assumptions.expected_monthly_income
+    : (snapshot?.split.monthlyIncome && snapshot.split.monthlyIncome > 0 ? snapshot.split.monthlyIncome : 3200);
+
+  const activeFeasibilityAssessment = useMemo(() => {
+    if (!selectedFeasibilityGoal) return null;
+    return evaluatePoolFeasibility({
+      targetAmount: finance.convertToBase(selectedFeasibilityGoal.target_amount || 0, selectedFeasibilityGoal.currency),
+      currentAssigned: finance.convertToBase(selectedFeasibilityGoal.assigned_amount || 0, selectedFeasibilityGoal.currency),
+      deadline: selectedFeasibilityGoal.deadline || null,
+      startDate: selectedFeasibilityGoal.start_date || null,
+      existingGoals: finance.goals,
+      evaluatingGoalId: selectedFeasibilityGoal.id,
+      transactions: finance.transactions,
+      categories: finance.categories,
+      fixedMonthlyExpenses: fixedMonthlyTotal,
+      weeklyVariableBudget: essentialVariable / 4.33,
+      expectedMonthlyIncome: expectedMonthlyIncomeVal,
+      convertToBase: finance.convertToBase,
+    });
+  }, [selectedFeasibilityGoal, finance.goals, finance.transactions, finance.categories, fixedMonthlyTotal, essentialVariable, expectedMonthlyIncomeVal, finance.convertToBase]);
 
   const createFeasibility = useMemo(() => {
     const targetVal = finance.convertToBase(parseFloat(newName ? newAmount : '0') || 0, newCurrency);
@@ -1328,6 +1348,25 @@ export default function FinancePoolsPage() {
                   </button>
                 )}
 
+                {/* Feasible / On-Track Callout Banner */}
+                {cardFeasibility && cardFeasibility.isFeasible && cardFeasibility.requiredMonthlyPace > 0 && !isHit && (
+                  <button
+                    type="button"
+                    onClick={() => openFeasibilityDialog(goal, cardFeasibility)}
+                    className="w-full text-left p-2 rounded-xl bg-emerald-50/70 hover:bg-emerald-100/70 border border-emerald-200/70 text-emerald-900 transition-colors flex items-center justify-between text-xs cursor-pointer group shadow-2xs mt-2"
+                  >
+                    <div className="flex items-center gap-1.5 truncate">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                      <span className="truncate font-semibold text-[11px] text-emerald-800">
+                        Feasible • <strong>{formatCurrency(cardFeasibility.netMonthlySurplus, baseCurrency)}/mo</strong> surplus
+                      </span>
+                    </div>
+                    <span className="text-[10px] font-bold text-emerald-700 underline group-hover:text-emerald-900 shrink-0 ml-2 flex items-center gap-0.5">
+                      View math <ChevronRight className="w-3 h-3" />
+                    </span>
+                  </button>
+                )}
+
                 {/* Actions */}
                 <div className="flex gap-2 pt-1 w-full">
                   <Button
@@ -1707,7 +1746,7 @@ export default function FinancePoolsPage() {
         open={feasibilityDialogOpen}
         onOpenChange={setFeasibilityDialogOpen}
         goal={selectedFeasibilityGoal}
-        assessment={selectedFeasibilityAssessment}
+        assessment={activeFeasibilityAssessment || selectedFeasibilityAssessment}
         currency={baseCurrency}
         totalLiquidCash={totalCash}
         allGoals={finance.goals}
@@ -1726,6 +1765,10 @@ export default function FinancePoolsPage() {
         onApplyRecommendedTarget={(goalId, targetVal) => {
           finance.updateGoal(goalId, { target_amount: targetVal } as any);
           toast.success(`Target amount adjusted to ${formatCurrency(targetVal, baseCurrency)}`);
+        }}
+        onUpdateExpectedIncome={async (val) => {
+          await updateAssumptions({ expected_monthly_income: val });
+          toast.success(`Expected monthly income updated to ${formatCurrency(val, baseCurrency)}/mo`);
         }}
       />
     </div>

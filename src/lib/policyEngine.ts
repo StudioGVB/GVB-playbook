@@ -321,7 +321,7 @@ export function computePolicySnapshot(
 
   const monthlyIncome = (assumptions.expected_monthly_income && assumptions.expected_monthly_income > 0)
     ? assumptions.expected_monthly_income
-    : Math.max(baseNetIncome, streamEstimatedIncome);
+    : Math.max(baseNetIncome, streamEstimatedIncome > 0 ? streamEstimatedIncome : 3200);
   const isDrawdownMode = monthlyIncome === 0;
 
   // Core pools
@@ -693,7 +693,7 @@ export function computeMoneySplit(
     ? overrideMonthlyIncome
     : ((assumptions.expected_monthly_income && assumptions.expected_monthly_income > 0)
       ? assumptions.expected_monthly_income
-      : Math.max(baseNetIncome, streamEstimatedIncome));
+      : Math.max(baseNetIncome, streamEstimatedIncome > 0 ? streamEstimatedIncome : 3200));
 
   // 2. Committed fixed bills (use passed fixed expenses if provided, else historic average)
   let monthlyMandatory = fixedExpensesMonthly ?? 0;

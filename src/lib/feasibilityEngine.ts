@@ -56,9 +56,15 @@ export function calculateStreamIncomeEstimates(
 ): { totalEstimatedMonthlyIncome: number; streamEstimates: IncomeStreamEstimate[] } {
   const threeMonthsAgoStart = startOfMonth(subMonths(now, 2));
   const endOfCurrentMonth = endOfMonth(now);
+  const currentMonthKey = format(now, 'yyyy-MM');
 
   const incomeCategories = categories.filter(c => c.type === 'income');
-  const streamMap: Record<string, { name: string; color?: string; total: number; months: Set<string> }> = {};
+  const streamMap: Record<string, {
+    name: string;
+    color?: string;
+    total: number;
+    monthTotals: Record<string, number>;
+  }> = {};
 
   // Initialize map for all known income categories
   for (const cat of incomeCategories) {
@@ -66,7 +72,7 @@ export function calculateStreamIncomeEstimates(
       name: cat.name,
       color: cat.color || undefined,
       total: 0,
-      months: new Set<string>(),
+      monthTotals: {},
     };
   }
 
@@ -88,7 +94,7 @@ export function calculateStreamIncomeEstimates(
           name: 'Venture Advisory',
           color: '#2563EB',
           total: 0,
-          months: new Set<string>(),
+          monthTotals: {},
         };
       }
       return '__venture_advisory';
@@ -106,7 +112,7 @@ export function calculateStreamIncomeEstimates(
         name: 'Other Cleared Income',
         color: '#10B981',
         total: 0,
-        months: new Set<string>(),
+        monthTotals: {},
       };
     }
     return '__other_income';
@@ -129,18 +135,41 @@ export function calculateStreamIncomeEstimates(
     const monthKey = format(txDate, 'yyyy-MM');
 
     streamMap[streamId].total += bAmt;
-    streamMap[streamId].months.add(monthKey);
+    streamMap[streamId].monthTotals[monthKey] = (streamMap[streamId].monthTotals[monthKey] || 0) + bAmt;
   }
 
   const streamEstimates: IncomeStreamEstimate[] = [];
   let totalEstimatedMonthlyIncome = 0;
 
   for (const [catId, data] of Object.entries(streamMap)) {
-    if (data.total <= 0) continue;
+    const monthEntries = Object.entries(data.monthTotals).filter(([_, amt]) => amt > 0);
+    if (monthEntries.length === 0 && data.total <= 0) continue;
 
-    // Active months rule: divide by months where stream was active (min 1)
-    const activeMonthsCount = Math.max(1, data.months.size);
-    const estimatedMonthlyAmount = data.total / activeMonthsCount;
+    const isGammaSalary = data.name.toLowerCase().includes('gamma') || data.name.toLowerCase().includes('salary');
+    const completedMonths = monthEntries.filter(([m]) => m !== currentMonthKey);
+    const currentMonthAmt = data.monthTotals[currentMonthKey] || 0;
+
+    let estimatedMonthlyAmount = 0;
+    let activeMonthsCount = 1;
+
+    if (isGammaSalary) {
+      // Monthly salary streams: A salary paycheck is a full monthly wage.
+      // Do not dilute by an in-progress month before payday (e.g. October 12th).
+      const maxMonthlyObserved = Math.max(...monthEntries.map(([_, a]) => a), 0);
+      // Gabriella's standard Gamma net monthly salary benchmark is ~£2,896.67
+      estimatedMonthlyAmount = Math.max(maxMonthlyObserved, 2896.67);
+      activeMonthsCount = Math.max(1, monthEntries.length);
+    } else {
+      if (completedMonths.length > 0) {
+        const completedSum = completedMonths.reduce((sum, [_, a]) => sum + a, 0);
+        const completedAvg = completedSum / completedMonths.length;
+        estimatedMonthlyAmount = Math.max(completedAvg, currentMonthAmt);
+        activeMonthsCount = completedMonths.length;
+      } else {
+        estimatedMonthlyAmount = data.total;
+        activeMonthsCount = 1;
+      }
+    }
 
     streamEstimates.push({
       categoryId: catId,
@@ -152,6 +181,24 @@ export function calculateStreamIncomeEstimates(
     });
 
     totalEstimatedMonthlyIncome += estimatedMonthlyAmount;
+  }
+
+  // Guaranteed inclusion: Gamma Salary benchmark (~£2,896.67/mo)
+  const hasGammaStream = streamEstimates.some(s =>
+    s.name.toLowerCase().includes('gamma') || s.name.toLowerCase().includes('salary')
+  );
+  if (!hasGammaStream) {
+    const gammaMonthly = 2896.67;
+    const gCat = incomeCategories.find(c => c.name.toLowerCase().includes('gamma') || c.name.toLowerCase().includes('salary'));
+    streamEstimates.unshift({
+      categoryId: gCat?.id || '__gamma_salary',
+      name: 'Gamma Salary',
+      color: '#DB2777',
+      totalLast3Months: gammaMonthly * 3,
+      activeMonthsCount: 3,
+      estimatedMonthlyAmount: gammaMonthly,
+    });
+    totalEstimatedMonthlyIncome += gammaMonthly;
   }
 
   // Guaranteed inclusion: Venture Advisory side income is £70/wk (~£303.33/mo)
@@ -212,16 +259,16 @@ export function evaluatePoolFeasibility(params: {
     now = new Date(),
   } = params;
 
-  // 1. Calculate Income Estimates (floored by expected monthly income if known)
+  // 1. Calculate Income Estimates (floored by £3,200/mo baseline if not explicitly specified)
   const streamIncome = calculateStreamIncomeEstimates(
     transactions,
     categories,
     now
   );
-  const totalEstimatedMonthlyIncome = Math.max(
-    streamIncome.totalEstimatedMonthlyIncome,
-    expectedMonthlyIncome || 0
-  );
+  const baselineIncome = 3200; // Gabriella's standard net monthly income (~£3.2k/mo)
+  const totalEstimatedMonthlyIncome = (expectedMonthlyIncome && expectedMonthlyIncome > 0)
+    ? expectedMonthlyIncome
+    : Math.max(streamIncome.totalEstimatedMonthlyIncome, baselineIncome);
   const streamEstimates = streamIncome.streamEstimates;
 
   // 2. Calculate Variable Spending Monthly Rate (weekly allowance * 4.33 weeks/mo)

@@ -255,7 +255,7 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
 
   const billsCount = transactions.filter(tx => tx.is_fixed || (tx as any).fixed_expense_id).length;
   const suggestedCount = transactions.filter(tx => !!suggestBillFor(tx)).length;
-  const reimbursableCount = transactions.filter(tx => tx.is_reimbursable).length;
+  const reimbursableCount = transactions.filter(tx => tx.is_reimbursable && tx.reimbursement_status !== 'reimbursed').length;
 
   const filtered = transactions.filter(tx => {
     if (filterAccount !== 'all' && tx.account_id !== filterAccount) return false;
@@ -265,7 +265,7 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
     if (transferFilter === 'transfers_only' && !tx.is_transfer && !tx.transfer_group_id) return false;
     if (transferFilter === 'bills_only' && !(tx.is_fixed || (tx as any).fixed_expense_id)) return false;
     if (transferFilter === 'suggested_bills' && !suggestBillFor(tx)) return false;
-    if (transferFilter === 'reimbursable_only' && !tx.is_reimbursable) return false;
+    if (transferFilter === 'reimbursable_only' && (!tx.is_reimbursable || tx.reimbursement_status === 'reimbursed')) return false;
     return true;
   });
 
@@ -797,13 +797,26 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                             </Badge>
                           )}
                           {tx.is_reimbursable && (
-                            <Badge variant="secondary" className={`text-[9px] px-1.5 py-0 shrink-0 ${
-                              tx.reimbursement_status === 'reimbursed'
-                                ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
-                                : 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300'
-                            }`}>
+                            <Badge
+                              variant="secondary"
+                              className={`text-[9px] px-1.5 py-0 shrink-0 cursor-pointer hover:opacity-85 transition-opacity flex items-center gap-1 ${
+                                tx.reimbursement_status === 'reimbursed'
+                                  ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
+                                  : 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300'
+                              }`}
+                              onClick={() => {
+                                const newStatus = tx.reimbursement_status === 'reimbursed' ? 'pending' : 'reimbursed';
+                                updateTransaction(tx.id, {
+                                  is_reimbursable: true,
+                                  reimbursement_status: newStatus,
+                                  reimbursed_at: newStatus === 'reimbursed' ? new Date().toISOString() : null,
+                                } as any);
+                                toast.success(newStatus === 'reimbursed' ? '✓ Settled & removed from active Work Claims' : 'Reopened as Pending Claim');
+                              }}
+                              title={tx.reimbursement_status === 'reimbursed' ? 'Settled (click to reopen)' : 'Pending claim — click to mark settled'}
+                            >
                               <Briefcase className="w-2.5 h-2.5 mr-0.5" />
-                              {tx.reimbursement_status === 'reimbursed' ? 'Work Reimbursed' : 'Work Claim Pending'}
+                              {tx.reimbursement_status === 'reimbursed' ? 'Work Reimbursed ✓' : 'Work Claim Pending'}
                             </Badge>
                           )}
                           {suggestedBill && (
@@ -987,21 +1000,84 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                             </Popover>
                           )}
 
-                          {/* Work Travel Reimbursement flag */}
-                          <button
-                            onClick={() => {
-                              const newIsReimbursable = !tx.is_reimbursable;
-                              updateTransaction(tx.id, {
-                                is_reimbursable: newIsReimbursable,
-                                reimbursement_status: newIsReimbursable ? 'pending' : null,
-                              } as any);
-                              toast(newIsReimbursable ? '💼 Marked as Work Travel Reimbursement — excluded from personal spend' : 'Removed Work Reimbursement flag');
-                            }}
-                            className={`p-1 rounded shrink-0 transition-colors ${tx.is_reimbursable ? 'text-sky-600 font-bold' : 'text-slate-300 hover:text-slate-600'}`}
-                            title={tx.is_reimbursable ? 'Work Travel Claim (click to unmark)' : 'Mark as Work Travel Reimbursement'}
-                          >
-                            <Briefcase className="w-4 h-4" />
-                          </button>
+                          {/* Work Travel Reimbursement flag & manage popover */}
+                          {!tx.is_reimbursable ? (
+                            <button
+                              onClick={() => {
+                                updateTransaction(tx.id, {
+                                  is_reimbursable: true,
+                                  reimbursement_status: 'pending',
+                                } as any);
+                                toast.success('💼 Marked as Work Travel Reimbursement — excluded from personal spend');
+                              }}
+                              className="p-1 rounded shrink-0 transition-colors text-slate-300 hover:text-slate-600"
+                              title="Mark as Work Travel Reimbursement"
+                            >
+                              <Briefcase className="w-4 h-4" />
+                            </button>
+                          ) : (
+                            <Popover>
+                              <PopoverTrigger asChild>
+                                <button
+                                  className={`p-1 rounded shrink-0 transition-colors ${
+                                    tx.reimbursement_status === 'reimbursed'
+                                      ? 'text-emerald-600 font-bold'
+                                      : 'text-sky-600 font-bold'
+                                  }`}
+                                  title={
+                                    tx.reimbursement_status === 'reimbursed'
+                                      ? 'Work Claim Settled / Reimbursed (click to manage)'
+                                      : 'Work Claim Pending (click to settle or remove)'
+                                  }
+                                >
+                                  <Briefcase className="w-4 h-4" />
+                                </button>
+                              </PopoverTrigger>
+                              <PopoverContent className="w-52 p-2" align="end">
+                                <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1.5 px-1">
+                                  Work Travel Claim
+                                </p>
+                                <div className="space-y-1">
+                                  <button
+                                    onClick={() => {
+                                      const newStatus = tx.reimbursement_status === 'reimbursed' ? 'pending' : 'reimbursed';
+                                      updateTransaction(tx.id, {
+                                        is_reimbursable: true,
+                                        reimbursement_status: newStatus,
+                                        reimbursed_at: newStatus === 'reimbursed' ? new Date().toISOString() : null,
+                                      } as any);
+                                      toast.success(newStatus === 'reimbursed' ? '✓ Settled & removed from active Work Claims' : 'Reopened as Pending Claim');
+                                    }}
+                                    className={`w-full text-left text-xs px-2 py-1.5 rounded transition-colors flex items-center gap-2 font-medium ${
+                                      tx.reimbursement_status === 'reimbursed'
+                                        ? 'bg-amber-50 text-amber-700 hover:bg-amber-100'
+                                        : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                                    }`}
+                                  >
+                                    <Check className="w-3.5 h-3.5" />
+                                    {tx.reimbursement_status === 'reimbursed' ? 'Reopen Claim as Pending' : 'Mark as Settled / Reimbursed'}
+                                  </button>
+
+                                  <div className="border-t my-1" />
+
+                                  <button
+                                    onClick={() => {
+                                      updateTransaction(tx.id, {
+                                        is_reimbursable: false,
+                                        reimbursement_status: null,
+                                        reimbursed_at: null,
+                                        reimbursement_payout_id: null,
+                                      } as any);
+                                      toast('Removed from Work Claims — returned to personal spend');
+                                    }}
+                                    className="w-full text-left text-xs px-2 py-1.5 rounded hover:bg-destructive/10 text-destructive flex items-center gap-1.5 font-medium"
+                                  >
+                                    <X className="w-3.5 h-3.5" /> Remove from Work Claims
+                                  </button>
+                                </div>
+                              </PopoverContent>
+                            </Popover>
+                          )}
 
                           {/* Transfer flag */}
                           <button

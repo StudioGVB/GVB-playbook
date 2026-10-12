@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Slider } from '@/components/ui/slider';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { ArrowUpRight, Wallet, Sparkles, Settings2, TrendingUp, Plus, Trash2, Briefcase, Pencil, Archive, ArchiveRestore, Check, X } from 'lucide-react';
+import { ArrowUpRight, Wallet, Sparkles, Settings2, TrendingUp, Plus, Trash2, Briefcase, Pencil, Archive, ArchiveRestore, Check, X, Coins } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { useFinanceData } from '@/hooks/useFinanceData';
 import { useFinanceAssumptions } from '@/hooks/useFinanceAssumptions';
@@ -407,6 +407,37 @@ export default function FinanceAccountsPage({ defaultTab }: { defaultTab?: strin
                     Income starts {new Date(jobStartDate).toLocaleDateString()}
                   </p>
                 )}
+              </div>
+
+              {/* Expected Monthly Income tile */}
+              <div className="bg-white rounded-[2rem] p-6 border-2 border-[#FF7AD1]/30 shadow-sm md:col-span-2">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-10 h-10 rounded-2xl bg-[#FFF5FA] flex items-center justify-center text-[#FF2EB8]">
+                    <Coins className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-display font-bold text-slate-900">Expected Monthly Income</h3>
+                    <p className="text-xs text-slate-500">Your regular monthly take-home after tax (Gamma salary + Venture Advisory + other). Baseline for savings & feasibility calculations.</p>
+                  </div>
+                </div>
+                <div className="flex flex-col sm:flex-row sm:items-center gap-3 max-w-md">
+                  <div className="relative flex-1">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm">
+                      {baseCurrency === 'GBP' ? '£' : '$'}
+                    </span>
+                    <Input
+                      type="number"
+                      step="50"
+                      value={expectedIncome}
+                      onChange={(e) => setExpectedIncome(e.target.value)}
+                      placeholder="3200"
+                      className="pl-8 font-display font-bold text-base rounded-xl border-slate-200"
+                    />
+                  </div>
+                  <span className="text-xs text-slate-500 font-medium">
+                    Standard: <strong>£3,200.00/mo</strong>
+                  </span>
+                </div>
               </div>
             </div>
 
