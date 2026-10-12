@@ -18,7 +18,7 @@ import {
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Plus, ShoppingCart, Target, Wallet, Lock, ArrowRightLeft, Trash2, Palette, Plane, Car, Home, GraduationCap, Heart, Gift, Laptop, Baby, PiggyBank, Briefcase, UtensilsCrossed, Dumbbell, Music, Gamepad2, BookOpen, Sparkles, Pencil, AlertCircle, RotateCcw, type LucideIcon } from 'lucide-react';
+import { Plus, ShoppingCart, Target, Wallet, Lock, ArrowRightLeft, Trash2, Palette, Plane, Car, Home, GraduationCap, Heart, Gift, Laptop, Baby, PiggyBank, Briefcase, UtensilsCrossed, Dumbbell, Music, Gamepad2, BookOpen, Sparkles, Pencil, AlertCircle, RotateCcw, AlertTriangle, ChevronRight, HelpCircle, type LucideIcon } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import PriorMonthAllocator from '@/components/finance/PriorMonthAllocator';
@@ -29,6 +29,7 @@ import { detectPaycheck, calculatePaycheckWaterfall, isPaycheckProcessed, markPa
 import { baseAmt } from '@/lib/financeUtils';
 import { evaluatePoolFeasibility } from '@/lib/feasibilityEngine';
 import FeasibilityAlert from '@/components/finance/FeasibilityAlert';
+import FeasibilityBreakdownDialog from '@/components/finance/FeasibilityBreakdownDialog';
 import { toast } from 'sonner';
 
 
@@ -140,6 +141,17 @@ export default function FinancePoolsPage() {
   const [editPercentAllocation, setEditPercentAllocation] = useState('0');
   const [editStartDate, setEditStartDate] = useState('');
   const [editDeadline, setEditDeadline] = useState('');
+
+  // Feasibility breakdown dialog
+  const [feasibilityDialogOpen, setFeasibilityDialogOpen] = useState(false);
+  const [selectedFeasibilityGoal, setSelectedFeasibilityGoal] = useState<typeof finance.goals[0] | null>(null);
+  const [selectedFeasibilityAssessment, setSelectedFeasibilityAssessment] = useState<any>(null);
+
+  const openFeasibilityDialog = (goal: typeof finance.goals[0], assessment: any) => {
+    setSelectedFeasibilityGoal(goal);
+    setSelectedFeasibilityAssessment(assessment);
+    setFeasibilityDialogOpen(true);
+  };
 
   const baseCurrency = finance.settings?.base_currency || 'AUD';
   const fmt = (n: number) => formatCurrency(n, baseCurrency);
@@ -1095,6 +1107,21 @@ export default function FinancePoolsPage() {
           const isHit = goal.target_amount > 0 && displayAmount >= goal.target_amount;
           const goalColor = isHit ? '#10b981' : (goal.color || '#4558ff');
           const GoalIcon = getPoolIcon(goal.name);
+          const cardFeasibility = goal.deadline ? evaluatePoolFeasibility({
+            targetAmount: finance.convertToBase(goal.target_amount || 0, goal.currency),
+            currentAssigned: finance.convertToBase(goal.assigned_amount || 0, goal.currency),
+            deadline: goal.deadline || null,
+            startDate: goal.start_date || null,
+            existingGoals: finance.goals,
+            evaluatingGoalId: goal.id,
+            transactions: finance.transactions,
+            categories: finance.categories,
+            fixedMonthlyExpenses: fixedMonthlyTotal,
+            weeklyVariableBudget: essentialVariable / 4.33,
+            expectedMonthlyIncome: expectedMonthlyIncomeVal,
+            convertToBase: finance.convertToBase,
+          }) : null;
+
           return (
             <div
               key={goal.id}
@@ -1140,40 +1167,26 @@ export default function FinancePoolsPage() {
                       </PopoverContent>
                     </Popover>
                     <div className="min-w-0 flex flex-col">
-                      {(() => {
-                        const cardFeasibility = goal.deadline ? evaluatePoolFeasibility({
-                          targetAmount: finance.convertToBase(goal.target_amount || 0, goal.currency),
-                          currentAssigned: finance.convertToBase(goal.assigned_amount || 0, goal.currency),
-                          deadline: goal.deadline || null,
-                          startDate: goal.start_date || null,
-                          existingGoals: finance.goals,
-                          evaluatingGoalId: goal.id,
-                          transactions: finance.transactions,
-                          categories: finance.categories,
-                          fixedMonthlyExpenses: fixedMonthlyTotal,
-                          weeklyVariableBudget: essentialVariable / 4.33,
-                          expectedMonthlyIncome: expectedMonthlyIncomeVal,
-                          convertToBase: finance.convertToBase,
-                        }) : null;
-
-                        return (
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <h3 className="text-sm font-bold text-slate-900 truncate">{goal.name}</h3>
-                            {isHit && <Badge variant="outline" className="text-[9px] px-1.5 py-0 border-emerald-300 text-emerald-800 bg-emerald-100 font-bold">✓ Goal Hit!</Badge>}
-                            {(goal as any).is_stash && <Badge variant="secondary" className="text-[9px] px-1.5 py-0 bg-slate-100 text-slate-600 border border-slate-200">Stash</Badge>}
-                            {tripInfo && <Badge variant="outline" className="text-[9px] px-1.5 py-0 border-sky-200 text-sky-600 bg-sky-50">Trip</Badge>}
-                            {cardFeasibility && !cardFeasibility.isFeasible && cardFeasibility.requiredMonthlyPace > 0 && !isHit && (
-                              <Badge
-                                variant="outline"
-                                className="text-[9px] px-1.5 py-0 bg-rose-50 text-rose-700 border-rose-200 font-bold cursor-help"
-                                title={`Requires ${formatCurrency(cardFeasibility.requiredMonthlyPace, baseCurrency)}/mo, surplus capacity is ${formatCurrency(cardFeasibility.netMonthlySurplus, baseCurrency)}/mo`}
-                              >
-                                ⚠️ Unfeasible
-                              </Badge>
-                            )}
-                          </div>
-                        );
-                      })()}
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <h3 className="text-sm font-bold text-slate-900 truncate">{goal.name}</h3>
+                        {isHit && <Badge variant="outline" className="text-[9px] px-1.5 py-0 border-emerald-300 text-emerald-800 bg-emerald-100 font-bold">✓ Goal Hit!</Badge>}
+                        {(goal as any).is_stash && <Badge variant="secondary" className="text-[9px] px-1.5 py-0 bg-slate-100 text-slate-600 border border-slate-200">Stash</Badge>}
+                        {tripInfo && <Badge variant="outline" className="text-[9px] px-1.5 py-0 border-sky-200 text-sky-600 bg-sky-50">Trip</Badge>}
+                        {cardFeasibility && !cardFeasibility.isFeasible && cardFeasibility.requiredMonthlyPace > 0 && !isHit && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openFeasibilityDialog(goal, cardFeasibility);
+                            }}
+                            className="inline-flex items-center gap-1 text-[9px] px-2 py-0.5 rounded-full bg-rose-100/90 text-rose-700 hover:bg-rose-200 border border-rose-300 font-bold transition-all shadow-2xs cursor-pointer active:scale-95"
+                            title="Click to view why this goal is unfeasible and see solutions"
+                          >
+                            <span>⚠️ Unfeasible</span>
+                            <ChevronRight className="w-2.5 h-2.5 opacity-70" />
+                          </button>
+                        )}
+                      </div>
                       {goal.description && (
                         <p className="text-[11px] text-slate-500 font-normal mt-0.5 line-clamp-2 leading-tight">
                           {goal.description}
@@ -1295,6 +1308,25 @@ export default function FinancePoolsPage() {
                     );
                   })()}
                 </div>
+
+                {/* Unfeasible Shortfall Callout Banner with Click Handler */}
+                {cardFeasibility && !cardFeasibility.isFeasible && cardFeasibility.requiredMonthlyPace > 0 && !isHit && (
+                  <button
+                    type="button"
+                    onClick={() => openFeasibilityDialog(goal, cardFeasibility)}
+                    className="w-full text-left p-2.5 rounded-xl bg-rose-50/90 hover:bg-rose-100/90 border border-rose-200/90 text-rose-900 transition-colors flex items-center justify-between text-xs cursor-pointer group shadow-2xs mt-2"
+                  >
+                    <div className="flex items-center gap-2 truncate">
+                      <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                      <span className="truncate font-semibold text-[11px]">
+                        Shortfall: <strong>{formatCurrency(cardFeasibility.shortfall, baseCurrency)}/mo</strong> needed
+                      </span>
+                    </div>
+                    <span className="text-[10px] font-bold text-rose-700 underline group-hover:text-rose-900 shrink-0 ml-2 flex items-center gap-0.5">
+                      See why & solutions <ChevronRight className="w-3 h-3" />
+                    </span>
+                  </button>
+                )}
 
                 {/* Actions */}
                 <div className="flex gap-2 pt-1 w-full">
@@ -1669,6 +1701,33 @@ export default function FinancePoolsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Feasibility Breakdown Dialog */}
+      <FeasibilityBreakdownDialog
+        open={feasibilityDialogOpen}
+        onOpenChange={setFeasibilityDialogOpen}
+        goal={selectedFeasibilityGoal}
+        assessment={selectedFeasibilityAssessment}
+        currency={baseCurrency}
+        totalLiquidCash={totalCash}
+        allGoals={finance.goals}
+        onEditGoal={(g) => openEditDialog(g)}
+        onMoveFunds={(g, suggestedAmt) => {
+          const defaultSource = poolOptions.find(p => p.available > 0 && p.id !== g.id)?.id || (funMoney > 0 ? UNALLOCATED : '');
+          setMoveFrom(defaultSource);
+          setMoveTo(g.id);
+          setMoveAmount(suggestedAmt ? String(Math.ceil(suggestedAmt)) : '');
+          setMoveOpen(true);
+        }}
+        onApplyRecommendedDate={(goalId, dateStr) => {
+          finance.updateGoal(goalId, { deadline: dateStr } as any);
+          toast.success(`Target date extended to ${dateStr}`);
+        }}
+        onApplyRecommendedTarget={(goalId, targetVal) => {
+          finance.updateGoal(goalId, { target_amount: targetVal } as any);
+          toast.success(`Target amount adjusted to ${formatCurrency(targetVal, baseCurrency)}`);
+        }}
+      />
     </div>
   );
 }

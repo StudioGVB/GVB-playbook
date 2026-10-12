@@ -50,10 +50,18 @@ export default function FeasibilityAlert({
                 <span className="font-bold">−{fmt(assessment.fixedMonthlyExpenses + assessment.variableMonthlyBudget)}</span>
               </div>
               {assessment.existingPoolsMonthlyCommitment > 0 && (
-                <div className="flex justify-between">
-                  <span>Other Active Goal Pools:</span>
-                  <span className="font-bold">−{fmt(assessment.existingPoolsMonthlyCommitment)}</span>
-                </div>
+                <>
+                  <div className="flex justify-between">
+                    <span>Other Active Goal Pools:</span>
+                    <span className="font-bold">−{fmt(assessment.existingPoolsMonthlyCommitment)}</span>
+                  </div>
+                  {assessment.competingGoals?.slice(0, 3).map(cg => (
+                    <div key={cg.id} className="flex justify-between text-[10px] text-rose-600/90 pl-2">
+                      <span className="truncate">↳ {cg.name}:</span>
+                      <span className="shrink-0 tabular-nums">−{fmt(cg.monthlyCommitment)}/mo</span>
+                    </div>
+                  ))}
+                </>
               )}
             </div>
           </div>

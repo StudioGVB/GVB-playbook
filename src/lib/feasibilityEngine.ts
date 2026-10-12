@@ -11,20 +11,38 @@ export interface IncomeStreamEstimate {
   estimatedMonthlyAmount: number;
 }
 
+export interface CompetingGoalDetail {
+  id: string;
+  name: string;
+  targetAmount: number;
+  assignedAmount: number;
+  remainingAmount: number;
+  monthlyCommitment: number;
+  weeklyPace: number;
+  deadline?: string | null;
+  daysRemaining?: number;
+}
+
 export interface FeasibilityAssessment {
   requiredMonthlyPace: number;
   requiredWeeklyPace: number;
   estimatedMonthlyIncome: number;
   fixedMonthlyExpenses: number;
   variableMonthlyBudget: number;
+  totalMonthlySurplusBeforeGoals: number;
   existingPoolsMonthlyCommitment: number;
   netMonthlySurplus: number;
+  shortfall: number;
+  remainingNeeded: number;
   monthsRemaining: number;
+  daysRemaining: number;
   isFeasible: boolean;
   isTight: boolean; // net surplus capacity is tight (< 20% buffer above required pace)
   recommendedFeasibleDate: Date | null;
   recommendedFeasibleTarget: number;
+  recommendedDateWithSurplusBeforeGoals: Date | null;
   streamEstimates: IncomeStreamEstimate[];
+  competingGoals: CompetingGoalDetail[];
 }
 
 /**
@@ -211,6 +229,7 @@ export function evaluatePoolFeasibility(params: {
 
   // 3. Calculate Existing Goal Pools Required Monthly Commitment
   let existingPoolsMonthlyCommitment = 0;
+  const competingGoals: CompetingGoalDetail[] = [];
   const evalStart = startDate ? new Date(startDate) : now;
   const evalDeadline = deadline ? new Date(deadline) : null;
 
@@ -238,21 +257,53 @@ export function evaluatePoolFeasibility(params: {
       const daysLeft = Math.max(1, differenceInCalendarDays(gDl, calcFrom));
       const weeksLeft = daysLeft / 7;
       const gWeekly = gRemaining / weeksLeft;
-      existingPoolsMonthlyCommitment += gWeekly * 4.33;
+      const gMonthly = gWeekly * 4.33;
+      existingPoolsMonthlyCommitment += gMonthly;
+      competingGoals.push({
+        id: g.id,
+        name: g.name,
+        targetAmount: gTarget,
+        assignedAmount: gAssigned,
+        remainingAmount: gRemaining,
+        monthlyCommitment: gMonthly,
+        weeklyPace: gWeekly,
+        deadline: g.deadline,
+        daysRemaining: daysLeft,
+      });
     } else if (g.percent_allocation && g.percent_allocation > 0) {
-      existingPoolsMonthlyCommitment += (g.percent_allocation / 100) * 100 * 4.33;
+      const gMonthly = (g.percent_allocation / 100) * 100 * 4.33;
+      existingPoolsMonthlyCommitment += gMonthly;
+      competingGoals.push({
+        id: g.id,
+        name: g.name,
+        targetAmount: gTarget,
+        assignedAmount: gAssigned,
+        remainingAmount: gRemaining,
+        monthlyCommitment: gMonthly,
+        weeklyPace: gMonthly / 4.33,
+        deadline: null,
+      });
     }
   }
 
-  // 4. Calculate Net Monthly Surplus Capacity
+  // Sort competing goals by monthly commitment descending (highest drain first)
+  competingGoals.sort((a, b) => b.monthlyCommitment - a.monthlyCommitment);
+
+  // 4. Calculate Total Savings Capacity & Net Monthly Surplus Capacity
+  const totalMonthlySurplusBeforeGoals = Math.max(
+    0,
+    totalEstimatedMonthlyIncome - fixedMonthlyExpenses - variableMonthlyBudget
+  );
+
   const netMonthlySurplus = Math.max(
     0,
-    totalEstimatedMonthlyIncome - fixedMonthlyExpenses - variableMonthlyBudget - existingPoolsMonthlyCommitment
+    totalMonthlySurplusBeforeGoals - existingPoolsMonthlyCommitment
   );
 
   // 5. Calculate Required Pace for Target Pool
   const remainingNeeded = Math.max(0, targetAmount - currentAssigned);
   let monthsRemaining = 1;
+  let daysRemaining = 0;
   let requiredMonthlyPace = 0;
   let requiredWeeklyPace = 0;
 
@@ -261,7 +312,7 @@ export function evaluatePoolFeasibility(params: {
     const stDate = startDate ? new Date(startDate) : now;
     const calcFrom = stDate > now ? stDate : now;
 
-    const daysRemaining = Math.max(1, differenceInCalendarDays(dlDate, calcFrom));
+    daysRemaining = Math.max(1, differenceInCalendarDays(dlDate, calcFrom));
     const weeksRemaining = daysRemaining / 7;
     monthsRemaining = daysRemaining / 30.4375;
 
@@ -272,19 +323,29 @@ export function evaluatePoolFeasibility(params: {
   // 6. Feasibility Decision
   const isFeasible = remainingNeeded <= 0.01 || !deadline || requiredMonthlyPace <= netMonthlySurplus + 0.01;
   const isTight = !isFeasible ? false : requiredMonthlyPace > netMonthlySurplus * 0.8 && requiredMonthlyPace > 0;
+  const shortfall = Math.max(0, requiredMonthlyPace - netMonthlySurplus);
 
   // 7. Calculate Recommendations
   let recommendedFeasibleDate: Date | null = null;
   let recommendedFeasibleTarget = targetAmount;
+  let recommendedDateWithSurplusBeforeGoals: Date | null = null;
 
-  if (!isFeasible && netMonthlySurplus > 0) {
-    // Recommend Date: How long to save `remainingNeeded` at `netMonthlySurplus` pace?
-    const requiredMonths = remainingNeeded / netMonthlySurplus;
-    const requiredDays = Math.ceil(requiredMonths * 30.4375);
-    recommendedFeasibleDate = addDays(now, requiredDays);
+  if (!isFeasible) {
+    if (netMonthlySurplus > 0) {
+      // Recommend Date: How long to save `remainingNeeded` at `netMonthlySurplus` pace?
+      const requiredMonths = remainingNeeded / netMonthlySurplus;
+      const requiredDays = Math.ceil(requiredMonths * 30.4375);
+      recommendedFeasibleDate = addDays(now, requiredDays);
 
-    // Recommend Target: How much can be saved by `deadline` at `netMonthlySurplus` pace?
-    recommendedFeasibleTarget = currentAssigned + netMonthlySurplus * monthsRemaining;
+      // Recommend Target: How much can be saved by `deadline` at `netMonthlySurplus` pace?
+      recommendedFeasibleTarget = currentAssigned + netMonthlySurplus * monthsRemaining;
+    }
+
+    if (totalMonthlySurplusBeforeGoals > 0) {
+      const requiredMonthsBeforeGoals = remainingNeeded / totalMonthlySurplusBeforeGoals;
+      const requiredDaysBeforeGoals = Math.ceil(requiredMonthsBeforeGoals * 30.4375);
+      recommendedDateWithSurplusBeforeGoals = addDays(now, requiredDaysBeforeGoals);
+    }
   }
 
   return {
@@ -293,13 +354,19 @@ export function evaluatePoolFeasibility(params: {
     estimatedMonthlyIncome: totalEstimatedMonthlyIncome,
     fixedMonthlyExpenses,
     variableMonthlyBudget,
+    totalMonthlySurplusBeforeGoals,
     existingPoolsMonthlyCommitment,
     netMonthlySurplus,
+    shortfall,
+    remainingNeeded,
     monthsRemaining,
+    daysRemaining,
     isFeasible,
     isTight,
     recommendedFeasibleDate,
     recommendedFeasibleTarget,
+    recommendedDateWithSurplusBeforeGoals,
     streamEstimates,
+    competingGoals,
   };
 }
