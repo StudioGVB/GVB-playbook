@@ -229,7 +229,7 @@ export default function FinancePoolsPage() {
   // Real-time feasibility assessments for Create & Edit Pool dialogs
   const expectedMonthlyIncomeVal = (assumptions?.expected_monthly_income && assumptions.expected_monthly_income > 0)
     ? assumptions.expected_monthly_income
-    : (snapshot?.split.monthlyIncome && snapshot.split.monthlyIncome > 0 ? snapshot.split.monthlyIncome : 3200);
+    : undefined;
 
   const activeFeasibilityAssessment = useMemo(() => {
     if (!selectedFeasibilityGoal) return null;
@@ -1766,9 +1766,14 @@ export default function FinancePoolsPage() {
           finance.updateGoal(goalId, { target_amount: targetVal } as any);
           toast.success(`Target amount adjusted to ${formatCurrency(targetVal, baseCurrency)}`);
         }}
+        hasManualIncomeOverride={Boolean(assumptions?.expected_monthly_income && assumptions.expected_monthly_income > 0)}
         onUpdateExpectedIncome={async (val) => {
           await updateAssumptions({ expected_monthly_income: val });
           toast.success(`Expected monthly income updated to ${formatCurrency(val, baseCurrency)}/mo`);
+        }}
+        onResetExpectedIncome={async () => {
+          await updateAssumptions({ expected_monthly_income: null });
+          toast.success('Reset to 3-month dynamic transaction average');
         }}
       />
     </div>

@@ -1,6 +1,6 @@
 import { FinanceTransaction, FinanceCategory, FinanceGoal } from '@/hooks/useFinanceData';
 import { baseAmt, parseUkDate } from './financeUtils';
-import { format, subMonths, startOfMonth, endOfMonth, differenceInCalendarDays, addDays } from 'date-fns';
+import { format, subMonths, subDays, startOfMonth, endOfMonth, differenceInCalendarDays, addDays } from 'date-fns';
 
 export interface IncomeStreamEstimate {
   categoryId: string;
@@ -46,178 +46,191 @@ export interface FeasibilityAssessment {
 }
 
 /**
- * Calculates per-stream estimated monthly income using active-month averaging.
- * Prevents diluting new or single-occurrence main streams (like Gamma income).
+ * Calculates per-stream estimated monthly income using Gabriella's 3-month rule:
+ * For each income stream (Gamma, Venture Advisory, Etsy, etc.):
+ *  1. Calculate the total for that stream in the last three months (90-day window).
+ *  2. Divide that stream's 3-month total by 3.
+ *  3. Add all streams together for the total average monthly income.
  */
 export function calculateStreamIncomeEstimates(
   transactions: FinanceTransaction[],
   categories: FinanceCategory[],
   now: Date = new Date()
 ): { totalEstimatedMonthlyIncome: number; streamEstimates: IncomeStreamEstimate[] } {
-  const threeMonthsAgoStart = startOfMonth(subMonths(now, 2));
-  const endOfCurrentMonth = endOfMonth(now);
-  const currentMonthKey = format(now, 'yyyy-MM');
+  const ninetyDaysAgo = subDays(now, 90);
 
-  const incomeCategories = categories.filter(c => c.type === 'income');
-  const streamMap: Record<string, {
+  const incomeCategories = categories.filter(c => c.type === 'income' && !c.is_archived);
+
+  interface StreamCollector {
+    id: string;
     name: string;
     color?: string;
     total: number;
-    monthTotals: Record<string, number>;
-  }> = {};
+    count: number;
+    monthlyTarget?: number | null;
+  }
 
-  // Initialize map for all known income categories
+  const streamMap: Record<string, StreamCollector> = {};
+
+  // 1. Initialize streams from all active income categories
   for (const cat of incomeCategories) {
+    const isIncomeCat = cat.name.trim().toLowerCase() === 'income';
+    const streamName = isIncomeCat ? 'Gamma' : cat.name.trim();
     streamMap[cat.id] = {
-      name: cat.name,
-      color: cat.color || undefined,
+      id: cat.id,
+      name: streamName,
+      color: cat.color || (isIncomeCat ? '#DB2777' : undefined),
       total: 0,
-      monthTotals: {},
+      count: 0,
+      monthlyTarget: cat.monthly_target,
     };
   }
 
+  // Ensure baseline collector keys for known streams if not already in categories
+  const hasGammaCat = Object.values(streamMap).some(s =>
+    s.name.toLowerCase().includes('gamma') || s.name.toLowerCase().includes('salary')
+  );
+  if (!hasGammaCat) {
+    streamMap['__gamma'] = {
+      id: '__gamma',
+      name: 'Gamma',
+      color: '#DB2777',
+      total: 0,
+      count: 0,
+      monthlyTarget: 2896.67,
+    };
+  }
+
+  const hasVentureCat = Object.values(streamMap).some(s =>
+    s.name.toLowerCase().includes('venture') || s.name.toLowerCase().includes('batchbase')
+  );
+  if (!hasVentureCat) {
+    streamMap['__venture_advisory'] = {
+      id: '__venture_advisory',
+      name: 'Venture Advisory',
+      color: '#2563EB',
+      total: 0,
+      count: 0,
+      monthlyTarget: (70 * 52) / 12,
+    };
+  }
+
+  streamMap['__other_income'] = {
+    id: '__other_income',
+    name: 'Other Cleared Income',
+    color: '#10B981',
+    total: 0,
+    count: 0,
+  };
+
   // Helper to match transaction to an income category or stream
-  const findIncomeStream = (tx: FinanceTransaction): string | null => {
+  const findIncomeStreamId = (tx: FinanceTransaction): string => {
     if (tx.category_id && streamMap[tx.category_id]) return tx.category_id;
     const text = `${tx.merchant || ''} ${tx.description || ''} ${(tx.raw as any)?.message || ''}`.toLowerCase();
 
     if (text.includes('gamma')) {
-      const g = incomeCategories.find(c => c.name.toLowerCase().includes('gamma'));
+      const g = Object.values(streamMap).find(s => s.name.toLowerCase().includes('gamma') || s.name.toLowerCase().includes('salary'));
       if (g) return g.id;
     }
     const isGabriellaIncome = text.includes('gabriella') && tx.amount > 0 && !tx.transfer_group_id;
     if (text.includes('batchbase') || text.includes('batch base') || text.includes('venture') || text.includes('advisory') || isGabriellaIncome) {
-      const v = incomeCategories.find(c => c.name.toLowerCase().includes('venture') || c.name.toLowerCase().includes('batchbase'));
+      const v = Object.values(streamMap).find(s => s.name.toLowerCase().includes('venture') || s.name.toLowerCase().includes('batchbase'));
       if (v) return v.id;
-      if (!streamMap['__venture_advisory']) {
-        streamMap['__venture_advisory'] = {
-          name: 'Venture Advisory',
-          color: '#2563EB',
-          total: 0,
-          monthTotals: {},
-        };
-      }
       return '__venture_advisory';
     }
     if (text.includes('etsy')) {
-      const e = incomeCategories.find(c => c.name.toLowerCase().includes('etsy'));
+      const e = Object.values(streamMap).find(s => s.name.toLowerCase().includes('etsy'));
       if (e) return e.id;
     }
     if (text.includes('back pocket') || text.includes('bpg')) {
-      const b = incomeCategories.find(c => c.name.toLowerCase().includes('pocket') || c.name.toLowerCase().includes('back'));
+      const b = Object.values(streamMap).find(s => s.name.toLowerCase().includes('pocket') || s.name.toLowerCase().includes('back'));
       if (b) return b.id;
-    }
-    if (!streamMap['__other_income']) {
-      streamMap['__other_income'] = {
-        name: 'Other Cleared Income',
-        color: '#10B981',
-        total: 0,
-        monthTotals: {},
-      };
     }
     return '__other_income';
   };
 
-  // Filter income transactions in the last 3 months window
+  // 2. Aggregate transactions within the last 3 months (90 days)
   for (const tx of transactions) {
+    if (tx.amount <= 0 || tx.is_reimbursable) continue;
+
     const text = `${tx.merchant || ''} ${tx.description || ''} ${(tx.raw as any)?.message || ''}`.toLowerCase();
-    const isGabriellaIncome = text.includes('gabriella') && tx.amount > 0 && !tx.transfer_group_id;
-    const isBatchbase = text.includes('batchbase') || text.includes('batch base') || text.includes('venture') || text.includes('advisory') || isGabriellaIncome;
-    if (tx.amount <= 0 || (!isBatchbase && tx.is_transfer) || tx.is_reimbursable) continue;
+    const isDepositFromIncome = text.includes('gamma') || text.includes('batchbase') || text.includes('venture') || text.includes('advisory') || (text.includes('gabriella') && !tx.transfer_group_id);
+
+    // Skip internal transfers between own bank accounts
+    if (!isDepositFromIncome && (tx.is_transfer || tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed')) {
+      continue;
+    }
 
     const txDate = parseUkDate(tx.posted_at);
-    if (txDate < threeMonthsAgoStart || txDate > endOfCurrentMonth) continue;
+    if (txDate < ninetyDaysAgo || txDate > now) continue;
 
-    const streamId = findIncomeStream(tx);
+    const streamId = findIncomeStreamId(tx);
     if (!streamId || !streamMap[streamId]) continue;
 
     const bAmt = baseAmt(tx);
-    const monthKey = format(txDate, 'yyyy-MM');
-
     streamMap[streamId].total += bAmt;
-    streamMap[streamId].monthTotals[monthKey] = (streamMap[streamId].monthTotals[monthKey] || 0) + bAmt;
+    streamMap[streamId].count += 1;
   }
 
+  // 3. For each stream: calculate average from the last 3 months (Divided by 3)
   const streamEstimates: IncomeStreamEstimate[] = [];
-  let totalEstimatedMonthlyIncome = 0;
 
-  for (const [catId, data] of Object.entries(streamMap)) {
-    const monthEntries = Object.entries(data.monthTotals).filter(([_, amt]) => amt > 0);
-    if (monthEntries.length === 0 && data.total <= 0) continue;
-
-    const isGammaSalary = data.name.toLowerCase().includes('gamma') || data.name.toLowerCase().includes('salary');
-    const completedMonths = monthEntries.filter(([m]) => m !== currentMonthKey);
-    const currentMonthAmt = data.monthTotals[currentMonthKey] || 0;
+  for (const [id, data] of Object.entries(streamMap)) {
+    const isGamma = data.name.toLowerCase().includes('gamma') || data.name.toLowerCase().includes('salary');
+    const isVenture = data.name.toLowerCase().includes('venture') || data.name.toLowerCase().includes('batchbase');
 
     let estimatedMonthlyAmount = 0;
-    let activeMonthsCount = 1;
 
-    if (isGammaSalary) {
-      // Monthly salary streams: A salary paycheck is a full monthly wage.
-      // Do not dilute by an in-progress month before payday (e.g. October 12th).
-      const maxMonthlyObserved = Math.max(...monthEntries.map(([_, a]) => a), 0);
-      // Gabriella's standard Gamma net monthly salary benchmark is ~£2,896.67
-      estimatedMonthlyAmount = Math.max(maxMonthlyObserved, 2896.67);
-      activeMonthsCount = Math.max(1, monthEntries.length);
+    if (data.total > 0) {
+      // Gabriella's rule: total for the last 3 months Divided by 3
+      estimatedMonthlyAmount = data.total / 3;
     } else {
-      if (completedMonths.length > 0) {
-        const completedSum = completedMonths.reduce((sum, [_, a]) => sum + a, 0);
-        const completedAvg = completedSum / completedMonths.length;
-        estimatedMonthlyAmount = Math.max(completedAvg, currentMonthAmt);
-        activeMonthsCount = completedMonths.length;
+      // Stream has £0 recorded in 90-day window:
+      if (isVenture) {
+        // Gabriella's regular £70/wk advisory rate
+        estimatedMonthlyAmount = (70 * 52) / 12; // ~£303.33/mo
+      } else if (isGamma) {
+        // Fallback only if no transactions loaded yet
+        estimatedMonthlyAmount = data.monthlyTarget || 2896.67;
+      } else if (data.monthlyTarget && data.monthlyTarget > 0) {
+        estimatedMonthlyAmount = data.monthlyTarget;
       } else {
-        estimatedMonthlyAmount = data.total;
-        activeMonthsCount = 1;
+        estimatedMonthlyAmount = 0;
       }
     }
 
+    // Skip unused categories with zero total and zero estimate
+    if (data.total <= 0 && estimatedMonthlyAmount <= 0) continue;
+
     streamEstimates.push({
-      categoryId: catId,
+      categoryId: id,
       name: data.name,
       color: data.color,
-      totalLast3Months: data.total,
-      activeMonthsCount,
-      estimatedMonthlyAmount,
-    });
-
-    totalEstimatedMonthlyIncome += estimatedMonthlyAmount;
-  }
-
-  // Guaranteed inclusion: Gamma Salary benchmark (~£2,896.67/mo)
-  const hasGammaStream = streamEstimates.some(s =>
-    s.name.toLowerCase().includes('gamma') || s.name.toLowerCase().includes('salary')
-  );
-  if (!hasGammaStream) {
-    const gammaMonthly = 2896.67;
-    const gCat = incomeCategories.find(c => c.name.toLowerCase().includes('gamma') || c.name.toLowerCase().includes('salary'));
-    streamEstimates.unshift({
-      categoryId: gCat?.id || '__gamma_salary',
-      name: 'Gamma Salary',
-      color: '#DB2777',
-      totalLast3Months: gammaMonthly * 3,
+      totalLast3Months: Math.round(data.total * 100) / 100,
       activeMonthsCount: 3,
-      estimatedMonthlyAmount: gammaMonthly,
+      estimatedMonthlyAmount: Math.round(estimatedMonthlyAmount * 100) / 100,
     });
-    totalEstimatedMonthlyIncome += gammaMonthly;
   }
 
-  // Guaranteed inclusion: Venture Advisory side income is £70/wk (~£303.33/mo)
-  const hasVentureStream = streamEstimates.some(s =>
-    s.name.toLowerCase().includes('venture') || s.name.toLowerCase().includes('batchbase')
-  );
-  if (!hasVentureStream) {
-    const ventureMonthly = (70 * 52) / 12; // ~£303.33/mo
-    const vCat = incomeCategories.find(c => c.name.toLowerCase().includes('venture') || c.name.toLowerCase().includes('batchbase'));
-    streamEstimates.push({
-      categoryId: vCat?.id || '__venture_advisory',
-      name: 'Venture Advisory',
-      color: '#2563EB',
-      totalLast3Months: ventureMonthly * 3,
-      activeMonthsCount: 3,
-      estimatedMonthlyAmount: ventureMonthly,
-    });
-    totalEstimatedMonthlyIncome += ventureMonthly;
-  }
+  // Sort streams: Gamma first, Venture Advisory second, then by amount descending
+  streamEstimates.sort((a, b) => {
+    const aGamma = a.name.toLowerCase().includes('gamma') || a.name.toLowerCase().includes('salary');
+    const bGamma = b.name.toLowerCase().includes('gamma') || b.name.toLowerCase().includes('salary');
+    if (aGamma && !bGamma) return -1;
+    if (!aGamma && bGamma) return 1;
+
+    const aVenture = a.name.toLowerCase().includes('venture') || a.name.toLowerCase().includes('batchbase');
+    const bVenture = b.name.toLowerCase().includes('venture') || b.name.toLowerCase().includes('batchbase');
+    if (aVenture && !bVenture) return -1;
+    if (!aVenture && bVenture) return 1;
+
+    return b.estimatedMonthlyAmount - a.estimatedMonthlyAmount;
+  });
+
+  // 4. Sum them all together for total average income a month
+  const totalEstimatedMonthlyIncome = Math.round(
+    streamEstimates.reduce((sum, s) => sum + s.estimatedMonthlyAmount, 0) * 100
+  ) / 100;
 
   return {
     totalEstimatedMonthlyIncome,
@@ -259,16 +272,15 @@ export function evaluatePoolFeasibility(params: {
     now = new Date(),
   } = params;
 
-  // 1. Calculate Income Estimates (floored by £3,200/mo baseline if not explicitly specified)
+  // 1. Calculate Income Estimates (driven directly by the 3-month stream averages unless user override is provided)
   const streamIncome = calculateStreamIncomeEstimates(
     transactions,
     categories,
     now
   );
-  const baselineIncome = 3200; // Gabriella's standard net monthly income (~£3.2k/mo)
   const totalEstimatedMonthlyIncome = (expectedMonthlyIncome && expectedMonthlyIncome > 0)
     ? expectedMonthlyIncome
-    : Math.max(streamIncome.totalEstimatedMonthlyIncome, baselineIncome);
+    : streamIncome.totalEstimatedMonthlyIncome;
   const streamEstimates = streamIncome.streamEstimates;
 
   // 2. Calculate Variable Spending Monthly Rate (weekly allowance * 4.33 weeks/mo)

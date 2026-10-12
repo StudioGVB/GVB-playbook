@@ -25,6 +25,7 @@ import {
   Check,
   X,
   Sparkles,
+  RotateCcw,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { formatCurrency } from '@/lib/financeUtils';
@@ -40,11 +41,13 @@ interface FeasibilityBreakdownDialogProps {
   currency?: string;
   totalLiquidCash?: number;
   allGoals?: FinanceGoal[];
+  hasManualIncomeOverride?: boolean;
   onEditGoal?: (goal: FinanceGoal) => void;
   onMoveFunds?: (goal: FinanceGoal, suggestedAmount?: number) => void;
   onApplyRecommendedDate?: (goalId: string, dateStr: string) => void;
   onApplyRecommendedTarget?: (goalId: string, target: number) => void;
   onUpdateExpectedIncome?: (amount: number) => Promise<void> | void;
+  onResetExpectedIncome?: () => Promise<void> | void;
 }
 
 export default function FeasibilityBreakdownDialog({
@@ -55,11 +58,13 @@ export default function FeasibilityBreakdownDialog({
   currency = 'GBP',
   totalLiquidCash = 0,
   allGoals = [],
+  hasManualIncomeOverride = false,
   onEditGoal,
   onMoveFunds,
   onApplyRecommendedDate,
   onApplyRecommendedTarget,
   onUpdateExpectedIncome,
+  onResetExpectedIncome,
 }: FeasibilityBreakdownDialogProps) {
   if (!goal || !assessment) return null;
 
@@ -196,15 +201,28 @@ export default function FeasibilityBreakdownDialog({
                 <Coins className="w-3.5 h-3.5 text-slate-400" />
                 Monthly Cash Flow Calculation
               </h4>
-              {onUpdateExpectedIncome && !isEditingIncome && (
-                <button
-                  type="button"
-                  onClick={handleStartEditIncome}
-                  className="text-[11px] font-semibold text-primary hover:underline inline-flex items-center gap-1"
-                >
-                  <Pencil className="w-3 h-3" /> Adjust Income
-                </button>
-              )}
+              <div className="flex items-center gap-2">
+                {hasManualIncomeOverride && onResetExpectedIncome && !isEditingIncome && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await onResetExpectedIncome();
+                    }}
+                    className="text-[11px] font-semibold text-amber-700 hover:text-amber-800 hover:underline inline-flex items-center gap-1"
+                  >
+                    <RotateCcw className="w-3 h-3" /> Reset to 3-Mo Average
+                  </button>
+                )}
+                {onUpdateExpectedIncome && !isEditingIncome && (
+                  <button
+                    type="button"
+                    onClick={handleStartEditIncome}
+                    className="text-[11px] font-semibold text-primary hover:underline inline-flex items-center gap-1"
+                  >
+                    <Pencil className="w-3 h-3" /> Adjust Income
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="rounded-2xl border border-slate-200/80 bg-slate-50/50 divide-y divide-slate-100 text-xs overflow-hidden">
@@ -216,9 +234,18 @@ export default function FeasibilityBreakdownDialog({
                       <TrendingUp className="w-3.5 h-3.5" />
                     </div>
                     <div>
-                      <span className="font-bold text-slate-800">Estimated Monthly Income</span>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="font-bold text-slate-800">Average Monthly Income</span>
+                        {hasManualIncomeOverride && (
+                          <Badge variant="outline" className="text-[9px] px-1.5 py-0 bg-amber-50 text-amber-700 border-amber-300 font-bold">
+                            Manual Override
+                          </Badge>
+                        )}
+                      </div>
                       <p className="text-[10px] text-slate-400">
-                        Total monthly take-home (Gamma salary + Venture Advisory + other)
+                        {hasManualIncomeOverride
+                          ? 'Manual override active • Click Reset to use 3-month transaction average'
+                          : 'Average of last 3 months per stream (90-day total ÷ 3)'}
                       </p>
                     </div>
                   </div>
@@ -283,10 +310,16 @@ export default function FeasibilityBreakdownDialog({
                       <span
                         key={s.categoryId}
                         className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md bg-slate-100/90 text-slate-700 font-medium border border-slate-200/60"
+                        title={s.totalLast3Months > 0 ? `90-day total: ${fmt(s.totalLast3Months)} ÷ 3 = ${fmt(s.estimatedMonthlyAmount)}/mo` : `${s.name}: ${fmt(s.estimatedMonthlyAmount)}/mo`}
                       >
                         <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: s.color || '#10B981' }} />
                         <span>{s.name}:</span>
                         <strong className="font-bold text-slate-900">+{fmt(s.estimatedMonthlyAmount)}/mo</strong>
+                        {s.totalLast3Months > 0 && (
+                          <span className="text-[9px] text-slate-400 font-normal">
+                            ({fmt(s.totalLast3Months)} ÷ 3)
+                          </span>
+                        )}
                       </span>
                     ))}
                   </div>

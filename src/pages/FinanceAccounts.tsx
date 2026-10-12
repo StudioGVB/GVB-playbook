@@ -417,7 +417,7 @@ export default function FinanceAccountsPage({ defaultTab }: { defaultTab?: strin
                   </div>
                   <div>
                     <h3 className="text-lg font-display font-bold text-slate-900">Expected Monthly Income</h3>
-                    <p className="text-xs text-slate-500">Your regular monthly take-home after tax (Gamma salary + Venture Advisory + other). Baseline for savings & feasibility calculations.</p>
+                    <p className="text-xs text-slate-500">Your monthly take-home after tax. Leave blank to automatically use your true 3-month transaction average (Gamma + Venture Advisory + other streams).</p>
                   </div>
                 </div>
                 <div className="flex flex-col sm:flex-row sm:items-center gap-3 max-w-md">
@@ -430,12 +430,12 @@ export default function FinanceAccountsPage({ defaultTab }: { defaultTab?: strin
                       step="50"
                       value={expectedIncome}
                       onChange={(e) => setExpectedIncome(e.target.value)}
-                      placeholder="3200"
+                      placeholder="Auto (3-month avg)"
                       className="pl-8 font-display font-bold text-base rounded-xl border-slate-200"
                     />
                   </div>
                   <span className="text-xs text-slate-500 font-medium">
-                    Standard: <strong>£3,200.00/mo</strong>
+                    Default: <strong>3-Month Dynamic Avg</strong>
                   </span>
                 </div>
               </div>

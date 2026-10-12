@@ -56,7 +56,7 @@ export function useFinanceAssumptionsState() {
         // Ensure student_loan_plan is null if not explicitly set to a plan
         const updatedAssumptions = {
           ...(data as any),
-          expected_monthly_income: (data as any).expected_monthly_income || 3200,
+          expected_monthly_income: (data as any).expected_monthly_income ?? null,
           student_loan_plan: (data as any).student_loan_plan === 'none' ? null : (data as any).student_loan_plan,
         };
         setAssumptions(updatedAssumptions);
@@ -67,7 +67,7 @@ export function useFinanceAssumptionsState() {
           future_monthly_survival_cost: 0,
           buffer_months: 3,
           weekly_fun_budget: 150,
-          expected_monthly_income: 3200,
+          expected_monthly_income: null,
           discretionary_savings_cap: 0,
           discretionary_start_date: null,
           discretionary_end_date: null,
@@ -116,7 +116,7 @@ export function useFinanceAssumptionsState() {
           future_monthly_survival_cost: 0,
           buffer_months: 3,
           weekly_fun_budget: 150,
-          expected_monthly_income: 3200,
+          expected_monthly_income: null,
           discretionary_savings_cap: 0,
           discretionary_start_date: null,
           discretionary_end_date: null,

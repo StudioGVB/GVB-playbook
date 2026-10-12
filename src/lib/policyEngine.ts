@@ -311,17 +311,13 @@ export function computePolicySnapshot(
   const ventureSideMonthly = (70 * 52) / 12;
   const baseNetIncome = salaryTakeHome > 0 ? salaryTakeHome + ventureSideMonthly : 0;
   
-  // Calculate stream-based income from recent cleared income
+  // Calculate stream-based income from recent cleared income (3-month average)
   const streamRes = calculateStreamIncomeEstimates(transactions, categories, now);
-  const hasVentureStream = streamRes.streamEstimates.some(s =>
-    s.name.toLowerCase().includes('venture') || s.name.toLowerCase().includes('batchbase')
-  );
-  const ventureAddition = hasVentureStream ? 0 : ventureSideMonthly;
-  const streamEstimatedIncome = streamRes.totalEstimatedMonthlyIncome + ventureAddition;
+  const streamEstimatedIncome = streamRes.totalEstimatedMonthlyIncome;
 
   const monthlyIncome = (assumptions.expected_monthly_income && assumptions.expected_monthly_income > 0)
     ? assumptions.expected_monthly_income
-    : Math.max(baseNetIncome, streamEstimatedIncome > 0 ? streamEstimatedIncome : 3200);
+    : (streamEstimatedIncome > 0 ? streamEstimatedIncome : baseNetIncome);
   const isDrawdownMode = monthlyIncome === 0;
 
   // Core pools
@@ -681,19 +677,15 @@ export function computeMoneySplit(
   const ventureSideMonthly = (70 * 52) / 12; // ~£303.33/mo
   const baseNetIncome = salaryTakeHome > 0 ? salaryTakeHome + ventureSideMonthly : 0;
   
-  // Calculate stream-based income from recent cleared income
+  // Calculate stream-based income from recent cleared income (3-month average)
   const streamRes = calculateStreamIncomeEstimates(transactions, categories, new Date());
-  const hasVentureStream = streamRes.streamEstimates.some(s =>
-    s.name.toLowerCase().includes('venture') || s.name.toLowerCase().includes('batchbase')
-  );
-  const ventureAddition = hasVentureStream ? 0 : ventureSideMonthly;
-  const streamEstimatedIncome = streamRes.totalEstimatedMonthlyIncome + ventureAddition;
+  const streamEstimatedIncome = streamRes.totalEstimatedMonthlyIncome;
 
   const monthlyIncome = (overrideMonthlyIncome && overrideMonthlyIncome > 0)
     ? overrideMonthlyIncome
     : ((assumptions.expected_monthly_income && assumptions.expected_monthly_income > 0)
       ? assumptions.expected_monthly_income
-      : Math.max(baseNetIncome, streamEstimatedIncome > 0 ? streamEstimatedIncome : 3200));
+      : (streamEstimatedIncome > 0 ? streamEstimatedIncome : baseNetIncome));
 
   // 2. Committed fixed bills (use passed fixed expenses if provided, else historic average)
   let monthlyMandatory = fixedExpensesMonthly ?? 0;
