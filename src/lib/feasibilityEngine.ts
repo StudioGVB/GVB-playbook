@@ -111,6 +111,7 @@ export function evaluatePoolFeasibility(params: {
   categories: FinanceCategory[];
   fixedMonthlyExpenses: number;
   weeklyVariableBudget: number;
+  expectedMonthlyIncome?: number;
   convertToBase: (amount: number, currency?: string) => number;
   now?: Date;
 }): FeasibilityAssessment {
@@ -125,22 +126,31 @@ export function evaluatePoolFeasibility(params: {
     categories,
     fixedMonthlyExpenses,
     weeklyVariableBudget,
+    expectedMonthlyIncome,
     convertToBase,
     now = new Date(),
   } = params;
 
-  // 1. Calculate Income Estimates
-  const { totalEstimatedMonthlyIncome, streamEstimates } = calculateStreamIncomeEstimates(
+  // 1. Calculate Income Estimates (floored by expected monthly income if known)
+  const streamIncome = calculateStreamIncomeEstimates(
     transactions,
     categories,
     now
   );
+  const totalEstimatedMonthlyIncome = Math.max(
+    streamIncome.totalEstimatedMonthlyIncome,
+    expectedMonthlyIncome || 0
+  );
+  const streamEstimates = streamIncome.streamEstimates;
 
   // 2. Calculate Variable Spending Monthly Rate (weekly allowance * 4.33 weeks/mo)
   const variableMonthlyBudget = weeklyVariableBudget * 4.33;
 
   // 3. Calculate Existing Goal Pools Required Monthly Commitment
   let existingPoolsMonthlyCommitment = 0;
+  const evalStart = startDate ? new Date(startDate) : now;
+  const evalDeadline = deadline ? new Date(deadline) : null;
+
   for (const g of existingGoals) {
     if (g.id === evaluatingGoalId) continue;
     if ((g as any).is_emergency || (g as any).is_stash || g.name.toLowerCase().includes('stash') || g.name.toLowerCase().includes('emergency')) {
@@ -154,7 +164,15 @@ export function evaluatePoolFeasibility(params: {
 
     if (g.deadline) {
       const gDl = new Date(g.deadline);
-      const daysLeft = Math.max(1, differenceInCalendarDays(gDl, now));
+      const gStart = g.start_date ? new Date(g.start_date) : now;
+
+      // Timeline overlap check:
+      // If g ends before evaluating goal starts, or g starts after evaluating goal ends, they do not compete!
+      if (evalStart && gDl < evalStart) continue;
+      if (evalDeadline && gStart > evalDeadline) continue;
+
+      const calcFrom = gStart > now ? gStart : now;
+      const daysLeft = Math.max(1, differenceInCalendarDays(gDl, calcFrom));
       const weeksLeft = daysLeft / 7;
       const gWeekly = gRemaining / weeksLeft;
       existingPoolsMonthlyCommitment += gWeekly * 4.33;

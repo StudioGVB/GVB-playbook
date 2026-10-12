@@ -215,6 +215,8 @@ export default function FinancePoolsPage() {
   }, [finance.goals]);
 
   // Real-time feasibility assessments for Create & Edit Pool dialogs
+  const expectedMonthlyIncomeVal = snapshot?.split.monthlyIncome ?? assumptions?.expected_monthly_income;
+
   const createFeasibility = useMemo(() => {
     const targetVal = finance.convertToBase(parseFloat(newName ? newAmount : '0') || 0, newCurrency);
     return evaluatePoolFeasibility({
@@ -227,9 +229,10 @@ export default function FinancePoolsPage() {
       categories: finance.categories,
       fixedMonthlyExpenses: fixedMonthlyTotal,
       weeklyVariableBudget: essentialVariable / 4.33,
+      expectedMonthlyIncome: expectedMonthlyIncomeVal,
       convertToBase: finance.convertToBase,
     });
-  }, [newAmount, newCurrency, newDeadline, newStartDate, newName, finance.goals, finance.transactions, finance.categories, fixedMonthlyTotal, essentialVariable, assumptions, finance.convertToBase]);
+  }, [newAmount, newCurrency, newDeadline, newStartDate, newName, finance.goals, finance.transactions, finance.categories, fixedMonthlyTotal, essentialVariable, assumptions, expectedMonthlyIncomeVal, finance.convertToBase]);
 
   const editFeasibility = useMemo(() => {
     const targetVal = finance.convertToBase(parseFloat(editTarget) || 0, editCurrency);
@@ -247,9 +250,10 @@ export default function FinancePoolsPage() {
       categories: finance.categories,
       fixedMonthlyExpenses: fixedMonthlyTotal,
       weeklyVariableBudget: essentialVariable / 4.33,
+      expectedMonthlyIncome: expectedMonthlyIncomeVal,
       convertToBase: finance.convertToBase,
     });
-  }, [editTarget, editCurrency, editDeadline, editStartDate, editGoalId, finance.goals, finance.transactions, finance.categories, fixedMonthlyTotal, essentialVariable, assumptions, finance.convertToBase]);
+  }, [editTarget, editCurrency, editDeadline, editStartDate, editGoalId, finance.goals, finance.transactions, finance.categories, fixedMonthlyTotal, essentialVariable, assumptions, expectedMonthlyIncomeVal, finance.convertToBase]);
 
   const emergencyGoalAssigned = useMemo(() => {
     if (!emergencyGoal) return 0;
@@ -1148,6 +1152,7 @@ export default function FinancePoolsPage() {
                           categories: finance.categories,
                           fixedMonthlyExpenses: fixedMonthlyTotal,
                           weeklyVariableBudget: essentialVariable / 4.33,
+                          expectedMonthlyIncome: expectedMonthlyIncomeVal,
                           convertToBase: finance.convertToBase,
                         }) : null;
 
@@ -1158,7 +1163,11 @@ export default function FinancePoolsPage() {
                             {(goal as any).is_stash && <Badge variant="secondary" className="text-[9px] px-1.5 py-0 bg-slate-100 text-slate-600 border border-slate-200">Stash</Badge>}
                             {tripInfo && <Badge variant="outline" className="text-[9px] px-1.5 py-0 border-sky-200 text-sky-600 bg-sky-50">Trip</Badge>}
                             {cardFeasibility && !cardFeasibility.isFeasible && cardFeasibility.requiredMonthlyPace > 0 && !isHit && (
-                              <Badge variant="outline" className="text-[9px] px-1.5 py-0 bg-rose-50 text-rose-700 border-rose-200 font-bold">
+                              <Badge
+                                variant="outline"
+                                className="text-[9px] px-1.5 py-0 bg-rose-50 text-rose-700 border-rose-200 font-bold cursor-help"
+                                title={`Requires ${formatCurrency(cardFeasibility.requiredMonthlyPace, baseCurrency)}/mo, surplus capacity is ${formatCurrency(cardFeasibility.netMonthlySurplus, baseCurrency)}/mo`}
+                              >
                                 ⚠️ Unfeasible
                               </Badge>
                             )}
