@@ -52,6 +52,39 @@ export function calculateStreamIncomeEstimates(
     };
   }
 
+  // Helper to match transaction to an income category or stream
+  const findIncomeStream = (tx: FinanceTransaction): string | null => {
+    if (tx.category_id && streamMap[tx.category_id]) return tx.category_id;
+    const text = `${tx.merchant || ''} ${tx.description || ''} ${(tx.raw as any)?.message || ''}`.toLowerCase();
+
+    if (text.includes('gamma')) {
+      const g = incomeCategories.find(c => c.name.toLowerCase().includes('gamma'));
+      if (g) return g.id;
+    }
+    if (text.includes('batchbase') || text.includes('batch base') || text.includes('venture') || text.includes('advisory')) {
+      const v = incomeCategories.find(c => c.name.toLowerCase().includes('venture') || c.name.toLowerCase().includes('batchbase'));
+      if (v) return v.id;
+      if (!streamMap['__venture_advisory']) {
+        streamMap['__venture_advisory'] = {
+          name: 'Venture Advisory',
+          color: '#2563EB',
+          total: 0,
+          months: new Set<string>(),
+        };
+      }
+      return '__venture_advisory';
+    }
+    if (text.includes('etsy')) {
+      const e = incomeCategories.find(c => c.name.toLowerCase().includes('etsy'));
+      if (e) return e.id;
+    }
+    if (text.includes('back pocket') || text.includes('bpg')) {
+      const b = incomeCategories.find(c => c.name.toLowerCase().includes('pocket') || c.name.toLowerCase().includes('back'));
+      if (b) return b.id;
+    }
+    return null;
+  };
+
   // Filter income transactions in the last 3 months window
   for (const tx of transactions) {
     if (tx.amount <= 0 || tx.is_reimbursable) continue;
@@ -59,14 +92,14 @@ export function calculateStreamIncomeEstimates(
     const txDate = parseUkDate(tx.posted_at);
     if (txDate < threeMonthsAgoStart || txDate > endOfCurrentMonth) continue;
 
-    const catId = tx.category_id;
-    if (!catId || !streamMap[catId]) continue;
+    const streamId = findIncomeStream(tx);
+    if (!streamId || !streamMap[streamId]) continue;
 
     const bAmt = baseAmt(tx);
     const monthKey = format(txDate, 'yyyy-MM');
 
-    streamMap[catId].total += bAmt;
-    streamMap[catId].months.add(monthKey);
+    streamMap[streamId].total += bAmt;
+    streamMap[streamId].months.add(monthKey);
   }
 
   const streamEstimates: IncomeStreamEstimate[] = [];
