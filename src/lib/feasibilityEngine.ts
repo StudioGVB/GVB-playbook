@@ -1,5 +1,5 @@
 import { FinanceTransaction, FinanceCategory, FinanceGoal } from '@/hooks/useFinanceData';
-import { baseAmt } from './financeUtils';
+import { baseAmt, parseUkDate } from './financeUtils';
 import { format, subMonths, startOfMonth, endOfMonth, differenceInCalendarDays, addDays } from 'date-fns';
 
 export interface IncomeStreamEstimate {
@@ -56,7 +56,7 @@ export function calculateStreamIncomeEstimates(
   for (const tx of transactions) {
     if (tx.amount <= 0 || tx.is_reimbursable) continue;
 
-    const txDate = new Date(tx.posted_at);
+    const txDate = parseUkDate(tx.posted_at);
     if (txDate < threeMonthsAgoStart || txDate > endOfCurrentMonth) continue;
 
     const catId = tx.category_id;

@@ -6,7 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { startOfWeek, differenceInDays, endOfWeek } from 'date-fns';
 import { computePolicySnapshot } from '@/lib/policyEngine';
-import { formatCurrency } from '@/lib/financeUtils';
+import { formatCurrency, baseAmt, parseUkDate } from '@/lib/financeUtils';
 import type { useFinanceData } from '@/hooks/useFinanceData';
 import type { FinanceAssumptions } from '@/hooks/useFinanceAssumptions';
 import type { WeeklyBoost } from '@/hooks/useWeeklyBoosts';
@@ -65,9 +65,10 @@ export default function WeeklyAllowanceHero({ finance, assumptions, fixedExpense
         .filter(tx => {
           if (tx.amount >= 0 || tx.is_transfer || tx.is_reimbursable) return false;
           if (tx.category_id !== cat.id) return false;
-          return new Date(tx.posted_at) >= weekStart;
+          const d = parseUkDate(tx.posted_at);
+          return d >= weekStart && d <= weekEnd;
         })
-        .reduce((sum, tx) => sum + Math.abs(tx.amount), 0);
+        .reduce((sum, tx) => sum + Math.abs(baseAmt(tx)), 0);
       return { name: cat.name, color: cat.color, spent, target: cat.weekly_target!, id: cat.id };
     });
   }, [categories, transactions, weekStart]);

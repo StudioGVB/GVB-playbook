@@ -12,7 +12,7 @@ import { computePolicySnapshot } from '@/lib/policyEngine';
 import { useWeekTypes } from '@/hooks/useWeekTypes';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { formatCurrency } from '@/lib/financeUtils';
+import { formatCurrency, baseAmt, parseUkDate } from '@/lib/financeUtils';
 import { startOfWeek, endOfWeek, eachWeekOfInterval, subWeeks, format, isWithinInterval, differenceInDays } from 'date-fns';
 import { CalendarIcon, ChevronDown, ChevronUp, X } from 'lucide-react';
 import { DateRange } from 'react-day-picker';
@@ -103,7 +103,7 @@ export default function FinanceHistory() {
       const weekTxns = finance.transactions.filter(tx => {
         if (tx.amount >= 0 || tx.is_transfer || tx.is_fixed) return false;
         if ((tx as any).goal_id) return false;
-        const d = new Date(tx.posted_at);
+        const d = parseUkDate(tx.posted_at);
         if (!isWithinInterval(d, { start: ws, end: we })) return false;
         const cat = catMap.get(tx.category_id || '');
         if (cat?.exclude_from_reports) return false;
@@ -117,7 +117,7 @@ export default function FinanceHistory() {
       const dailySpending = Array(7).fill(0);
 
       for (const tx of weekTxns) {
-        const amt = Math.abs(tx.amount);
+        const amt = Math.abs(baseAmt(tx));
         const catId = tx.category_id || '__uncategorised';
         const cat = catMap.get(catId);
         const isEssential = essentialCatIds.has(catId);
@@ -136,7 +136,7 @@ export default function FinanceHistory() {
           });
         }
 
-        const dayIdx = differenceInDays(new Date(tx.posted_at), ws);
+        const dayIdx = differenceInDays(parseUkDate(tx.posted_at), ws);
         if (dayIdx >= 0 && dayIdx < 7) dailySpending[dayIdx] += amt;
       }
 

@@ -1,4 +1,4 @@
-import { baseAmt } from './financeUtils';
+import { baseAmt, parseUkDate } from './financeUtils';
 import type { FinanceGoal } from '@/hooks/useFinanceData';
 
 export interface PaycheckWaterfallBreakdown {
@@ -42,7 +42,7 @@ export function detectPaycheck(
     if (amt <= 0) return false;
     if (tx.is_reimbursable) return false;
 
-    const d = new Date(tx.posted_at);
+    const d = parseUkDate(tx.posted_at);
     if (d < windowStart || d > windowEnd) return false;
 
     const rawText = `${tx.merchant || ''} ${tx.description || ''}`.toLowerCase();

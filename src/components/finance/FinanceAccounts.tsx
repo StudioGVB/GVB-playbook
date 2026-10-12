@@ -10,7 +10,7 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/
 import { Plus, Trash2, Wallet, RefreshCw, Loader2, Building2, Landmark, CreditCard, Upload, FileText, X, ArrowRight, Camera, Check, Eye, EyeOff } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
-import { formatCurrency } from '@/lib/financeUtils';
+import { formatCurrency, parseUkDate } from '@/lib/financeUtils';
 import { parseBankCSV, parseNetBankMarkdown } from '@/lib/csvParser';
 import { format, startOfWeek, startOfMonth, isAfter } from 'date-fns';
 import { toast } from 'sonner';
@@ -89,10 +89,10 @@ export default function FinanceAccounts({ finance }: Props) {
     const map: Record<string, { week: number; month: number }> = {};
     for (const tx of transactions) {
       if (tx.amount >= 0 || tx.is_transfer || tx.transfer_group_id) continue;
-      const d = new Date(tx.posted_at);
+      const d = parseUkDate(tx.posted_at);
       if (!map[tx.account_id]) map[tx.account_id] = { week: 0, month: 0 };
-      if (isAfter(d, weekStart)) map[tx.account_id].week += Math.abs(tx.amount);
-      if (isAfter(d, monthStart)) map[tx.account_id].month += Math.abs(tx.amount);
+      if (d >= weekStart) map[tx.account_id].week += Math.abs(tx.amount);
+      if (d >= monthStart) map[tx.account_id].month += Math.abs(tx.amount);
     }
     return map;
   }, [transactions]);

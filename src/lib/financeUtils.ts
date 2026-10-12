@@ -594,10 +594,11 @@ export function computeWeeklyCategoryStats(
       const weekStart = startOfWeek(subWeeks(now, w), { weekStartsOn: 1 });
       const weekEnd = new Date(weekStart);
       weekEnd.setDate(weekEnd.getDate() + 7);
-      const weekTxs = txs.filter(tx =>
-        tx.category_id === cat.id && tx.amount < 0 &&
-        new Date(tx.posted_at) >= weekStart && new Date(tx.posted_at) < weekEnd
-      );
+      const weekTxs = txs.filter(tx => {
+        if (tx.category_id !== cat.id || tx.amount >= 0) return false;
+        const d = parseUkDate(tx.posted_at);
+        return d >= weekStart && d < weekEnd;
+      });
       weeklySpends.push(weekTxs.reduce((s, tx) => s + Math.abs(baseAmt(tx)), 0));
     }
 
@@ -710,7 +711,8 @@ export function computeSafeToSpend(
       if (tx.is_transfer || tx.transfer_group_id || tx.amount >= 0) return false;
       const cat = categories.find(c => c.id === tx.category_id);
       if (tx.is_fixed || cat?.type === 'fixed') return false;
-      return new Date(tx.posted_at) >= weekStart;
+      const d = parseUkDate(tx.posted_at);
+      return d >= weekStart;
     })
     .reduce((s, tx) => s + Math.abs(baseAmt(tx)), 0);
 

@@ -456,8 +456,10 @@ export default function FinancePoolsPage() {
       if (waterfallBreakdown.emergencyTopUp > 0) {
         const emergencyGoal = finance.goals.find(g => (g as any).is_emergency === true || g.name.toLowerCase().includes('emergency'));
         if (emergencyGoal) {
+          const oneInBase = finance.convertToBase(1, emergencyGoal.currency);
+          const nativeTopUp = oneInBase === 0 ? waterfallBreakdown.emergencyTopUp : waterfallBreakdown.emergencyTopUp / oneInBase;
           await finance.updateGoal(emergencyGoal.id, {
-            assigned_amount: (emergencyGoal.assigned_amount || 0) + waterfallBreakdown.emergencyTopUp,
+            assigned_amount: (emergencyGoal.assigned_amount || 0) + nativeTopUp,
             is_emergency: true,
           } as any);
         } else {
@@ -479,8 +481,10 @@ export default function FinancePoolsPage() {
         if (item.allocatedAmount <= 0) continue;
         const g = finance.goals.find(x => x.id === item.goalId);
         if (g) {
+          const oneInBase = finance.convertToBase(1, g.currency);
+          const nativeAdd = oneInBase === 0 ? item.allocatedAmount : item.allocatedAmount / oneInBase;
           await finance.updateGoal(g.id, {
-            assigned_amount: (g.assigned_amount || 0) + item.allocatedAmount,
+            assigned_amount: (g.assigned_amount || 0) + nativeAdd,
           } as any);
         }
       }
@@ -521,9 +525,11 @@ export default function FinancePoolsPage() {
       if (breakdown.emergencyTopUp > 0) {
         const emergencyGoal = finance.goals.find(g => (g as any).is_emergency === true || g.name.toLowerCase().includes('emergency'));
         if (emergencyGoal) {
+          const oneInBase = finance.convertToBase(1, emergencyGoal.currency);
+          const nativeTopUp = oneInBase === 0 ? breakdown.emergencyTopUp : breakdown.emergencyTopUp / oneInBase;
           const current = emergencyGoal.assigned_amount || 0;
           await finance.updateGoal(emergencyGoal.id, {
-            assigned_amount: Math.max(0, current - breakdown.emergencyTopUp),
+            assigned_amount: Math.max(0, current - nativeTopUp),
           } as any);
         }
       }
@@ -533,9 +539,11 @@ export default function FinancePoolsPage() {
         if (item.allocatedAmount <= 0) continue;
         const g = finance.goals.find(x => x.id === item.goalId);
         if (g) {
+          const oneInBase = finance.convertToBase(1, g.currency);
+          const nativeDeduct = oneInBase === 0 ? item.allocatedAmount : item.allocatedAmount / oneInBase;
           const current = g.assigned_amount || 0;
           await finance.updateGoal(g.id, {
-            assigned_amount: Math.max(0, current - item.allocatedAmount),
+            assigned_amount: Math.max(0, current - nativeDeduct),
           } as any);
         }
       }
@@ -1325,7 +1333,7 @@ export default function FinancePoolsPage() {
       </div>
 
         {/* Weekly Pool Savings Engine Card (Positioned Underneath Pools) */}
-        <WeeklyPoolSavingsCard finance={finance} spendablePool={spendablePool} funMoney={funMoney} />
+        <WeeklyPoolSavingsCard finance={finance} spendablePool={spendablePool} funMoney={funMoney} snapshot={snapshot} />
       </TabsContent>
 
         <TabsContent value="balance-sheet" className="space-y-6">

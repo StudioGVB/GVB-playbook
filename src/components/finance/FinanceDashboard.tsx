@@ -151,7 +151,7 @@ export function FinanceDashboard() {
     const rangeAgo = new Date();
     rangeAgo.setDate(rangeAgo.getDate() - daysRange);
     const recentTxns = finance.transactions.filter(tx => {
-      const d = new Date(tx.posted_at);
+      const d = parseUkDate(tx.posted_at);
       return d >= rangeAgo && d <= new Date();
     });
 
@@ -205,21 +205,30 @@ export function FinanceDashboard() {
   }, [finance.totalCashBase, snapshot, poolsSum]);
 
   const totalPoolsWeeklyPace = useMemo(() => {
+    if (snapshot?.split) {
+      return snapshot.split.goalSavingsAmount / 4.33;
+    }
     let sum = 0;
     const today = new Date();
     for (const goal of finance.goals) {
-      if (goal.target_amount > 0 && goal.deadline && goal.assigned_amount < goal.target_amount) {
+      if ((goal as any).is_stash) continue;
+      if (goal.start_date && new Date(goal.start_date) > today) continue;
+      const targetBase = finance.convertToBase(goal.target_amount || 0, goal.currency);
+      const assignedBase = finance.convertToBase(goal.assigned_amount || 0, goal.currency);
+      const remainingBase = Math.max(0, targetBase - assignedBase);
+      if (remainingBase <= 0.01) continue;
+      if (goal.deadline) {
         const d = new Date(goal.deadline);
         const diffTime = d.getTime() - today.getTime();
         const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
         if (diffDays > 0) {
           const weeks = diffDays / 7;
-          sum += (goal.target_amount - goal.assigned_amount) / weeks;
+          sum += remainingBase / weeks;
         }
       }
     }
     return sum;
-  }, [finance.goals]);
+  }, [finance.goals, finance.convertToBase, snapshot]);
 
   // Advanced dashboard calculations
   const advancedMetrics = useMemo(() => {
@@ -268,14 +277,14 @@ export function FinanceDashboard() {
 
     const last7DaysSpent = finance.transactions
       .filter(tx => {
-        const d = new Date(tx.posted_at);
+        const d = parseUkDate(tx.posted_at);
         return d >= sevenDaysAgo && !tx.is_transfer && !tx.is_reimbursable && tx.amount < 0 && !isFixedTx(tx) && !tx.goal_id;
       })
       .reduce((sum, tx) => sum + Math.abs(baseAmt(tx)), 0);
 
     const prior7DaysSpent = finance.transactions
       .filter(tx => {
-        const d = new Date(tx.posted_at);
+        const d = parseUkDate(tx.posted_at);
         return d >= fourteenDaysAgo && d < sevenDaysAgo && !tx.is_transfer && !tx.is_reimbursable && tx.amount < 0 && !isFixedTx(tx) && !tx.goal_id;
       })
       .reduce((sum, tx) => sum + Math.abs(baseAmt(tx)), 0);

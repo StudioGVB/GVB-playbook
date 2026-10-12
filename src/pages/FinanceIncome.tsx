@@ -4,7 +4,7 @@ import { ChevronLeft, ChevronRight, TrendingUp, DollarSign, Tag, X, Briefcase, H
 import { PieChart as RePieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 import { useFinanceData } from '@/hooks/useFinanceData';
 import { useFixedExpenses } from '@/hooks/useFixedExpenses';
-import { baseAmt, formatCurrency, formatUkDate } from '@/lib/financeUtils';
+import { baseAmt, formatCurrency, formatUkDate, parseUkDate } from '@/lib/financeUtils';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -203,7 +203,7 @@ export default function FinanceIncome() {
     const isExplicitIncome = cat?.type === 'income';
     if (!isExplicitIncome && isInternalTransfer(tx)) return false;
 
-    const d = new Date(tx.posted_at);
+    const d = parseUkDate(tx.posted_at);
     return d >= monthStart && d <= monthEnd;
   }), [transactions, categories, monthStart, monthEnd]);
 

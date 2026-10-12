@@ -4,7 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { CalendarDays } from 'lucide-react';
 import { format, differenceInCalendarDays, startOfDay, addDays, isSameDay, getDay } from 'date-fns';
 import type { FinanceTransaction } from '@/hooks/useFinanceData';
-import { formatCurrency } from '@/lib/financeUtils';
+import { formatCurrency, baseAmt, parseUkDate } from '@/lib/financeUtils';
 
 interface TripDailyBreakdownProps {
   tripId: string;
@@ -52,7 +52,7 @@ export function TripDailyBreakdown({
       if (tx.is_transfer || tx.amount >= 0) return false;
       if ((tx as any).trip_id === tripId) return true;
       // Auto-include any spend during trip dates (untagged travel spend)
-      const d = startOfDay(new Date(tx.posted_at));
+      const d = startOfDay(parseUkDate(tx.posted_at));
       return d >= start && d <= end;
     });
 
@@ -70,9 +70,9 @@ export function TripDailyBreakdown({
       const inTrip = d >= start && d <= end;
       const dayNum = inTrip ? differenceInCalendarDays(d, start) + 1 : 0;
       const dayTxs = inTrip
-        ? tripTxs.filter(tx => isSameDay(startOfDay(new Date(tx.posted_at)), d))
+        ? tripTxs.filter(tx => isSameDay(startOfDay(parseUkDate(tx.posted_at)), d))
         : [];
-      const spent = dayTxs.reduce((s, tx) => s + Math.abs(tx.amount), 0);
+      const spent = dayTxs.reduce((s, tx) => s + Math.abs(baseAmt(tx)), 0);
       if (inTrip) totalSpent += spent;
       cells.push({
         date: d, dayNum, spent, txCount: dayTxs.length,

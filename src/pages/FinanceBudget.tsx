@@ -206,8 +206,23 @@ export default function FinanceBudget() {
     
     if (settleRef.current === prevWeekKey) return;
     const localKey = `stash_settled_v3_${prevWeekKey}`;
-    if (localStorage.getItem(localKey)) {
+    
+    // Check if already settled in database across any device (prevents mobile/desktop duplicate settlements)
+    const isAlreadySettledInDb = (() => {
+      try {
+        if (!stashGoal?.description) return false;
+        const parsed = JSON.parse(stashGoal.description);
+        return parsed?.last_settled_week === prevWeekKey;
+      } catch {
+        return false;
+      }
+    })();
+
+    if (isAlreadySettledInDb || localStorage.getItem(localKey)) {
       settleRef.current = prevWeekKey;
+      if (isAlreadySettledInDb && !localStorage.getItem(localKey)) {
+        localStorage.setItem(localKey, 'true');
+      }
       return;
     }
 
@@ -271,6 +286,7 @@ export default function FinanceBudget() {
               await finance.updateGoal(stashGoal.id, {
                 assigned_amount: (stashGoal.assigned_amount || 0) + toStash,
                 is_stash: true,
+                description: JSON.stringify({ last_settled_week: prevWeekKey }),
               } as any);
             } else {
               await finance.addGoal({
@@ -282,6 +298,7 @@ export default function FinanceBudget() {
                 assigned_amount: toStash,
                 color: '#10b981',
                 is_stash: true,
+                description: JSON.stringify({ last_settled_week: prevWeekKey }),
               } as any);
             }
             toast.success(`Settled ${fmt(toEmergency)} into Emergency Reserve 🛡️ and ${fmt(toStash)} into Savings Stash 💰`);
@@ -294,6 +311,7 @@ export default function FinanceBudget() {
             await finance.updateGoal(stashGoal.id, {
               assigned_amount: (stashGoal.assigned_amount || 0) + underspend,
               is_stash: true,
+              description: JSON.stringify({ last_settled_week: prevWeekKey }),
             } as any);
             toast.success(`Settled ${fmt(underspend)} from last week's underspend into Savings Stash 💰`);
           } else {
@@ -306,6 +324,7 @@ export default function FinanceBudget() {
               assigned_amount: underspend,
               color: '#10b981',
               is_stash: true,
+              description: JSON.stringify({ last_settled_week: prevWeekKey }),
             } as any);
             toast.success(`Created Savings Stash with ${fmt(underspend)} from last week's underspend 💰`);
           }
@@ -360,7 +379,7 @@ export default function FinanceBudget() {
     const spendTxns = transactions.filter(tx => {
       if (tx.amount >= 0 || tx.is_transfer) return false;
       if ((tx as any).goal_id) return false;
-      if (new Date(tx.posted_at) < cutoff) return false;
+      if (parseUkDate(tx.posted_at) < cutoff) return false;
       const cat = catMap.get(tx.category_id || '');
       if (cat?.exclude_from_reports) return false;
       if (cat?.type === 'fixed' || cat?.type === 'income' || cat?.type === 'transfer') return false;
@@ -398,7 +417,8 @@ export default function FinanceBudget() {
     const thisWeekTxns = transactions.filter(tx => {
       if (tx.amount >= 0 || tx.is_transfer || tx.is_reimbursable) return false;
       if ((tx as any).goal_id) return false;
-      if (new Date(tx.posted_at) < weekStart) return false;
+      const d = parseUkDate(tx.posted_at);
+      if (d < weekStart || d > weekEnd) return false;
       const cat = catMap.get(tx.category_id || '');
       if (cat?.exclude_from_reports) return false;
       if (cat?.type === 'fixed' || cat?.type === 'income' || cat?.type === 'transfer') return false;

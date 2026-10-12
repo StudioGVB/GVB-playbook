@@ -4,7 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { PieChart as PieChartIcon } from 'lucide-react';
 import { PieChart as RechartsPieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 import type { FinanceTransaction, FinanceCategory } from '@/hooks/useFinanceData';
-import { formatCurrency } from '@/lib/financeUtils';
+import { formatCurrency, baseAmt, parseUkDate } from '@/lib/financeUtils';
 import { startOfDay } from 'date-fns';
 
 interface TripCategoryBreakdownProps {
@@ -34,7 +34,7 @@ export function TripCategoryBreakdown({
       if (tx.is_transfer || tx.amount >= 0) return false;
       if ((tx as any).trip_id === tripId) return true;
       if (start && end) {
-        const d = startOfDay(new Date(tx.posted_at));
+        const d = startOfDay(parseUkDate(tx.posted_at));
         return d >= start && d <= end;
       }
       return false;
@@ -67,14 +67,15 @@ export function TripCategoryBreakdown({
 
       const key = name;
       const existing = totals.get(key);
+      const bAmt = Math.abs(baseAmt(tx));
       if (existing) {
-        existing.amount += Math.abs(tx.amount);
+        existing.amount += bAmt;
         existing.count += 1;
       } else {
         totals.set(key, {
           name,
           color: color || FALLBACK_COLORS[totals.size % FALLBACK_COLORS.length],
-          amount: Math.abs(tx.amount),
+          amount: bAmt,
           count: 1,
         });
       }

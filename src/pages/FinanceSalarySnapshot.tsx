@@ -164,7 +164,8 @@ export default function FinanceSalarySnapshot() {
 
   // ---------- VARIABLE ----------
   const essentialsMonthly = snapshot?.computedEssentialVariable ?? assumptions?.estimated_essential_variable ?? 0;
-  const funMonthly = (assumptions?.weekly_fun_budget || 100) * 4.33;
+  const funWeekly = snapshot?.baseWeeklyFun ?? assumptions?.weekly_fun_budget ?? 100;
+  const funMonthly = funWeekly * 4.33;
   const variableMonthly = essentialsMonthly + funMonthly;
   const surplus = afterFixed - variableMonthly;
 
@@ -219,7 +220,7 @@ export default function FinanceSalarySnapshot() {
     studentLoanPlan: (assumptions.student_loan_plan as StudentLoanPlan) || null,
     rentMonthly: Math.round(baselineRent),
     otherBillsMonthly: Math.round(Math.max(0, fixedAll - baselineRent)),
-    weeklyFun: assumptions.weekly_fun_budget || 100,
+    weeklyFun: Math.round(funWeekly),
     weeklyEssentials: Math.round(essentialsMonthly / 4.33),
     savingsTarget: 5000,
     bigPurchase: 1000,
@@ -368,7 +369,7 @@ export default function FinanceSalarySnapshot() {
             />
             <Row
               label="Fun money"
-              sub={`Weekly cap · ${gbp(assumptions.weekly_fun_budget || 100)}/wk`}
+              sub={`Weekly cap · ${gbp(funWeekly)}/wk`}
               value={-funMonthly}
               negative
             />

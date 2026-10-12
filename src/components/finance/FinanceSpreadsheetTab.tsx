@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
-import { formatCurrency } from '@/lib/financeUtils';
+import { formatCurrency, parseUkDate } from '@/lib/financeUtils';
 import { useFinanceData } from '@/hooks/useFinanceData';
 import { useFixedExpenses } from '@/hooks/useFixedExpenses';
 import { calcTakeHome, StudentLoanPlan, STUDENT_LOAN_LABELS } from '@/lib/ukTakeHome';
@@ -159,7 +159,7 @@ export default function FinanceSpreadsheetTab() {
         if (tx.is_transfer) return false;
         if (tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') return false;
       }
-      const d = new Date(tx.posted_at);
+      const d = parseUkDate(tx.posted_at);
       return d >= ninetyDaysAgo && d <= now;
     });
 
@@ -248,7 +248,7 @@ export default function FinanceSpreadsheetTab() {
       if (tx.is_transfer) return false;
       if (tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') return false;
       if ((tx as any).fixed_expense_id || tx.is_fixed) return false;
-      const d = new Date(tx.posted_at);
+      const d = parseUkDate(tx.posted_at);
       return d >= ninetyDaysAgo && d <= now;
     });
 

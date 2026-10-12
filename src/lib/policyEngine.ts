@@ -407,7 +407,7 @@ export function computePolicySnapshot(
   const currentBufferMonths = emergencySurvivalMonthly > 0 ? totalLiquidCash / emergencySurvivalMonthly : Infinity;
 
   // Runway projection: piecewise across the union of all trip windows
-  const fullWeeklyBurn = weeklyFixedCosts + (essentialVariable / 4.33) + (assumptions.weekly_fun_budget || 100);
+  const fullWeeklyBurn = weeklyFixedCosts + weeklyEssentialBudget + baseWeeklyFun;
   const fixedOnlyBurn = weeklyFixedCosts;
   const totalWeeklyBurn = isTravelWeek ? fixedOnlyBurn : fullWeeklyBurn;
 
@@ -645,7 +645,7 @@ export function computeMoneySplit(
     const mandatoryCategories = categories.filter(c => c.type === 'fixed');
     const mandatoryCatIds = new Set(mandatoryCategories.map(c => c.id));
     let mandatorySpend = 0;
-    const relevantTxs = transactions.filter(tx => new Date(tx.posted_at) >= threeMonthsAgo);
+    const relevantTxs = transactions.filter(tx => parseUkDate(tx.posted_at) >= threeMonthsAgo);
     for (const tx of relevantTxs) {
       if (tx.is_transfer || tx.is_reimbursable) continue;
       if (tx.amount < 0 && (tx.is_fixed || (tx.category_id && mandatoryCatIds.has(tx.category_id)))) {

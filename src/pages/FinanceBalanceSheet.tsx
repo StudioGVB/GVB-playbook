@@ -2,8 +2,8 @@ import { useMemo, useState } from 'react';
 import { format, startOfMonth, endOfMonth, addMonths } from 'date-fns';
 import { ChevronLeft, ChevronRight, TrendingUp, TrendingDown, Receipt, ShoppingBag, Scale } from 'lucide-react';
 import { useFinanceData } from '@/hooks/useFinanceData';
-import { useFixedExpenses, type FixedExpense } from '@/hooks/useFixedExpenses';
-import { baseAmt, formatCurrency, isExcludedSpendDate } from '@/lib/financeUtils';
+import { useFixedExpenses, type FixedExpense, toMonthly } from '@/hooks/useFixedExpenses';
+import { baseAmt, formatCurrency, isExcludedSpendDate, parseUkDate } from '@/lib/financeUtils';
 import { Button } from '@/components/ui/button';
 
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -11,6 +11,7 @@ import { Table, LayoutGrid } from 'lucide-react';
 import FinanceSpreadsheetTab from '@/components/finance/FinanceSpreadsheetTab';
 import MonthlyCashFlowBreakdown from '@/components/finance/MonthlyCashFlowBreakdown';
 import { calcTakeHome } from '@/lib/ukTakeHome';
+import { computePolicySnapshot } from '@/lib/policyEngine';
 
 // Candy-jar palette (matches Accounts & Settings)
 const PINK = '#FF2EB8';
@@ -71,7 +72,7 @@ export default function FinanceBalanceSheet() {
     const matchedFixedIds = new Set<string>();
 
     for (const tx of transactions) {
-      const d = new Date(tx.posted_at);
+      const d = parseUkDate(tx.posted_at);
       if (d < monthStart || d > monthEnd) continue;
       if (isExcludedSpendDate(d)) continue;
       const cat = categories.find(c => c.id === tx.category_id);
@@ -195,46 +196,42 @@ export default function FinanceBalanceSheet() {
   const heroBorder = isPositive ? GREEN : RED;
   const heroText = isPositive ? GREEN_DEEP : RED_DEEP;
 
-  const poolSavingsMonthly = useMemo(() => {
-    let monthlyTargetSum = 0;
-    const now = new Date();
-    for (const g of finance.goals) {
-      if ((g as any).is_stash) continue;
-      if (g.start_date && new Date(g.start_date) > now) continue;
-      const targetBase = finance.convertToBase(g.target_amount || 0, g.currency);
-      const assignedBase = finance.convertToBase(g.assigned_amount || 0, g.currency);
-      const remainingBase = Math.max(0, targetBase - assignedBase);
-      if (remainingBase <= 0.01) continue;
-      if (g.deadline) {
-        const daysLeft = Math.max(1, Math.ceil((new Date(g.deadline).getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
-        const weeksLeft = Math.max(1, daysLeft / 7);
-        const weeklyRequired = remainingBase / weeksLeft;
-        monthlyTargetSum += weeklyRequired * 4.33;
-      } else if (g.percent_allocation && g.percent_allocation > 0) {
-        monthlyTargetSum += (g.percent_allocation / 100) * 400;
-      }
-    }
-    return monthlyTargetSum;
-  }, [finance.goals, finance.convertToBase]);
+  const fixedExpensesMonthlyAll = useMemo(() => {
+    return fixedExpenses.reduce((sum, e) => {
+      return sum + toMonthly(finance.convertToBase(e.amount, e.currency), e.frequency);
+    }, 0);
+  }, [fixedExpenses, finance.convertToBase]);
 
-  const variableAllowanceMonthly = useMemo(() => {
-    const essentialWeekly = finance.assumptions?.estimated_essential_variable || 115;
-    const funWeekly = finance.assumptions?.weekly_fun_budget || 100;
-    return (essentialWeekly + funWeekly) * 4.33;
-  }, [finance.assumptions]);
+  const fixedExpensesMonthlyInternal = useMemo(() => {
+    return fixedExpenses
+      .filter(e => !e.paid_externally)
+      .reduce((sum, e) => {
+        return sum + toMonthly(finance.convertToBase(e.amount, e.currency), e.frequency);
+      }, 0);
+  }, [fixedExpenses, finance.convertToBase]);
 
-  const expectedIncomeValue = useMemo(() => {
-    if (!finance.assumptions) return 0;
-    if (finance.assumptions.expected_monthly_income) return finance.assumptions.expected_monthly_income;
-    if (finance.assumptions.gross_annual_salary) {
-      return calcTakeHome({
-        grossAnnual: finance.assumptions.gross_annual_salary,
-        pensionPercent: finance.assumptions.pension_percent || 0,
-        studentLoanPlan: finance.assumptions.student_loan_plan as any,
-      }).netMonthly;
-    }
-    return 0;
-  }, [finance.assumptions]);
+  const snapshot = useMemo(() => {
+    if (!finance.assumptions) return null;
+    return computePolicySnapshot(
+      finance.assumptions,
+      finance.accounts,
+      finance.transactions,
+      finance.categories,
+      finance.goals,
+      finance.convertToBase,
+      fixedExpensesMonthlyInternal,
+      undefined,
+      undefined,
+      finance.trips,
+      fixedExpensesMonthlyAll,
+    );
+  }, [finance.assumptions, finance.accounts, finance.transactions, finance.categories, finance.goals, finance.convertToBase, fixedExpensesMonthlyInternal, finance.trips, fixedExpensesMonthlyAll]);
+
+  const poolSavingsMonthly = snapshot?.split.goalSavingsAmount ?? 0;
+  const essentialBudgetMonthly = snapshot 
+    ? snapshot.weeklyEssentialBudget * 4.33 
+    : (finance.assumptions?.estimated_essential_variable || 115) * 4.33;
+  const expectedIncomeValue = snapshot?.split.monthlyIncome ?? (finance.assumptions?.expected_monthly_income || 0);
 
   return (
     <div className="min-h-screen -mx-4 sm:-mx-6 -my-6 px-4 sm:px-6 py-6 bg-[#FFF5FA] font-body">
@@ -295,7 +292,7 @@ export default function FinanceBalanceSheet() {
               income={stats.income}
               expectedIncome={expectedIncomeValue}
               fixedBills={stats.fixed}
-              essentialBudget={(finance.assumptions?.estimated_essential_variable || 115) * 4.33}
+              essentialBudget={essentialBudgetMonthly}
               essentialSpent={stats.variable}
               poolSavings={poolSavingsMonthly}
               baseCurrency={baseCurrency}

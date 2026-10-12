@@ -9,13 +9,16 @@ import { toast } from 'sonner';
 import { sendLocalNotification } from '@/lib/notifications';
 import { format, differenceInCalendarDays, differenceInCalendarWeeks } from 'date-fns';
 
+import type { PolicySnapshot } from '@/lib/policyEngine';
+
 interface Props {
   finance: ReturnType<typeof useFinanceData>;
   spendablePool?: number;
   funMoney?: number;
+  snapshot?: PolicySnapshot | null;
 }
 
-export default function WeeklyPoolSavingsCard({ finance, spendablePool = 0, funMoney = 0 }: Props) {
+export default function WeeklyPoolSavingsCard({ finance, spendablePool = 0, funMoney = 0, snapshot }: Props) {
   const [transferring, setTransferring] = useState(false);
   const [lastTransferDate, setLastTransferDate] = useState<string | null>(() => {
     return localStorage.getItem('gvb_last_weekly_pool_transfer');
@@ -71,7 +74,9 @@ export default function WeeklyPoolSavingsCard({ finance, spendablePool = 0, funM
         } else {
           weeksRemaining = Math.max(1, daysRemaining / 7);
           weeklyRequiredBase = remainingBase / weeksRemaining;
-          status = daysRemaining <= 14 ? 'urgent' : 'on_track';
+          // Only flag urgent if overdue or if required pace exceeds weekly cashflow capacity
+          const weeklyCapacity = snapshot?.baseWeeklyFun ?? 150;
+          status = (weeklyRequiredBase > weeklyCapacity * 1.5) ? 'urgent' : 'on_track';
         }
       } else if (goal.percent_allocation && goal.percent_allocation > 0) {
         // Fallback proportional target
@@ -127,9 +132,10 @@ export default function WeeklyPoolSavingsCard({ finance, spendablePool = 0, funM
   const totalWeeklyRequired = poolBreakdown.reduce((sum, item) => sum + item.weeklyRequiredBase, 0);
   const totalMonthlyRequired = totalWeeklyRequired * 4.33;
 
-  // True Safe-to-Spend (Weekly safe-to-spend allowance adjusted by deducting weekly pool savings)
-  const weeklyBudget = funMoney > 0 ? (funMoney / 4.33) : (spendablePool > 0 ? (spendablePool / 4.33) : ((finance.assumptions?.weekly_fun_budget || 0) + (finance.assumptions?.weekly_essential_budget || 0)));
-  const trueWeeklySafeToSpend = Math.max(0, weeklyBudget - totalWeeklyRequired);
+  // True Safe-to-Spend (Unified safe-to-spend allowance from live cashflow model)
+  const trueWeeklySafeToSpend = snapshot
+    ? (snapshot.weeklyFunBudget + snapshot.weeklyEssentialBudget)
+    : Math.max(0, (funMoney > 0 ? funMoney / 4.33 : (spendablePool > 0 ? spendablePool / 4.33 : 100)) - totalWeeklyRequired);
   const activePoolsCount = poolBreakdown.filter(p => p.remainingBase > 0.01).length;
 
   // Execute 1-Click Weekly Transfer into Pools
@@ -340,7 +346,11 @@ export default function WeeklyPoolSavingsCard({ finance, spendablePool = 0, funM
                       ) : isFutureStart ? (
                         <Badge className="bg-indigo-50 text-indigo-700 border-indigo-200 text-[10px]">Starts {format(new Date(goal.start_date!), 'MMM d')}</Badge>
                       ) : status === 'urgent' ? (
-                        <Badge className="bg-amber-100 text-amber-800 border-amber-200 text-[10px]">Pace up</Badge>
+                        <Badge className="bg-amber-100 text-amber-800 border-amber-200 text-[10px]">
+                          {daysRemaining != null && daysRemaining <= 0 ? 'Overdue' : 'Pace up'}
+                        </Badge>
+                      ) : daysRemaining != null && daysRemaining <= 14 ? (
+                        <Badge variant="outline" className="text-[10px] border-blue-200 text-blue-700 bg-blue-50/50">Due Soon</Badge>
                       ) : (
                         <Badge variant="outline" className="text-[10px] border-slate-200">On Track</Badge>
                       )}

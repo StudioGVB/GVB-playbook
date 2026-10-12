@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { useFixedExpenses, type FixedExpense } from '@/hooks/useFixedExpenses';
 import { useFinanceData } from '@/hooks/useFinanceData';
 import { useAutoLinkFixedBills } from '@/hooks/useAutoLinkFixedBills';
-import { formatCurrency } from '@/lib/financeUtils';
+import { formatCurrency, parseUkDate } from '@/lib/financeUtils';
 
 const FREQ_TO_MONTHLY: Record<string, number> = {
   weekly: 52 / 12,
@@ -69,7 +69,7 @@ export default function FinanceCostOfLiving() {
       let variable = 0;
       let any = false;
       for (const tx of finance.transactions) {
-        const d = new Date(tx.posted_at);
+        const d = parseUkDate(tx.posted_at);
         if (d < start || d >= end) continue;
         any = true;
         if (tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') continue;
@@ -104,7 +104,7 @@ export default function FinanceCostOfLiving() {
       const end = new Date(now.getFullYear(), now.getMonth() - i + 1, 1);
       let any = false;
       for (const tx of finance.transactions) {
-        const d = new Date(tx.posted_at);
+        const d = parseUkDate(tx.posted_at);
         if (d < start || d >= end) continue;
         any = true;
         if (tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') continue;

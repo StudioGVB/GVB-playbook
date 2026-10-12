@@ -21,13 +21,17 @@ export interface FixedExpense {
   updated_at: string;
 }
 
-const FREQ_TO_MONTHLY: Record<string, number> = {
+export const FREQ_TO_MONTHLY: Record<string, number> = {
   weekly: 52 / 12,
   fortnightly: 26 / 12,
   monthly: 1,
   quarterly: 1 / 3,
   yearly: 1 / 12,
 };
+
+export function toMonthly(amount: number, frequency: string): number {
+  return amount * (FREQ_TO_MONTHLY[frequency] || 1);
+}
 
 const DEFAULT_FX: Record<string, number> = { AUD_GBP: 0.52, GBP_AUD: 1.92 };
 

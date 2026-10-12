@@ -3,7 +3,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Badge } from '@/components/ui/badge';
 import { Repeat, ChevronDown, Lock, Sparkles } from 'lucide-react';
-import { formatCurrency, baseAmt } from '@/lib/financeUtils';
+import { formatCurrency, baseAmt, parseUkDate } from '@/lib/financeUtils';
 import type { FixedExpense } from '@/hooks/useFixedExpenses';
 import type { FinanceTransaction, FinanceCategory } from '@/hooks/useFinanceData';
 import { subMonths } from 'date-fns';
@@ -89,7 +89,7 @@ function detectSubscriptions(
     const cat = catMap.get(tx.category_id || '');
     if (cat?.type === 'fixed' || cat?.type === 'income' || cat?.type === 'transfer') continue;
     if (cat?.exclude_from_reports) continue;
-    const d = new Date(tx.posted_at);
+    const d = parseUkDate(tx.posted_at);
     if (d < cutoff) continue;
     const text = `${tx.merchant || ''} ${tx.description || ''}`;
     const brand = matchSubscription(text);

@@ -9,7 +9,7 @@ import { useNavigate } from 'react-router-dom';
 import type { FinanceTrip } from '@/hooks/useFinanceTrips';
 import type { FinanceTransaction, FinanceGoal, FinanceCategory } from '@/hooks/useFinanceData';
 import { computeTripSpent } from '@/lib/policyEngine';
-import { formatCurrency } from '@/lib/financeUtils';
+import { formatCurrency, baseAmt, parseUkDate } from '@/lib/financeUtils';
 import { TripCategoryBreakdown } from '@/components/finance/TripCategoryBreakdown';
 import { LogTripExpenseDialog } from '@/components/finance/LogTripExpenseDialog';
 
@@ -77,14 +77,14 @@ export function TravelHome({ trip, goal, transactions, categories = [], onExitTo
     const tripTxs = transactions.filter(tx => {
       if (tx.is_transfer || tx.amount >= 0) return false;
       if ((tx as any).trip_id === trip.id) return true;
-      const d = startOfDay(new Date(tx.posted_at));
+      const d = startOfDay(parseUkDate(tx.posted_at));
       return d >= start && d <= end;
     });
 
     // Spending today
     const spentToday = tripTxs
-      .filter(tx => startOfDay(new Date(tx.posted_at)).getTime() === today.getTime())
-      .reduce((sum, tx) => sum + Math.abs(tx.amount), 0);
+      .filter(tx => startOfDay(parseUkDate(tx.posted_at)).getTime() === today.getTime())
+      .reduce((sum, tx) => sum + Math.abs(baseAmt(tx)), 0);
 
     const dailyBudgetEven = poolTotal / totalDays;
     const dailyBudgetRemaining = poolRemaining / daysRemaining;
@@ -106,8 +106,8 @@ export function TravelHome({ trip, goal, transactions, categories = [], onExitTo
     }> = [];
     for (let i = 0; i < totalDays; i++) {
       const d = addDays(start, i);
-      const dayTxs = tripTxs.filter(tx => isSameDay(startOfDay(new Date(tx.posted_at)), d));
-      const spent = dayTxs.reduce((s, tx) => s + Math.abs(tx.amount), 0);
+      const dayTxs = tripTxs.filter(tx => isSameDay(startOfDay(parseUkDate(tx.posted_at)), d));
+      const spent = dayTxs.reduce((s, tx) => s + Math.abs(baseAmt(tx)), 0);
       dailyBreakdown.push({
         date: d,
         dayNum: i + 1,
