@@ -315,7 +315,11 @@ export function computePolicySnapshot(
   let streamEstimatedIncome = 0;
   if (!assumptions.expected_monthly_income && !salaryTakeHome) {
     const streamRes = calculateStreamIncomeEstimates(transactions, categories, now);
-    streamEstimatedIncome = streamRes.totalEstimatedMonthlyIncome;
+    const hasVentureStream = streamRes.streamEstimates.some(s =>
+      s.name.toLowerCase().includes('venture') || s.name.toLowerCase().includes('batchbase')
+    );
+    const ventureAddition = hasVentureStream ? 0 : ventureSideMonthly;
+    streamEstimatedIncome = streamRes.totalEstimatedMonthlyIncome + ventureAddition;
   }
 
   const monthlyIncome = (assumptions.expected_monthly_income && assumptions.expected_monthly_income > 0)
@@ -682,7 +686,11 @@ export function computeMoneySplit(
   let streamEstimatedIncome = 0;
   if (!assumptions.expected_monthly_income && !salaryTakeHome) {
     const streamRes = calculateStreamIncomeEstimates(transactions, categories, new Date());
-    streamEstimatedIncome = streamRes.totalEstimatedMonthlyIncome;
+    const hasVentureStream = streamRes.streamEstimates.some(s =>
+      s.name.toLowerCase().includes('venture') || s.name.toLowerCase().includes('batchbase')
+    );
+    const ventureAddition = hasVentureStream ? 0 : ventureSideMonthly;
+    streamEstimatedIncome = streamRes.totalEstimatedMonthlyIncome + ventureAddition;
   }
 
   const monthlyIncome = (overrideMonthlyIncome && overrideMonthlyIncome > 0)

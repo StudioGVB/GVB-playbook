@@ -32,9 +32,10 @@ export default function MonthlyCashFlowBreakdown({
   const [viewMode, setViewMode] = useState<'weekly' | 'monthly'>(defaultViewMode);
   const fmt = (n: number) => formatCurrency(n, baseCurrency);
 
-  // Effective monthly income to use: actual cleared income if available, else expected monthly income
-  const effectiveMonthlyIncome = income > 0 ? income : expectedIncome;
-  const isUsingExpected = income === 0 && expectedIncome > 0;
+  // Effective monthly income to use: full expected monthly income (Salary + Venture Advisory £70/wk).
+  // If cleared income already exceeds expected, use cleared income.
+  const effectiveMonthlyIncome = Math.max(income, expectedIncome);
+  const isUsingExpected = expectedIncome > income;
 
   // Monthly breakdown numbers
   const monthlyFunLeftover = Math.max(0, effectiveMonthlyIncome - fixedBills - essentialBudget - poolSavings);
@@ -140,7 +141,7 @@ export default function MonthlyCashFlowBreakdown({
                 </span>
                 <span className="text-sm font-semibold text-slate-700 block truncate">
                   {isUsingExpected ? (
-                    <>Expected Income <span className="text-xs text-sky-600 font-normal">(baseline profile)</span></>
+                    <>Expected Monthly Income <span className="text-xs text-sky-600 font-normal">(Salary + Venture Advisory £70/wk)</span></>
                   ) : (
                     <>Total Cleared Income</>
                   )}

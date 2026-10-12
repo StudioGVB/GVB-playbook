@@ -95,7 +95,9 @@ export function calculateStreamIncomeEstimates(
 
   // Filter income transactions in the last 3 months window
   for (const tx of transactions) {
-    if (tx.amount <= 0 || tx.is_transfer || tx.is_reimbursable) continue;
+    const text = `${tx.merchant || ''} ${tx.description || ''} ${(tx.raw as any)?.message || ''}`.toLowerCase();
+    const isBatchbase = text.includes('batchbase') || text.includes('batch base') || text.includes('venture') || text.includes('advisory');
+    if (tx.amount <= 0 || (!isBatchbase && tx.is_transfer) || tx.is_reimbursable) continue;
 
     const txDate = parseUkDate(tx.posted_at);
     if (txDate < threeMonthsAgoStart || txDate > endOfCurrentMonth) continue;
@@ -130,6 +132,24 @@ export function calculateStreamIncomeEstimates(
     });
 
     totalEstimatedMonthlyIncome += estimatedMonthlyAmount;
+  }
+
+  // Guaranteed inclusion: Venture Advisory side income is £70/wk (~£303.33/mo)
+  const hasVentureStream = streamEstimates.some(s =>
+    s.name.toLowerCase().includes('venture') || s.name.toLowerCase().includes('batchbase')
+  );
+  if (!hasVentureStream) {
+    const ventureMonthly = (70 * 52) / 12; // ~£303.33/mo
+    const vCat = incomeCategories.find(c => c.name.toLowerCase().includes('venture') || c.name.toLowerCase().includes('batchbase'));
+    streamEstimates.push({
+      categoryId: vCat?.id || '__venture_advisory',
+      name: 'Venture Advisory',
+      color: '#2563EB',
+      totalLast3Months: ventureMonthly * 3,
+      activeMonthsCount: 3,
+      estimatedMonthlyAmount: ventureMonthly,
+    });
+    totalEstimatedMonthlyIncome += ventureMonthly;
   }
 
   return {
