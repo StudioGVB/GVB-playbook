@@ -15,7 +15,7 @@ const CATEGORY_RULES: Record<string, string[]> = {
   'Bills': ['NETFLIX', 'SPOTIFY', 'APPLE.COM', 'GOOGLE STORAGE', 'YOUTUBE', 'DISNEY', 'STAN', 'BINGE', 'KAYO', 'AMAZON PRIME', 'CANVA', 'ADOBE', 'NOTION', 'GITHUB', 'FIGMA', 'CRUNCHYROLL', 'PARAMOUNT', 'CHATGPT', 'OPENAI', 'CLAUDE', 'ANTHROPIC', 'ENERGY', 'WATER', 'TELSTRA', 'OPTUS', 'VODAFONE', 'INTERNET', 'INSURANCE', 'ELECTRICITY', 'GAS BILL', 'COUNCIL', 'THREE ', 'EE ', 'O2 ', 'BRITISH GAS', 'OCTOPUS', 'THAMES WATER', 'NHS'],
 
   'Rent': ['RENT', 'RENTAL', 'EVANS', 'LEASE', 'LANDLORD', 'REAL ESTATE', 'PROPERTY', 'LETTING'],
-  'Income': ['GAMMA', 'SALARY', 'PAYROLL', 'VENTURE', 'ADVISORY', 'PAYCHECK', 'EMPLOYER', 'INCOME', 'STIPEND', 'DIVIDEND', 'FREELANCE'],
+  'Income': ['GAMMA', 'SALARY', 'PAYROLL', 'VENTURE', 'ADVISORY', 'PAYCHECK', 'EMPLOYER', 'INCOME', 'STIPEND', 'DIVIDEND', 'FREELANCE', 'BATCHBASE', 'BATCH BASE'],
   'Shopping': ['KMART', 'TARGET', 'BIG W', 'BUNNINGS', 'IKEA', 'JB HI-FI', 'OFFICEWORKS', 'AMAZON', 'EBAY', 'UNIQLO', 'ZARA', 'H&M', 'COTTON ON', 'PRIMARK', 'TK MAXX', 'TKMAXX', 'SPORTS DIRECT', 'DECATHLON', 'BOOTS', 'SUPERDRUG', 'PHARMACY', 'CHEMIST', 'JOHN LEWIS', 'MARKS SPENCER', 'M&S', 'ARGOS', 'CURRYS', 'WILKO', 'POUNDLAND', 'HOME BARGAIN', 'B&M', 'ASDA', 'ALDI', 'TESCO'],
   'Transfers': [],
 }
@@ -62,7 +62,20 @@ function ruleCategorize(
   raw: any,
   userCategories: any[]
 ): { categoryId: string | null; source: string } {
-  // Transfer detection
+  const upper = (description + ' ' + (merchant || '')).toUpperCase();
+  const isBatchbase = upper.includes('BATCHBASE') || upper.includes('BATCH BASE');
+
+  // Batchbase is earned Venture Advisory income, NEVER a transfer
+  if (isBatchbase) {
+    const ventureCat = userCategories.find((c: any) =>
+      c.type === 'income' && (c.name.toLowerCase().includes('venture') || c.name.toLowerCase().includes('batchbase'))
+    );
+    if (ventureCat) return { categoryId: ventureCat.id, source: 'rule' };
+    const incomeCat = userCategories.find((c: any) => c.type === 'income');
+    if (incomeCat) return { categoryId: incomeCat.id, source: 'rule' };
+  }
+
+  // Transfer detection (skip if batchbase)
   if (isTransfer) {
     const transferCat = userCategories.find((c: any) => c.type === 'transfer' || c.name.toLowerCase() === 'transfers');
     if (transferCat) return { categoryId: transferCat.id, source: 'rule' };
@@ -225,7 +238,26 @@ serve(async (req) => {
       const merchUpper = (tx.merchant || '').toUpperCase()
       const fullText = `${descUpper} ${merchUpper}`
 
-      // Gabriella / Up account transfers must remain in "Other" (uncategorized)
+      const isBatchbase = fullText.includes('BATCHBASE') || fullText.includes('BATCH BASE')
+      if (isBatchbase && tx.amount > 0) {
+        const ventureCat = categories.find((c: any) =>
+          c.type === 'income' && (c.name.toLowerCase().includes('venture') || c.name.toLowerCase().includes('batchbase'))
+        )
+        const targetId = ventureCat?.id || incomeCat?.id
+        if (targetId) {
+          ruleResults.push({ id: tx.id, category_id: targetId })
+          if (tx.is_transfer) {
+            await supabase.from('finance_transactions').update({
+              is_transfer: false,
+              transfer_side: null,
+              transfer_status: null,
+            }).eq('id', tx.id)
+          }
+          continue
+        }
+      }
+
+      // Other Gabriella / Up account transfers must remain in "Other" (uncategorized)
       if (fullText.includes('GABRIELLA') || fullText.includes('UP ACCOUNT') || fullText.includes('UP BANK')) {
         continue
       }

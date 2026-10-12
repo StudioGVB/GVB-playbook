@@ -210,6 +210,20 @@ Deno.serve(async (req) => {
 
       const descLower = (tx.description || "").toLowerCase();
       const merchantLower = (tx.merchant || "").toLowerCase();
+      const isBatchbase = descLower.includes("batchbase") || descLower.includes("batch base") || merchantLower.includes("batchbase");
+
+      // Batchbase is earned Venture Advisory income, never a transfer candidate
+      if (isBatchbase) {
+        if (tx.is_transfer || tx.transfer_status) {
+          await supabase.from("finance_transactions").update({
+            is_transfer: false,
+            transfer_side: null,
+            transfer_status: null,
+          }).eq("id", tx.id);
+        }
+        continue;
+      }
+
       const isCandidate =
         TRANSFER_KEYWORDS.some(kw => descLower.includes(kw)) ||
         merchantLower.includes("transfer") ||

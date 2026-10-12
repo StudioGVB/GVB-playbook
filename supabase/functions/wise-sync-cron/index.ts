@@ -318,12 +318,17 @@ serve(async (req) => {
           const merchant = cleanText(item.details?.merchant?.name || item.details?.senderName || item.details?.recipientName || item.recipientName || item.merchant || '') || null
 
           const fullText = `${description.toUpperCase()} ${(merchant || '').toUpperCase()}`
-          const isSavingsTransfer = fullText.includes('TRANSFER FROM SAVINGS') || fullText.includes('SAVINGS TRANSFER') || fullText.includes('TRANSFER FROM') || fullText.includes('TRANSFER TO SAVINGS')
+          const isBatchbase = fullText.includes('BATCHBASE') || fullText.includes('BATCH BASE')
+          const isSavingsTransfer = !isBatchbase && (
+            fullText.includes('TRANSFER FROM SAVINGS') ||
+            fullText.includes('SAVINGS TRANSFER') ||
+            fullText.includes('TRANSFER TO SAVINGS')
+          )
 
           let targetCategoryId = null
           if (fullText.includes('GAMMA')) {
             targetCategoryId = gammaCatId || ventureCatId
-          } else if (fullText.includes('VENTURE') || fullText.includes('ADVISORY')) {
+          } else if (fullText.includes('VENTURE') || fullText.includes('ADVISORY') || isBatchbase) {
             targetCategoryId = ventureCatId
           }
 
@@ -401,7 +406,12 @@ serve(async (req) => {
             const cleanDesc = cleanText(tx.description)
             const cleanMerch = cleanText(tx.merchant)
             const fullText = `${cleanDesc.toUpperCase()} ${(cleanMerch || '').toUpperCase()}`
-            const isSavingsTransfer = fullText.includes('TRANSFER FROM SAVINGS') || fullText.includes('SAVINGS TRANSFER') || fullText.includes('TRANSFER FROM') || fullText.includes('TRANSFER TO SAVINGS')
+            const isBatchbase = fullText.includes('BATCHBASE') || fullText.includes('BATCH BASE')
+            const isSavingsTransfer = !isBatchbase && (
+              fullText.includes('TRANSFER FROM SAVINGS') ||
+              fullText.includes('SAVINGS TRANSFER') ||
+              fullText.includes('TRANSFER TO SAVINGS')
+            )
 
             let targetAmount = tx.amount
             let targetIsTransfer = tx.is_transfer
@@ -411,10 +421,11 @@ serve(async (req) => {
               targetIsTransfer = true
             }
 
+            // Auto-assign Gamma to Gamma Salary category, and Batchbase / Venture to Venture Advisory
             if (fullText.includes('GAMMA')) {
               targetCatId = gammaCatId || ventureCatId || targetCatId
               targetIsTransfer = false
-            } else if ((fullText.includes('VENTURE') || fullText.includes('ADVISORY')) && ventureCatId) {
+            } else if ((fullText.includes('VENTURE') || fullText.includes('ADVISORY') || isBatchbase) && ventureCatId) {
               targetCatId = ventureCatId
               targetIsTransfer = false
             }

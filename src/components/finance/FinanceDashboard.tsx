@@ -164,8 +164,11 @@ export function FinanceDashboard() {
       const amt = Math.abs(baseAmt(tx));
       const cat = finance.categories.find(c => c.id === tx.category_id);
       
-      if (tx.amount > 0 && !tx.is_transfer) {
-        totalIncome += tx.amount;
+      const desc = `${tx.merchant || ''} ${tx.description || ''}`.toLowerCase();
+      const isBatchbase = desc.includes('batchbase') || desc.includes('batch base');
+
+      if (tx.amount > 0 && (!tx.is_transfer || isBatchbase)) {
+        totalIncome += baseAmt(tx);
         continue;
       }
       

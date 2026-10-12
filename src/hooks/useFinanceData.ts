@@ -297,6 +297,23 @@ export function useFinanceDataState() {
           });
         }
 
+        // Self-healing: Ensure Venture Advisory income category exists
+        const hasVentureCat = catRes.data.some((c: any) => c.type === 'income' && (c.name.toLowerCase().includes('venture') || c.name.toLowerCase().includes('batchbase')));
+        if (!hasVentureCat && catRes.data.length > 0) {
+          supabase.from('finance_categories').insert({
+            user_id: user.id,
+            name: 'Venture Advisory',
+            type: 'income',
+            is_cuttable: false,
+            is_essential: false,
+            color: '#2563eb'
+          }).then(() => {
+            fetchAll();
+          }).catch(err => {
+            console.error('[self-healing] Failed to create Venture Advisory category', err);
+          });
+        }
+
         // Detect and merge duplicate categories (case-insensitive name match)
         if (catRes.data.length > 0 && !cleaningDuplicatesRef.current) {
           cleanDuplicateCategories(catRes.data);
@@ -318,14 +335,73 @@ export function useFinanceDataState() {
       };
 
       if (txRes.data) {
+        const ventureCat = (catRes.data || []).find((c: any) =>
+          c.type === 'income' && (c.name.toLowerCase().includes('venture') || c.name.toLowerCase().includes('batchbase'))
+        );
+
+        // Self-healing for batchbase transactions & purging fake Travel Savings mirror transactions
+        const TRAVEL_SAVINGS_ACCOUNT_ID = '070104ff-80bf-4b70-a19a-23afce14be9b';
+        const batchbaseHealingIds: string[] = [];
+        const mirrorDeleteIds: string[] = [];
+
         const enriched = (txRes.data as any[])
-          .filter(t => !excludedAccountIds.has(t.account_id))
-          .map(t => ({
-            ...t,
-            base_amount: toBase(Number(t.amount) || 0, t.currency),
-          }));
+          .filter(t => {
+            if (excludedAccountIds.has(t.account_id)) return false;
+            // Detect fake mirror deductions created for batchbase in Travel Savings
+            const desc = (t.description || '').toLowerCase();
+            const merch = (t.merchant || '').toLowerCase();
+            const isMirror = t.account_id === TRAVEL_SAVINGS_ACCOUNT_ID && desc.includes('transfer to up') && (desc.includes('batchbase') || desc.includes('batch base') || merch.includes('batchbase'));
+            if (isMirror) {
+              mirrorDeleteIds.push(t.id);
+              return false;
+            }
+            return true;
+          })
+          .map(t => {
+            const desc = (t.description || '').toLowerCase();
+            const merch = (t.merchant || '').toLowerCase();
+            const tags = Array.isArray(t.raw?.tags) ? t.raw.tags.map((x: any) => String(x).toLowerCase()) : [];
+            const msg = (t.raw?.message || '').toLowerCase();
+            const isBatchbase = desc.includes('batchbase') || desc.includes('batch base') || merch.includes('batchbase') || tags.includes('batchbase') || tags.includes('batch') || msg.includes('batchbase');
+
+            if (isBatchbase) {
+              if (t.is_transfer || t.transfer_status || (ventureCat && t.category_id !== ventureCat.id)) {
+                batchbaseHealingIds.push(t.id);
+              }
+              return {
+                ...t,
+                is_transfer: false,
+                transfer_side: null,
+                transfer_status: null,
+                category_id: ventureCat?.id || t.category_id,
+                base_amount: toBase(Number(t.amount) || 0, t.currency),
+              };
+            }
+
+            return {
+              ...t,
+              base_amount: toBase(Number(t.amount) || 0, t.currency),
+            };
+          });
 
         setTransactions(enriched as any);
+
+        // Run async cleanup in background without blocking render
+        if (mirrorDeleteIds.length > 0) {
+          supabase.from('finance_transactions').delete().in('id', mirrorDeleteIds).then(() => {
+            console.log(`[self-healing] Purged ${mirrorDeleteIds.length} fake Travel Savings mirror transactions for batchbase`);
+          }).catch(console.error);
+        }
+        if (batchbaseHealingIds.length > 0 && ventureCat) {
+          supabase.from('finance_transactions').update({
+            is_transfer: false,
+            transfer_side: null,
+            transfer_status: null,
+            category_id: ventureCat.id,
+          }).in('id', batchbaseHealingIds).then(() => {
+            console.log(`[self-healing] Fixed ${batchbaseHealingIds.length} batchbase transactions to Venture Advisory income`);
+          }).catch(console.error);
+        }
       }
       if (goalRes.data) {
         setGoals(goalRes.data as any);
@@ -1045,28 +1121,45 @@ export function useFinanceDataState() {
         const merchUpper = (cleanMerch || '').toUpperCase();
         const fullText = `${descUpper} ${merchUpper}`;
 
-        const isGabriellaOrUp = fullText.includes('GABRIELLA') || fullText.includes('UP ACCOUNT') || fullText.includes('UP BANK');
+        const isBatchbase = fullText.includes('BATCHBASE') || fullText.includes('BATCH BASE');
+        const isGabriellaOrUp = !isBatchbase && (fullText.includes('GABRIELLA') || fullText.includes('UP ACCOUNT') || fullText.includes('UP BANK'));
 
-        // Flag internal transfers from savings
-        const isSavingsTransfer = fullText.includes('TRANSFER FROM SAVINGS') || fullText.includes('SAVINGS TRANSFER') || fullText.includes('TRANSFER FROM') || fullText.includes('TRANSFER TO SAVINGS');
+        // Flag internal transfers from savings (strictly savings transfer keywords, excluding external batchbase)
+        const isSavingsTransfer = !isBatchbase && (
+          fullText.includes('TRANSFER FROM SAVINGS') ||
+          fullText.includes('SAVINGS TRANSFER') ||
+          fullText.includes('TRANSFER TO SAVINGS')
+        );
+
         if (isSavingsTransfer) {
           if (!t.is_transfer) {
             await supabase.from('finance_transactions').update({
               is_transfer: true,
             }).eq('id', t.id);
           }
-        } else if (wiseAccountIds.has(t.account_id) && t.is_transfer && !t.transfer_group_id) {
-          // Unflag non-transfer Wise items
-          await supabase.from('finance_transactions').update({
-            is_transfer: false,
-            transfer_side: null,
-            transfer_status: null,
-          }).eq('id', t.id);
+        } else if (isBatchbase || (wiseAccountIds.has(t.account_id) && t.is_transfer && !t.transfer_group_id)) {
+          // Unflag non-transfer Wise items or Batchbase items incorrectly tagged as transfer
+          if (t.is_transfer || t.transfer_status || t.transfer_side) {
+            await supabase.from('finance_transactions').update({
+              is_transfer: false,
+              transfer_side: null,
+              transfer_status: null,
+            }).eq('id', t.id);
+          }
         }
 
         // Income auto-categorization
         if (targetAmount > 0 && !isSavingsTransfer) {
-          if (isGabriellaOrUp) {
+          if (isBatchbase || fullText.includes('VENTURE') || fullText.includes('ADVISORY')) {
+            if (ventureCat && (t.category_id !== ventureCat.id || t.is_transfer)) {
+              await supabase.from('finance_transactions').update({
+                is_transfer: false,
+                transfer_side: null,
+                transfer_status: null,
+                category_id: ventureCat.id,
+              }).eq('id', t.id);
+            }
+          } else if (isGabriellaOrUp) {
             // Gabriella / Up account incoming money -> keep category_id null so it goes to "Other" (uncategorized)
             if (t.category_id !== null || t.is_transfer) {
               await supabase.from('finance_transactions').update({
@@ -1079,13 +1172,6 @@ export function useFinanceDataState() {
               await supabase.from('finance_transactions').update({
                 is_transfer: false,
                 category_id: gammaCat.id,
-              }).eq('id', t.id);
-            }
-          } else if (fullText.includes('VENTURE') || fullText.includes('ADVISORY')) {
-            if (ventureCat && t.category_id !== ventureCat.id) {
-              await supabase.from('finance_transactions').update({
-                is_transfer: false,
-                category_id: ventureCat.id,
               }).eq('id', t.id);
             }
           } else if (t.is_transfer || (genericIncomeCat && !t.category_id)) {

@@ -87,7 +87,7 @@ export default function FinanceBalanceSheet() {
 
       const amt = baseAmt(tx);
       if (amt > 0) {
-        if (!tx.is_reimbursable && cat?.type !== 'transfer') {
+        if (!tx.is_reimbursable && (cat?.type !== 'transfer' || isIncomeKeyword)) {
           income += amt;
         }
       } else {

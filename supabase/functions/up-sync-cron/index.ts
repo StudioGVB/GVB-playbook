@@ -121,17 +121,35 @@ serve(async (req) => {
 
         const isSettled = (status?: string | null) => (status || '').toUpperCase() === 'SETTLED'
 
-        // 6. Transform (auto-flag GABRIELLA BLYTH as transfers)
+        // Fetch user categories for auto-assigning Venture Advisory income
+        const { data: userCats } = await supabase
+          .from('finance_categories')
+          .select('id, name, type')
+          .eq('user_id', userId)
+
+        const ventureCatId = userCats?.find((c: any) =>
+          c.type === 'income' && (c.name.toLowerCase().includes('venture') || c.name.toLowerCase().includes('batchbase'))
+        )?.id || null
+
+        // 6. Transform (auto-flag GABRIELLA BLYTH as transfers, except batchbase income)
         const TRAVEL_SAVINGS_ACCOUNT_ID = '070104ff-80bf-4b70-a19a-23afce14be9b'
         const txBatch = await Promise.all(allTransactions.map(async ({ tx, dbAccountId }) => {
           const rawAmount = parseFloat(tx.attributes.amount?.value || '0')
           const hasTransferRelation = !!tx.relationships?.transferAccount?.data
           const postedAt = tx.attributes.settledAt || tx.attributes.createdAt || new Date().toISOString()
           const description = tx.attributes.description || 'Unknown'
+          const rawText = tx.attributes.rawText || ''
+          const message = tx.attributes.message || ''
+          const tagIds = ((tx.relationships?.tags?.data || []) as any[]).map((t: any) => String(t?.id || '').toLowerCase())
+
+          const fullText = `${description} ${rawText} ${message} ${tagIds.join(' ')}`.toLowerCase()
+          const isBatchbase = fullText.includes('batchbase') || fullText.includes('batch base') || tagIds.includes('batchbase') || tagIds.includes('batch')
+
           const fingerprint = await computeFingerprint(userId, dbAccountId, postedAt, rawAmount, description)
           const status = tx.attributes.status || null
 
-          const isGabriella = description.toUpperCase().includes('GABRIELLA BLYTH') && rawAmount > 0
+          // If it's batchbase, it is NEVER a transfer — it is earned Venture Advisory income from an external account
+          const isGabriella = !isBatchbase && description.toUpperCase().includes('GABRIELLA BLYTH') && rawAmount > 0
 
           return {
             user_id: userId,
@@ -139,17 +157,20 @@ serve(async (req) => {
             external_transaction_id: tx.id,
             posted_at: postedAt,
             description,
-            merchant: tx.attributes.rawText || null,
+            merchant: rawText || null,
             amount: rawAmount,
             currency: tx.attributes.amount?.currencyCode || 'AUD',
-            is_transfer: hasTransferRelation || isGabriella,
-            transfer_side: isGabriella ? 'in' : undefined,
-            transfer_status: isGabriella ? 'auto_confirmed' : undefined,
+            category_id: isBatchbase ? ventureCatId : undefined,
+            is_transfer: !isBatchbase && (hasTransferRelation || isGabriella),
+            transfer_side: !isBatchbase && isGabriella ? 'in' : undefined,
+            transfer_status: !isBatchbase && isGabriella ? 'auto_confirmed' : undefined,
             transaction_fingerprint: fingerprint,
             raw: {
               category: tx.relationships?.category?.data?.id || null,
               parentCategory: tx.relationships?.parentCategory?.data?.id || null,
               status,
+              message: message || null,
+              tags: tagIds.length > 0 ? tagIds : null,
             },
           }
         }))
@@ -221,10 +242,21 @@ serve(async (req) => {
           }
         }
 
-        // 8. Auto-transfer: create mirror deductions in Travel Savings for GABRIELLA BLYTH
-        const gabriellaRows = rowsToUpsert.filter(r =>
-          r.description.toUpperCase().includes('GABRIELLA BLYTH') && r.amount > 0
-        )
+        // 8. Auto-transfer: create mirror deductions in Travel Savings for GABRIELLA BLYTH ONLY if not batchbase/income
+        const gabriellaRows = rowsToUpsert.filter(r => {
+          if (r.amount <= 0 || !r.is_transfer) return false
+          const rawText = `${r.description || ''} ${r.merchant || ''} ${(r.raw as any)?.message || ''} ${((r.raw as any)?.tags || []).join(' ')}`.toLowerCase()
+          if (rawText.includes('batchbase') || rawText.includes('batch base')) return false
+          return r.description.toUpperCase().includes('GABRIELLA BLYTH')
+        })
+
+        // Purge any fake mirror deductions previously created in Travel Savings for batchbase
+        await supabase
+          .from('finance_transactions')
+          .delete()
+          .eq('user_id', userId)
+          .eq('account_id', TRAVEL_SAVINGS_ACCOUNT_ID)
+          .or('description.ilike.%batchbase%,description.ilike.%batch base%')
 
         for (const gbRow of gabriellaRows) {
           const mirrorFingerprint = await computeFingerprint(

@@ -53,8 +53,6 @@ export function detectPaycheck(
       rawText.includes('gamma') ||
       rawText.includes('payroll') ||
       rawText.includes('salary') ||
-      rawText.includes('batchbase') ||
-      rawText.includes('batch base') ||
       rawText.includes('monzo') ||
       rawText.includes('salary transfer') ||
       rawText.includes('income transfer');

@@ -38,21 +38,23 @@ const LEGACY_MATCHERS: Record<string, string[]> = {
   'batchbase': ['batchbase', 'batch base', 'batch'],
   'gamma salary': ['gamma salary', 'gamma'],
   'gamma': ['gamma salary', 'gamma'],
-  'venture advisory': ['venture advisory', 'venture', 'proposal'],
+  'venture advisory': ['venture advisory', 'venture', 'proposal', 'batchbase', 'batch base', 'batch'],
   'etsy': ['etsy'],
   'back pocket games': ['back pocket', 'bpg', 'back pocket games'],
 };
 
 function isInternalTransfer(tx: any): boolean {
+  const text = `${tx.merchant || ''} ${tx.description || ''} ${tx.raw?.message || ''}`.toLowerCase();
+  // Batchbase is earned Venture Advisory income, never an internal transfer
+  if (text.includes('batchbase') || text.includes('batch base')) return false;
+
   if (tx.is_transfer) return true;
   if (tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') return true;
-  const text = `${tx.merchant || ''} ${tx.description || ''}`.toLowerCase();
+
   return (
     text.includes('transfer from savings') ||
     text.includes('transfer to savings') ||
     text.includes('savings transfer') ||
-    text.includes('transfer from') ||
-    text.includes('transfer to') ||
     text.includes('internal transfer')
   );
 }

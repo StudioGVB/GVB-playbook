@@ -181,7 +181,7 @@ export default function FinanceMonthly() {
       const isIncomeKeyword = rawText.includes('batchbase') || rawText.includes('batch base') || rawText.includes('payroll') || rawText.includes('salary') || rawText.includes('venture') || rawText.includes('etsy');
 
       if (tx.amount > 0 && (!tx.is_transfer || isIncomeCategory || isIncomeKeyword)) {
-        if (!tx.is_reimbursable && cat?.type !== 'transfer') {
+        if (!tx.is_reimbursable && (cat?.type !== 'transfer' || isIncomeKeyword)) {
           incomeTotal += baseAmt(tx);
           continue;
         }
@@ -308,7 +308,7 @@ export default function FinanceMonthly() {
       const isIncomeCategory = cat?.type === 'income';
       const isIncomeKeyword = rawText.includes('batchbase') || rawText.includes('batch base') || rawText.includes('payroll') || rawText.includes('salary') || rawText.includes('venture') || rawText.includes('etsy');
       if (tx.amount > 0 && (!tx.is_transfer || isIncomeCategory || isIncomeKeyword)) {
-        if (!tx.is_reimbursable && cat?.type !== 'transfer') {
+        if (!tx.is_reimbursable && (cat?.type !== 'transfer' || isIncomeKeyword)) {
           income += baseAmt(tx);
           continue;
         }
