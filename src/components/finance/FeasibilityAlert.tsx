@@ -99,29 +99,12 @@ export default function FeasibilityAlert({
     );
   }
 
-  if (assessment.isTight) {
-    const pctUsed = ((assessment.requiredMonthlyPace / Math.max(1, assessment.netMonthlySurplus)) * 100).toFixed(0);
-    return (
-      <div className="bg-amber-50/90 border-2 border-amber-300 rounded-2xl p-3.5 text-amber-950 flex items-start gap-2.5 transition-all">
-        <div className="w-7 h-7 rounded-lg bg-amber-100 flex items-center justify-center text-amber-700 shrink-0 mt-0.5">
-          <Zap className="w-4 h-4" />
-        </div>
-        <div className="min-w-0 text-xs">
-          <h4 className="font-display font-extrabold text-amber-900">Tight Cashflow Commitment ({pctUsed}% of Surplus)</h4>
-          <p className="text-amber-800 mt-0.5 font-medium">
-            Requires {fmt(assessment.requiredMonthlyPace)}/mo out of {fmt(assessment.netMonthlySurplus)}/mo available surplus capacity.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
   if (assessment.requiredMonthlyPace > 0) {
     return (
       <div className="bg-emerald-50/90 border border-emerald-300 rounded-2xl p-3 text-emerald-950 flex items-center gap-2.5 transition-all">
         <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
         <span className="text-xs font-medium text-emerald-800">
-          Target Feasible! Requires <strong className="font-bold">{fmt(assessment.requiredMonthlyPace)}/mo</strong> (surplus capacity is {fmt(assessment.netMonthlySurplus)}/mo).
+          Target Feasible • Requires <strong className="font-bold">{fmt(assessment.requiredMonthlyPace)}/mo</strong> ({fmt(assessment.requiredWeeklyPace)}/wk)
         </span>
       </div>
     );

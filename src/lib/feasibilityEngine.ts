@@ -304,19 +304,23 @@ export function evaluatePoolFeasibility(params: {
   // 2. Calculate Variable Spending Monthly Rate (weekly allowance * 4.33 weeks/mo)
   const variableMonthlyBudget = weeklyVariableBudget * 4.33;
 
-  // 3. Calculate Existing Goal Pools Required Monthly Commitment
+  // 3. Calculate Total Savings Capacity (Before Goal Pools)
+  const totalMonthlySurplusBeforeGoals = Math.max(
+    0,
+    totalEstimatedMonthlyIncome - fixedMonthlyExpenses - variableMonthlyBudget
+  );
+
+  // 4. Calculate Existing Goal Pools Required Monthly Commitment
   let existingPoolsMonthlyCommitment = 0;
   const competingGoals: CompetingGoalDetail[] = [];
-  const evalStart = startDate ? new Date(startDate) : now;
-  const evalDeadline = deadline ? new Date(deadline) : null;
+  const evalStart = startDate ? new Date(String(startDate).split('T')[0] + 'T00:00:00') : now;
+  const evalDeadline = deadline ? new Date(String(deadline).split('T')[0] + 'T00:00:00') : null;
 
   for (const g of existingGoals) {
     if (g.id === evaluatingGoalId) continue;
     if ((g as any).is_emergency || (g as any).is_stash || g.name.toLowerCase().includes('stash') || g.name.toLowerCase().includes('emergency')) {
       continue;
     }
-    // Only count goals that have already started.
-    if (g.start_date && new Date(g.start_date) > now) continue;
 
     const gTarget = convertToBase(g.target_amount || 0, g.currency);
     const gAssigned = convertToBase(g.assigned_amount || 0, g.currency);
@@ -324,8 +328,8 @@ export function evaluatePoolFeasibility(params: {
     if (gRemaining <= 0.01) continue;
 
     if (g.deadline) {
-      const gDl = new Date(g.deadline);
-      const gStart = g.start_date ? new Date(g.start_date) : now;
+      const gDl = new Date(String(g.deadline).split('T')[0] + 'T00:00:00');
+      const gStart = g.start_date ? new Date(String(g.start_date).split('T')[0] + 'T00:00:00') : now;
 
       // Timeline overlap check:
       // If g ends before evaluating goal starts, or g starts after evaluating goal ends, they do not compete!
@@ -350,7 +354,7 @@ export function evaluatePoolFeasibility(params: {
         daysRemaining: daysLeft,
       });
     } else if (g.percent_allocation && g.percent_allocation > 0) {
-      const gMonthly = (g.percent_allocation / 100) * 100 * 4.33;
+      const gMonthly = (g.percent_allocation / 100) * totalMonthlySurplusBeforeGoals;
       existingPoolsMonthlyCommitment += gMonthly;
       competingGoals.push({
         id: g.id,
@@ -367,12 +371,6 @@ export function evaluatePoolFeasibility(params: {
 
   // Sort competing goals by monthly commitment descending (highest drain first)
   competingGoals.sort((a, b) => b.monthlyCommitment - a.monthlyCommitment);
-
-  // 4. Calculate Total Savings Capacity & Net Monthly Surplus Capacity
-  const totalMonthlySurplusBeforeGoals = Math.max(
-    0,
-    totalEstimatedMonthlyIncome - fixedMonthlyExpenses - variableMonthlyBudget
-  );
 
   const netMonthlySurplus = Math.max(
     0,

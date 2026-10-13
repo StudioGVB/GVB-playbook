@@ -1194,6 +1194,20 @@ export default function FinancePoolsPage() {
                         {isHit && <Badge variant="outline" className="text-[9px] px-1.5 py-0 border-emerald-300 text-emerald-800 bg-emerald-100 font-bold">✓ Goal Hit!</Badge>}
                         {(goal as any).is_stash && <Badge variant="secondary" className="text-[9px] px-1.5 py-0 bg-slate-100 text-slate-600 border border-slate-200">Stash</Badge>}
                         {tripInfo && <Badge variant="outline" className="text-[9px] px-1.5 py-0 border-sky-200 text-sky-600 bg-sky-50">Trip</Badge>}
+                        {cardFeasibility && cardFeasibility.isFeasible && cardFeasibility.requiredMonthlyPace > 0 && !isHit && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openFeasibilityDialog(goal, cardFeasibility);
+                            }}
+                            className="inline-flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-100/90 text-emerald-800 hover:bg-emerald-200 border border-emerald-300 font-bold transition-all shadow-2xs cursor-pointer active:scale-95"
+                            title="Feasible — click to view cashflow math"
+                          >
+                            <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
+                            <span>Feasible</span>
+                          </button>
+                        )}
                         {cardFeasibility && !cardFeasibility.isFeasible && cardFeasibility.requiredMonthlyPace > 0 && !isHit && (
                           <button
                             type="button"
@@ -1346,25 +1360,6 @@ export default function FinancePoolsPage() {
                     </div>
                     <span className="text-[10px] font-bold text-rose-700 underline group-hover:text-rose-900 shrink-0 ml-2 flex items-center gap-0.5">
                       See why & solutions <ChevronRight className="w-3 h-3" />
-                    </span>
-                  </button>
-                )}
-
-                {/* Feasible / On-Track Callout Banner */}
-                {cardFeasibility && cardFeasibility.isFeasible && cardFeasibility.requiredMonthlyPace > 0 && !isHit && (
-                  <button
-                    type="button"
-                    onClick={() => openFeasibilityDialog(goal, cardFeasibility)}
-                    className="w-full text-left p-2 rounded-xl bg-emerald-50/70 hover:bg-emerald-100/70 border border-emerald-200/70 text-emerald-900 transition-colors flex items-center justify-between text-xs cursor-pointer group shadow-2xs mt-2"
-                  >
-                    <div className="flex items-center gap-1.5 truncate">
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                      <span className="truncate font-semibold text-[11px] text-emerald-800">
-                        Feasible • <strong>{formatCurrency(cardFeasibility.netMonthlySurplus, baseCurrency)}/mo</strong> surplus
-                      </span>
-                    </div>
-                    <span className="text-[10px] font-bold text-emerald-700 underline group-hover:text-emerald-900 shrink-0 ml-2 flex items-center gap-0.5">
-                      View math <ChevronRight className="w-3 h-3" />
                     </span>
                   </button>
                 )}

@@ -391,7 +391,22 @@ export default function FeasibilityBreakdownDialog({
                 </div>
               )}
 
-              {/* Net Surplus Capacity */}
+              {/* This Goal's Required Pace */}
+              {assessment.requiredMonthlyPace > 0 && (
+                <div className="p-3 flex items-center justify-between bg-white">
+                  <div>
+                    <span className="font-bold text-indigo-800">{goal.name} (This Pool)</span>
+                    <p className="text-[10px] text-slate-400">
+                      Required pace ({fmt(assessment.requiredWeeklyPace)}/wk)
+                    </p>
+                  </div>
+                  <span className="font-display font-bold text-indigo-600 tabular-nums">
+                    −{fmt(assessment.requiredMonthlyPace)}/mo
+                  </span>
+                </div>
+              )}
+
+              {/* Net Remaining Surplus After All Pots */}
               <div className={`p-3.5 flex items-center justify-between border-t-2 ${
                 isFeasible
                   ? 'bg-emerald-50/70 border-emerald-200'
@@ -399,12 +414,12 @@ export default function FeasibilityBreakdownDialog({
               }`}>
                 <div>
                   <span className="font-display font-extrabold text-slate-900 text-sm">
-                    Net Monthly Surplus for {goal.name}
+                    {isFeasible ? 'Remaining Monthly Surplus (After All Pots)' : 'Monthly Shortfall'}
                   </span>
                   <p className={`text-[11px] font-medium ${isFeasible ? 'text-emerald-700' : 'text-rose-700'}`}>
                     {isFeasible ? (
                       <>
-                        Surplus buffer of <strong className="font-bold">+{fmt(assessment.netMonthlySurplus - assessment.requiredMonthlyPace)}/mo</strong> after funding pace
+                        Available capacity before this pool: <strong className="font-bold">{fmt(assessment.netMonthlySurplus)}/mo</strong>
                       </>
                     ) : (
                       <>
@@ -417,7 +432,9 @@ export default function FeasibilityBreakdownDialog({
                   <span className={`text-base font-display font-black tabular-nums ${
                     isFeasible ? 'text-emerald-700' : 'text-rose-700'
                   }`}>
-                    {fmt(assessment.netMonthlySurplus)}/mo
+                    {isFeasible
+                      ? `+${fmt(Math.max(0, assessment.netMonthlySurplus - assessment.requiredMonthlyPace))}/mo`
+                      : `−${fmt(assessment.shortfall)}/mo`}
                   </span>
                 </div>
               </div>
