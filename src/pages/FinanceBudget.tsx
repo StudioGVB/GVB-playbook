@@ -10,6 +10,7 @@ import { useWeeklyBoosts } from '@/hooks/useWeeklyBoosts';
 import { useWeekTypes } from '@/hooks/useWeekTypes';
 import { useFinanceTrips } from '@/hooks/useFinanceTrips';
 import { computePolicySnapshot, computeActualSpendingIncome } from '@/lib/policyEngine';
+import { parseCoverMeta, planOverspendCover, planUnderspendRepay, type CoverMeta, type CoverStep } from '@/lib/overspendCover';
 import { formatCurrency, baseAmt, parseUkDate } from '@/lib/financeUtils';
 import { subDays, startOfDay, startOfWeek, endOfWeek, differenceInDays, format, addWeeks, subWeeks, isSameWeek, addDays } from 'date-fns';
 import { Lock, ShoppingCart, PartyPopper, Zap, X, Info, TrendingDown, Calendar as CalendarIcon, Shield, Target, ChevronDown, History, Clock, Check, Plane, ChevronLeft, ChevronRight } from 'lucide-react';
@@ -251,99 +252,111 @@ export default function FinanceBudget() {
     const netDifference = totalBudget - totalSpent;
 
     const doSettle = async () => {
+      const meta: CoverMeta = parseCoverMeta(stashGoal?.description);
+      const thisWeekKey = format(weekStart, 'yyyy-MM-dd');
+      let stashDelta = 0;
+      let emergencyDelta = 0;
+      let newBorrowed = { ...(meta.borrowed || {}) };
+      let steps: CoverStep[] = [];
+      let carryDebt = 0;
+      const potDeltas: Record<string, number> = {};
+
       if (netDifference > 0) {
-        // UNDERSPENT: Check if Emergency Fund is 100% full
-        const underspend = netDifference;
-        const totalCash = finance.totalCashBase();
-        const emergencyFloor = snapshot.emergencyFloor;
-        const emergencyShortfall = Math.max(0, emergencyFloor - totalCash);
+        // UNDERSPENT: 1) repay borrowed pots, 2) Emergency Fund if not full, 3) Savings Stash
+        const repay = planUnderspendRepay({ underspend: netDifference, goals: finance.goals as any, meta });
+        steps = repay.steps;
+        newBorrowed = repay.borrowed;
+        for (const s of repay.steps) if (s.goalId) potDeltas[s.goalId] = (potDeltas[s.goalId] || 0) + s.amount;
 
-        if (emergencyShortfall > 0.01) {
-          // Emergency Fund is NOT full! Prioritize Emergency Fund first
-          const toEmergency = Math.min(underspend, emergencyShortfall);
-          const toStash = underspend - toEmergency;
-
-          if (emergencyGoal) {
-            await finance.updateGoal(emergencyGoal.id, {
-              assigned_amount: (emergencyGoal.assigned_amount || 0) + toEmergency,
-              is_emergency: true,
-            } as any);
-          } else {
-            await finance.addGoal({
-              name: 'Emergency Reserve',
-              target_amount: emergencyFloor,
-              currency: baseCurrency,
-              priority: 1,
-              safety_mode: 'balanced',
-              assigned_amount: toEmergency,
-              color: '#ef6b6b',
-              is_emergency: true,
-            } as any);
-          }
-
-          if (toStash > 0) {
-            if (stashGoal) {
-              await finance.updateGoal(stashGoal.id, {
-                assigned_amount: (stashGoal.assigned_amount || 0) + toStash,
-                is_stash: true,
-                description: JSON.stringify({ last_settled_week: prevWeekKey }),
-              } as any);
-            } else {
-              await finance.addGoal({
-                name: 'Savings Stash',
-                target_amount: 9999,
-                currency: baseCurrency,
-                priority: 3,
-                safety_mode: 'balanced',
-                assigned_amount: toStash,
-                color: '#10b981',
-                is_stash: true,
-                description: JSON.stringify({ last_settled_week: prevWeekKey }),
-              } as any);
-            }
-            toast.success(`Settled ${fmt(toEmergency)} into Emergency Reserve 🛡️ and ${fmt(toStash)} into Savings Stash 💰`);
-          } else {
-            toast.success(`Settled ${fmt(toEmergency)} from last week's underspend into Emergency Reserve 🛡️`);
-          }
-        } else {
-          // Emergency Fund is 100% full! Add directly to Savings Stash
-          if (stashGoal) {
-            await finance.updateGoal(stashGoal.id, {
-              assigned_amount: (stashGoal.assigned_amount || 0) + underspend,
-              is_stash: true,
-              description: JSON.stringify({ last_settled_week: prevWeekKey }),
-            } as any);
-            toast.success(`Settled ${fmt(underspend)} from last week's underspend into Savings Stash 💰`);
-          } else {
-            await finance.addGoal({
-              name: 'Savings Stash',
-              target_amount: 9999,
-              currency: baseCurrency,
-              priority: 3,
-              safety_mode: 'balanced',
-              assigned_amount: underspend,
-              color: '#10b981',
-              is_stash: true,
-              description: JSON.stringify({ last_settled_week: prevWeekKey }),
-            } as any);
-            toast.success(`Created Savings Stash with ${fmt(underspend)} from last week's underspend 💰`);
-          }
+        let remainder = repay.remainder;
+        const emergencyShortfall = Math.max(0, snapshot.emergencyFloor - finance.totalCashBase());
+        if (remainder > 0 && emergencyShortfall > 0.01) {
+          emergencyDelta = Math.min(remainder, emergencyShortfall);
+          remainder -= emergencyDelta;
         }
-        if (assumptions.carry_forward_debt > 0) {
-          await updateAssumptions({ carry_forward_debt: 0, last_debt_week: null }, true);
-        }
+        stashDelta = remainder;
       } else if (netDifference < 0) {
-        // OVERSPENT: Carry forward to this week's fun budget so weekly allowance decreases to stay on track
-        const overspend = Math.abs(netDifference);
-        await updateAssumptions({
-          carry_forward_debt: overspend,
-          last_debt_week: format(weekStart, 'yyyy-MM-dd'),
-        }, true);
-        toast.warning(`You spent ${fmt(overspend)} more than you should have last week. Deducted ${fmt(overspend)} from this week's budget to stay on track. 📉`);
-      } else {
-        if (assumptions.carry_forward_debt > 0) {
-          await updateAssumptions({ carry_forward_debt: 0, last_debt_week: null }, true);
+        // OVERSPENT: Stash -> next week (capped) -> pots lowest priority first -> leftover debt
+        const plan = planOverspendCover({
+          overspend: Math.abs(netDifference),
+          stash: (stashGoal as any) || null,
+          nextWeekFun: snapshot.baseWeeklyFun,
+          goals: finance.goals as any,
+          trips: trips as any,
+          meta,
+          now: new Date(),
+        });
+        steps = plan.steps;
+        carryDebt = plan.nextWeekDeduction + plan.leftoverDebt;
+        for (const s of plan.steps) {
+          if (s.source === 'stash') stashDelta -= s.amount;
+          if (s.source === 'pot' && s.goalId) {
+            potDeltas[s.goalId] = (potDeltas[s.goalId] || 0) - s.amount;
+            newBorrowed[s.goalId] = Math.round(((newBorrowed[s.goalId] || 0) + s.amount) * 100) / 100;
+          }
         }
+      }
+
+      // Apply pot changes
+      for (const [goalId, delta] of Object.entries(potDeltas)) {
+        const g = finance.goals.find(x => x.id === goalId);
+        if (g) await finance.updateGoal(goalId, { assigned_amount: Math.max(0, (g.assigned_amount || 0) + delta) } as any);
+      }
+
+      // Emergency Fund
+      if (emergencyDelta > 0) {
+        if (emergencyGoal) {
+          await finance.updateGoal(emergencyGoal.id, {
+            assigned_amount: (emergencyGoal.assigned_amount || 0) + emergencyDelta,
+            is_emergency: true,
+          } as any);
+        } else {
+          await finance.addGoal({
+            name: 'Emergency Reserve', target_amount: snapshot.emergencyFloor, currency: baseCurrency,
+            priority: 1, safety_mode: 'balanced', assigned_amount: emergencyDelta, color: '#ef6b6b', is_emergency: true,
+          } as any);
+        }
+      }
+
+      // Stash balance + metadata (settle marker, borrowed ledger, last cover summary) — always written
+      const newMeta: CoverMeta = {
+        ...meta,
+        last_settled_week: prevWeekKey,
+        borrowed: newBorrowed,
+        last_cover: netDifference < 0
+          ? { week: prevWeekKey, overspend: Math.abs(netDifference), steps, leftoverDebt: carryDebt }
+          : (steps.length ? { week: prevWeekKey, overspend: 0, steps, leftoverDebt: 0 } : null),
+      };
+      if (stashGoal) {
+        await finance.updateGoal(stashGoal.id, {
+          assigned_amount: Math.max(0, (stashGoal.assigned_amount || 0) + stashDelta),
+          is_stash: true,
+          description: JSON.stringify(newMeta),
+        } as any);
+      } else {
+        await finance.addGoal({
+          name: 'Savings Stash', target_amount: 9999, currency: baseCurrency, priority: 3,
+          safety_mode: 'balanced', assigned_amount: Math.max(0, stashDelta), color: '#10b981', is_stash: true,
+          description: JSON.stringify(newMeta),
+        } as any);
+      }
+
+      // Debt for this week (engine only uses stored debt once a settle has run for this week)
+      await updateAssumptions({ carry_forward_debt: carryDebt, last_debt_week: thisWeekKey }, true);
+
+      // Summary toast
+      if (netDifference < 0) {
+        const parts = steps.map(s => `${fmt(s.amount)} ${s.source === 'next_week' ? 'from next week' : `from ${s.name}`}`);
+        const left = carryDebt - (steps.find(s => s.source === 'next_week')?.amount || 0);
+        toast.warning(`Overspent ${fmt(Math.abs(netDifference))} last week → covered ${parts.join(', ')}${left > 0.01 ? ` · ${fmt(left)} still carried` : ''}`, { duration: 10000 });
+      } else if (netDifference > 0) {
+        const repaid = steps.reduce((s, x) => s + x.amount, 0);
+        const bits = [
+          repaid > 0 ? `${fmt(repaid)} repaid to pots` : '',
+          emergencyDelta > 0 ? `${fmt(emergencyDelta)} to Emergency Reserve 🛡️` : '',
+          stashDelta > 0 ? `${fmt(stashDelta)} to Savings Stash 💰` : '',
+        ].filter(Boolean);
+        toast.success(`Underspent ${fmt(netDifference)} last week → ${bits.join(', ')}`);
       }
 
       settleRef.current = prevWeekKey;

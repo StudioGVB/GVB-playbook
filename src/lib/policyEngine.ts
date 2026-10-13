@@ -496,7 +496,8 @@ export function computePolicySnapshot(
   const currentWeekKey = format(weekStart, 'yyyy-MM-dd');
   const debtAppliesThisWeek = assumptions.last_debt_week === currentWeekKey;
   const storedDebt = debtAppliesThisWeek ? (assumptions.carry_forward_debt ?? 0) : 0;
-  const carryForwardDebt = Math.max(lastWeekOverspend, storedDebt);
+  // After settle runs, stored debt is authoritative (already reduced by Stash/pot cover); before that, fall back to raw overspend
+  const carryForwardDebt = debtAppliesThisWeek ? storedDebt : lastWeekOverspend;
   const effectiveDebt = !isTravelWeek ? carryForwardDebt : 0;
 
   // Deduct last week's overspend from this week's fun budget

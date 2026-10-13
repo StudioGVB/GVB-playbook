@@ -29,6 +29,7 @@ import { detectPaycheck, calculatePaycheckWaterfall, isPaycheckProcessed, markPa
 import { baseAmt } from '@/lib/financeUtils';
 import { evaluatePoolFeasibility } from '@/lib/feasibilityEngine';
 import FeasibilityAlert from '@/components/finance/FeasibilityAlert';
+import OverspendCoverPanel from '@/components/finance/OverspendCoverPanel';
 import FeasibilityBreakdownDialog from '@/components/finance/FeasibilityBreakdownDialog';
 import { toast } from 'sonner';
 
@@ -858,6 +859,7 @@ export default function FinancePoolsPage() {
         </TabsList>
 
         <TabsContent value="pools" className="space-y-6">
+          <OverspendCoverPanel finance={finance} trips={trips} baseCurrency={baseCurrency} />
           {/* Paycheck Landed Auto-Allocation Banner */}
           {paycheckTx && waterfallBreakdown && detectedPaycheck && (!paycheckAllocated || revertSecondsLeft > 0) && (
             <Card className="bg-gradient-to-r from-emerald-50 via-white to-sky-50 border-2 border-emerald-300 shadow-[6px_6px_0px_0px_rgba(16,185,129,0.12)] font-body transition-all duration-300">
