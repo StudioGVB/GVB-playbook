@@ -103,6 +103,55 @@ export function computeTripSpent(
 
 // ---- Core Policy Calculations ----
 
+export interface ActualSpendingIncome {
+  total: number;
+  gamma: number;
+  venture: number;
+  monthLabel: string; // e.g. "October 2026"
+  isFallback: boolean; // true = using last month because no Gamma pay yet this month
+}
+
+/**
+ * Real money in: Gamma + Venture Advisory deposits for the current calendar month.
+ * Falls back to the previous month if no Gamma pay has landed yet this month.
+ */
+export function computeActualSpendingIncome(
+  transactions: FinanceTransaction[],
+  categories: FinanceCategory[],
+  now: Date = new Date(),
+): ActualSpendingIncome {
+  const catById = new Map(categories.map(c => [c.id, c]));
+  const classify = (tx: FinanceTransaction): 'gamma' | 'venture' | null => {
+    if (tx.amount <= 0 || tx.is_reimbursable) return null;
+    const catName = (tx.category_id ? catById.get(tx.category_id)?.name : '')?.trim().toLowerCase() || '';
+    const text = `${tx.merchant || ''} ${tx.description || ''}`.toLowerCase();
+    if (catName === 'income' || catName.includes('gamma') || text.includes('gamma')) return 'gamma';
+    if (catName.includes('venture') || catName.includes('batchbase') ||
+        text.includes('venture') || text.includes('batchbase') || text.includes('batch base') || text.includes('advisory')) return 'venture';
+    return null;
+  };
+  const sumMonth = (y: number, m: number) => {
+    let gamma = 0, venture = 0;
+    for (const tx of transactions) {
+      const d = parseUkDate(tx.posted_at);
+      if (d.getFullYear() !== y || d.getMonth() !== m) continue;
+      const k = classify(tx);
+      if (k === 'gamma') gamma += baseAmt(tx);
+      else if (k === 'venture') venture += baseAmt(tx);
+    }
+    return { gamma, venture };
+  };
+  const label = (y: number, m: number) => new Date(y, m, 1).toLocaleString('en-GB', { month: 'long', year: 'numeric' });
+
+  const cur = sumMonth(now.getFullYear(), now.getMonth());
+  if (cur.gamma > 0) {
+    return { total: cur.gamma + cur.venture, ...cur, monthLabel: label(now.getFullYear(), now.getMonth()), isFallback: false };
+  }
+  const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const p = sumMonth(prev.getFullYear(), prev.getMonth());
+  return { total: p.gamma + p.venture, ...p, monthLabel: label(prev.getFullYear(), prev.getMonth()), isFallback: true };
+}
+
 export interface PolicySnapshot {
   // Totals
   totalLiquidCash: number;
@@ -302,17 +351,10 @@ export function computePolicySnapshot(
 
   // Determine drawdown mode
   const now = referenceDate;
-  const salaryTakeHome = calcTakeHome({
-    grossAnnual: assumptions.gross_annual_salary || 0,
-    pensionPercent: assumptions.pension_percent || 0,
-    studentLoanPlan: null, // Gabriella has no student loan
-  }).netMonthly;
-  const ventureSideMonthly = (70 * 52) / 12;
-  const baseNetIncome = salaryTakeHome > 0 ? salaryTakeHome + ventureSideMonthly : 0;
-  
-  const monthlyIncome = (assumptions.expected_monthly_income && assumptions.expected_monthly_income > 0)
-    ? assumptions.expected_monthly_income
-    : baseNetIncome;
+  // Spending income = REAL Gamma + Venture deposits that hit the account this calendar month.
+  // If no Gamma pay has landed yet this month, use last month's Gamma + Venture deposits.
+  const actualIncome = computeActualSpendingIncome(transactions, categories, now);
+  const monthlyIncome = actualIncome.total;
   const isDrawdownMode = monthlyIncome === 0;
 
   // Core pools
@@ -674,9 +716,7 @@ export function computeMoneySplit(
   
   const monthlyIncome = (overrideMonthlyIncome && overrideMonthlyIncome > 0)
     ? overrideMonthlyIncome
-    : ((assumptions.expected_monthly_income && assumptions.expected_monthly_income > 0)
-      ? assumptions.expected_monthly_income
-      : baseNetIncome);
+    : computeActualSpendingIncome(transactions, categories, new Date()).total;
 
   // 2. Committed fixed bills (use passed fixed expenses if provided, else historic average)
   let monthlyMandatory = fixedExpensesMonthly ?? 0;
