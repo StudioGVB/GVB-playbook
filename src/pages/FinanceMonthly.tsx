@@ -110,7 +110,7 @@ export default function FinanceMonthly() {
   const monthEnd = endOfMonth(selectedMonth);
   const monthLabel = format(monthStart, 'MMMM yyyy');
 
-  const baseCurrency = finance.settings?.base_currency || 'AUD';
+  const baseCurrency = finance.settings?.base_currency || 'GBP';
   const fxRates = (finance.settings?.fx_rates || {}) as Record<string, number>;
   const audToGbp = fxRates['AUD_GBP'] || 0.52;
   const fmt = (n: number) => formatCurrency(n, baseCurrency);
@@ -130,7 +130,7 @@ export default function FinanceMonthly() {
   // Monthly budgets
   const monthlyEssentialBudget = snapshot 
     ? snapshot.weeklyEssentialBudget * 4.33 
-    : (assumptions ? (assumptions.estimated_essential_variable || 0) * 4.33 : 0);
+    : (assumptions?.estimated_essential_variable || 400);
   const monthlyFunBudget = snapshot 
     ? snapshot.baseWeeklyFun * 4.33 
     : (assumptions ? (assumptions.weekly_fun_budget || 100) * 4.33 : 0);

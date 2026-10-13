@@ -83,7 +83,7 @@ export function FinanceDashboard() {
     );
   }, [assumptions, finance.accounts, finance.transactions, finance.categories, finance.goals, finance.convertToBase, fixedExpensesMonthly, fixedExpensesMonthlyAll, totalBoostThisWeek, wtMap]);
 
-  const baseCurrency = finance.settings?.base_currency || 'AUD';
+  const baseCurrency = finance.settings?.base_currency || 'GBP';
   const fxRates = (finance.settings?.fx_rates || {}) as Record<string, number>;
   const audToGbp = fxRates['AUD_GBP'] || 0.52;
   const fmt = (n: number) => formatCurrency(n, baseCurrency);
@@ -240,7 +240,7 @@ export function FinanceDashboard() {
     const totalCash = finance.totalCashBase();
     
     // 1. Runways
-    const emergencySurvivalMonthly = snapshot?.emergencySurvivalMonthly || (fixedMonthly + (assumptions?.estimated_essential_variable || 300) * 4.33);
+    const emergencySurvivalMonthly = snapshot?.emergencySurvivalMonthly || (fixedMonthly + (assumptions?.estimated_essential_variable || 400));
     const survivalRunwayMonths = emergencySurvivalMonthly > 0 ? totalCash / emergencySurvivalMonthly : 0;
     
     const activeBurnMonthly = fixedMonthly + averages.avgMonthlyEssentials + averages.avgMonthlyFun;
@@ -590,10 +590,10 @@ export function FinanceDashboard() {
               <div>
                 <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-0.5">Total Net Balance</span>
                 <span className="text-2xl font-display font-black text-emerald-600 block tabular-nums leading-none">
-                  {fmt(realTimeTotalIncome - totalSpent)}
+                  {fmt(realTimeTotalIncome - totalSpentSoFar)}
                 </span>
                 <span className="text-[9px] text-slate-400 mt-1 block">
-                  Actual remaining surplus after spend
+                  Actual remaining surplus after spend ({fmt(realTimeTotalIncome - totalSpent)} after all committed bills)
                 </span>
               </div>
 
@@ -823,8 +823,10 @@ export function FinanceDashboard() {
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 my-4">
                   <div className="rounded-xl bg-slate-50 border p-3">
                     <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Spent so far</p>
-                    <p className="text-xl font-display font-black tabular-nums text-slate-900 mt-1">{fmt(totalSpent)}</p>
-                    <p className="text-[10px] text-slate-500 mt-0.5">{fmt(dailyVariablePace)}/day var pace</p>
+                    <p className="text-xl font-display font-black tabular-nums text-slate-900 mt-1">{fmt(totalSpentSoFar)}</p>
+                    <p className="text-[10px] text-slate-500 mt-0.5">
+                      {fmt(dailyVariablePace)}/day var pace · +{fmt(Math.max(0, fixedMonthly - fixedSpent))} bills due
+                    </p>
                   </div>
                   <div className="rounded-xl bg-slate-50 border p-3">
                     <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Projected total</p>

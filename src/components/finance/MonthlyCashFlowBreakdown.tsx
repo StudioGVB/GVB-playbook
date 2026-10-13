@@ -25,7 +25,7 @@ export default function MonthlyCashFlowBreakdown({
   essentialSpent = 0,
   poolSavings,
   funSpent = 0,
-  baseCurrency = 'AUD',
+  baseCurrency = 'GBP',
   monthLabel,
   defaultViewMode = 'weekly',
 }: Props) {
@@ -50,11 +50,9 @@ export default function MonthlyCashFlowBreakdown({
   const displayIncome = effectiveMonthlyIncome / divisor;
   const displayFixed = fixedBills / divisor;
   const displayEssential = essentialBudget / divisor;
-  const displayEssentialSpent = essentialSpent / divisor;
   const displayPools = poolSavings / divisor;
   const displayFunLeftover = monthlyFunLeftover / divisor;
   const displayShortfall = monthlyShortfall / divisor;
-  const displayFunSpent = funSpent / divisor;
 
   // Percentage breakdown relative to income
   const incomeDenom = Math.max(effectiveMonthlyIncome, fixedBills + essentialBudget + poolSavings, 1);
@@ -164,7 +162,7 @@ export default function MonthlyCashFlowBreakdown({
               </div>
               <div className="min-w-0">
                 <span className="text-xs font-display font-bold uppercase text-amber-800 tracking-wider block">
-                  2. Fixed Bills
+                  2. Fixed Bills (Committed)
                 </span>
                 <span className="text-sm font-semibold text-slate-700 block truncate">Rent, Utilities & Subscriptions</span>
               </div>
@@ -173,7 +171,7 @@ export default function MonthlyCashFlowBreakdown({
               <span className="text-2xl font-display font-black text-amber-900 tabular-nums block">
                 −{fmt(displayFixed)}
               </span>
-              <span className="text-[10px] text-amber-600 font-semibold">{periodTag}</span>
+              <span className="text-[10px] text-amber-600 font-semibold">Committed {periodTag}</span>
             </div>
           </div>
 
@@ -185,15 +183,13 @@ export default function MonthlyCashFlowBreakdown({
               </div>
               <div className="min-w-0">
                 <span className="text-xs font-display font-bold uppercase text-purple-800 tracking-wider block">
-                  3. Essential Living
+                  3. Essential Living (Budget Estimate)
                 </span>
                 <span className="text-sm font-semibold text-slate-700 block truncate">
                   Supermarkets, Transport & Health
-                  {essentialSpent > 0 && (
-                    <span className="text-xs text-purple-600 block font-normal truncate">
-                      ({fmt(displayEssentialSpent)} spent so far this {isWeekly ? 'week' : 'month'})
-                    </span>
-                  )}
+                  <span className="text-xs text-purple-600 block font-normal truncate">
+                    Actual spent so far this month: {fmt(essentialSpent)} of {fmt(essentialBudget)} monthly budget
+                  </span>
                 </span>
               </div>
             </div>
@@ -201,7 +197,7 @@ export default function MonthlyCashFlowBreakdown({
               <span className="text-2xl font-display font-black text-purple-900 tabular-nums block">
                 −{fmt(displayEssential)}
               </span>
-              <span className="text-[10px] text-purple-600 font-semibold">{periodTag}</span>
+              <span className="text-[10px] text-purple-600 font-semibold">Budgeted {periodTag}</span>
             </div>
           </div>
 
@@ -213,7 +209,7 @@ export default function MonthlyCashFlowBreakdown({
               </div>
               <div className="min-w-0">
                 <span className="text-xs font-display font-bold uppercase text-[#FF2EB8] tracking-wider block">
-                  4. Savings Pools
+                  4. Savings Pools (Target Allocation)
                 </span>
                 <span className="text-sm font-semibold text-slate-700 block truncate">Travel, Vehicle, Reserve & Goals</span>
               </div>
@@ -222,7 +218,7 @@ export default function MonthlyCashFlowBreakdown({
               <span className="text-2xl font-display font-black text-[#FF2EB8] tabular-nums block">
                 −{fmt(displayPools)}
               </span>
-              <span className="text-[10px] text-pink-600 font-semibold">{periodTag}</span>
+              <span className="text-[10px] text-pink-600 font-semibold">Target {periodTag}</span>
             </div>
           </div>
 
@@ -256,11 +252,9 @@ export default function MonthlyCashFlowBreakdown({
                     <>Income Deficit • Adjust Pools or Expenses</>
                   )}
                 </span>
-                {funSpent > 0 && (
-                  <span className="text-xs font-medium block mt-0.5 opacity-90 truncate">
-                    ({fmt(displayFunSpent)} fun spent so far)
-                  </span>
-                )}
+                <span className="text-xs font-medium block mt-0.5 opacity-90 truncate">
+                  Actual fun spent so far this month: {fmt(funSpent)}
+                </span>
               </div>
             </div>
 

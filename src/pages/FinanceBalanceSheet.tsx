@@ -50,7 +50,7 @@ export default function FinanceBalanceSheet() {
   const finance = useFinanceData();
   const { transactions, categories, settings } = finance;
   const { expenses: fixedExpenses } = useFixedExpenses();
-  const baseCurrency = settings?.base_currency || 'AUD';
+  const baseCurrency = settings?.base_currency || 'GBP';
   const fxRates = (settings as any)?.fx_rates || { AUD_GBP: 0.52, GBP_AUD: 1.92 };
 
   const [monthOffset, setMonthOffset] = useState(0);
@@ -64,6 +64,8 @@ export default function FinanceBalanceSheet() {
     let income = 0;
     let fixed = 0;
     let variable = 0;
+    let essentialSpent = 0;
+    let funSpent = 0;
     const bills: { name: string; amount: number; fixedExpenseId?: string | null; tx?: any }[] = [];
     const variableByCat = new Map<string, number>();
     const reimbursements: { name: string; amount: number }[] = [];
@@ -93,13 +95,19 @@ export default function FinanceBalanceSheet() {
         }
       } else {
         const abs = Math.abs(amt);
-        if ((tx as any).fixed_expense_id) {
+        const isFixed = Boolean((tx as any).fixed_expense_id || tx.is_fixed || cat?.type === 'fixed');
+        if (isFixed) {
           fixed += abs;
           const label = tx.merchant || tx.description || 'Bill';
           bills.push({ name: label, amount: abs, fixedExpenseId: (tx as any).fixed_expense_id, tx });
           if ((tx as any).fixed_expense_id) matchedFixedIds.add((tx as any).fixed_expense_id as string);
         } else {
           variable += abs;
+          if (cat?.is_essential && cat?.type === 'variable') {
+            essentialSpent += abs;
+          } else {
+            funSpent += abs;
+          }
           const key = cat?.name || 'Uncategorised';
           variableByCat.set(key, (variableByCat.get(key) || 0) + abs);
         }
@@ -179,6 +187,8 @@ export default function FinanceBalanceSheet() {
       income,
       fixed,
       variable,
+      essentialSpent,
+      funSpent,
       totalExpenses: fixed + variable,
       net: income - fixed - variable,
       bills,
@@ -240,7 +250,7 @@ export default function FinanceBalanceSheet() {
     : directGoalSavings;
   const essentialBudgetMonthly = snapshot 
     ? snapshot.weeklyEssentialBudget * 4.33 
-    : (finance.assumptions?.estimated_essential_variable || 115) * 4.33;
+    : (finance.assumptions?.estimated_essential_variable || 400);
 
   return (
     <div className="min-h-screen -mx-4 sm:-mx-6 -my-6 px-4 sm:px-6 py-6 bg-[#FFF5FA] font-body">
@@ -302,7 +312,8 @@ export default function FinanceBalanceSheet() {
               expectedIncome={expectedIncomeValue}
               fixedBills={stats.fixed}
               essentialBudget={essentialBudgetMonthly}
-              essentialSpent={stats.variable}
+              essentialSpent={stats.essentialSpent}
+              funSpent={stats.funSpent}
               poolSavings={poolSavingsMonthly}
               baseCurrency={baseCurrency}
               monthLabel={monthLabel}
