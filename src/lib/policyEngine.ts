@@ -305,7 +305,7 @@ export function computePolicySnapshot(
   const salaryTakeHome = calcTakeHome({
     grossAnnual: assumptions.gross_annual_salary || 0,
     pensionPercent: assumptions.pension_percent || 0,
-    studentLoanPlan: assumptions.student_loan_plan as any,
+    studentLoanPlan: null, // Gabriella has no student loan
   }).netMonthly;
   const ventureSideMonthly = (70 * 52) / 12;
   const baseNetIncome = salaryTakeHome > 0 ? salaryTakeHome + ventureSideMonthly : 0;
@@ -667,7 +667,7 @@ export function computeMoneySplit(
   const salaryTakeHome = calcTakeHome({
     grossAnnual: assumptions.gross_annual_salary || 0,
     pensionPercent: assumptions.pension_percent || 0,
-    studentLoanPlan: assumptions.student_loan_plan as any,
+    studentLoanPlan: null, // Gabriella has no student loan
   }).netMonthly;
   const ventureSideMonthly = (70 * 52) / 12; // ~£303.33/mo
   const baseNetIncome = salaryTakeHome > 0 ? salaryTakeHome + ventureSideMonthly : 0;
