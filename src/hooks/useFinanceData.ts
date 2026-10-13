@@ -342,6 +342,7 @@ export function useFinanceDataState() {
         // Self-healing for Gabriella Blyth / Batchbase transactions & purging fake Travel Savings mirror transactions
         const TRAVEL_SAVINGS_ACCOUNT_ID = '070104ff-80bf-4b70-a19a-23afce14be9b';
         const batchbaseHealingIds: string[] = [];
+        const transferFlagFixIds: string[] = [];
         const mirrorDeleteIds: string[] = [];
 
         const enriched = (txRes.data as any[])
@@ -378,16 +379,21 @@ export function useFinanceDataState() {
             );
 
             // Incoming money from Gabriella Blyth without a matched outgoing transfer leg is personal income, never an internal transfer
-            const isVentureIncome = numAmt > 0 && (isBatchbase || isVentureText || (isGabriella && (isWeeklyPaycheck || !t.transfer_group_id)));
+            // Only weekly-sized Gabriella deposits are Venture Advisory — large ones (e.g. £3k salary) are left for manual tagging
+            const isVentureIncome = numAmt > 0 && (isBatchbase || isVentureText || (isGabriella && isWeeklyPaycheck));
             const isGabriellaSingleDeposit = isGabriella && numAmt > 0 && !t.transfer_group_id;
 
             if (isVentureIncome || isGabriellaSingleDeposit) {
-              const targetCatId = isVentureIncome && ventureCat ? ventureCat.id : t.category_id;
+              // Never override an income category the user has manually assigned
+              const hasManualIncomeCat = !!t.category_id && (catRes.data || []).some((c: any) => c.id === t.category_id && c.type === 'income');
+              const targetCatId = isVentureIncome && ventureCat && !hasManualIncomeCat ? ventureCat.id : t.category_id;
               const hasTransferFlag = t.is_transfer || t.transfer_status || t.transfer_side;
-              const needsCategoryFix = isVentureIncome && ventureCat && t.category_id !== ventureCat.id;
+              const needsCategoryFix = isVentureIncome && ventureCat && !hasManualIncomeCat && t.category_id !== ventureCat.id;
 
-              if (hasTransferFlag || needsCategoryFix) {
+              if (needsCategoryFix) {
                 batchbaseHealingIds.push(t.id);
+              } else if (hasTransferFlag) {
+                transferFlagFixIds.push(t.id);
               }
               return {
                 ...t,
@@ -422,6 +428,13 @@ export function useFinanceDataState() {
           }).in('id', batchbaseHealingIds).then(() => {
             console.log(`[self-healing] Fixed ${batchbaseHealingIds.length} Gabriella/batchbase transactions to Venture Advisory income`);
           }).catch(console.error);
+        }
+        if (transferFlagFixIds.length > 0) {
+          supabase.from('finance_transactions').update({
+            is_transfer: false,
+            transfer_side: null,
+            transfer_status: null,
+          }).in('id', transferFlagFixIds).then(() => {}).catch(console.error);
         }
       }
       if (goalRes.data) {
