@@ -767,7 +767,6 @@ export default function FinanceBudget() {
       {isCurrentWeek && (() => {
         const s = snapshot.split;
         const essentialsMonthly = essentialWeeklyBudget * 4.33;
-        const externalBills = (fixedExpenses || []).filter((e: any) => e.paid_externally);
         const manualIncome = assumptions?.expected_monthly_income && assumptions.expected_monthly_income > 0;
         const row = (label: string, val: string, sub?: string, cls = 'text-slate-900') => (
           <div className="flex items-start justify-between gap-4 py-2">
@@ -783,8 +782,8 @@ export default function FinanceBudget() {
                 <ChevronDown className="w-4 h-4 text-slate-400" />
               </CollapsibleTrigger>
               <CollapsibleContent className="mt-3 divide-y divide-slate-100">
-                {row('Monthly income', `+${fmt(s.monthlyIncome)}`, manualIncome ? 'Expected Monthly Income from Settings' : 'Default (no income set in Settings)', 'text-emerald-600')}
-                {row('Fixed bills', `−${fmt(s.mandatoryAmount)}`, externalBills.length ? `Excludes "paid externally": ${externalBills.map((e: any) => e.name).join(', ')}` : 'All fixed expenses', 'text-rose-600')}
+                {row('Monthly income', `+${fmt(s.monthlyIncome)}`, manualIncome ? 'Expected Monthly Income from Settings' : 'Take-home from gross salary (tax/NI/pension) + Venture £70/wk', 'text-emerald-600')}
+                {row('Fixed bills', `−${fmt(s.mandatoryAmount)}`, 'All fixed expenses (including externally-paid)', 'text-rose-600')}
                 {row('Essentials', `−${fmt(essentialsMonthly)}`, 'Higher of your estimate or normal-week average', 'text-rose-600')}
                 {row('Goal savings', `−${fmt(s.goalSavingsAmount)}`, 'Pools with deadlines: remaining ÷ weeks left', 'text-rose-600')}
                 {row('Fun money (monthly)', `=${fmt(s.funAmount)}`, `÷ 4.33 = ${fmt(snapshot.baseWeeklyFun)}/wk${boostAmount ? ` + ${fmt(boostAmount)} boost` : ''}${snapshot.carryForwardDebt ? ` − ${fmt(snapshot.carryForwardDebt)} carried debt` : ''}`)}
