@@ -103,53 +103,99 @@ export function computeTripSpent(
 
 // ---- Core Policy Calculations ----
 
+export interface OtherIncomeItem {
+  name: string;
+  amount: number;
+  date: Date;
+  weeksSpread: number;
+  perWeek: number;
+}
+
 export interface ActualSpendingIncome {
-  total: number;
-  gamma: number;
-  venture: number;
-  monthLabel: string; // e.g. "October 2026"
-  isFallback: boolean; // true = using last month because no Gamma pay yet this month
+  total: number;            // monthly: Gamma + VA monthly equivalent
+  gamma: number;            // latest Gamma pay amount
+  gammaDate: Date | null;   // payday of latest Gamma pay
+  nextPayday: Date | null;  // expected end of this pay cycle
+  isLate: boolean;          // latest Gamma pay > 35 days old
+  venture: number;          // VA monthly equivalent (rolling 4 weeks)
+  ventureLast4Weeks: number;
+  otherWeeklyBonus: number; // other income spread across remaining weeks
+  otherItems: OtherIncomeItem[];
 }
 
 /**
- * Real money in: Gamma + Venture Advisory deposits for the current calendar month.
- * Falls back to the previous month if no Gamma pay has landed yet this month.
+ * Pay-cycle income model (spending side):
+ *  - Gamma: most recent Gamma pay funds everything until the next payday.
+ *  - VA: rolling last-4-weeks of real deposits, converted to monthly (x 52/12).
+ *  - Other income (Etsy, Back Pocket, etc.): each deposit is spread across the
+ *    weeks left in the current pay cycle and added to fun money.
  */
 export function computeActualSpendingIncome(
   transactions: FinanceTransaction[],
   categories: FinanceCategory[],
   now: Date = new Date(),
 ): ActualSpendingIncome {
+  const DAY = 86400000;
   const catById = new Map(categories.map(c => [c.id, c]));
-  const classify = (tx: FinanceTransaction): 'gamma' | 'venture' | null => {
+  const classify = (tx: FinanceTransaction): 'gamma' | 'venture' | 'other' | null => {
     if (tx.amount <= 0 || tx.is_reimbursable) return null;
-    const catName = (tx.category_id ? catById.get(tx.category_id)?.name : '')?.trim().toLowerCase() || '';
+    const cat = tx.category_id ? catById.get(tx.category_id) : undefined;
+    const catName = cat?.name?.trim().toLowerCase() || '';
     const text = `${tx.merchant || ''} ${tx.description || ''}`.toLowerCase();
     if (catName === 'income' || catName.includes('gamma') || text.includes('gamma')) return 'gamma';
     if (catName.includes('venture') || catName.includes('batchbase') ||
         text.includes('venture') || text.includes('batchbase') || text.includes('batch base') || text.includes('advisory')) return 'venture';
+    // Other income: only genuine income (income category or known side streams), never transfers
+    if (tx.is_transfer || tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') return null;
+    if (cat?.type === 'income' || text.includes('etsy') || text.includes('back pocket') || text.includes('bpg')) return 'other';
     return null;
   };
-  const sumMonth = (y: number, m: number) => {
-    let gamma = 0, venture = 0;
-    for (const tx of transactions) {
-      const d = parseUkDate(tx.posted_at);
-      if (d.getFullYear() !== y || d.getMonth() !== m) continue;
-      const k = classify(tx);
-      if (k === 'gamma') gamma += baseAmt(tx);
-      else if (k === 'venture') venture += baseAmt(tx);
-    }
-    return { gamma, venture };
-  };
-  const label = (y: number, m: number) => new Date(y, m, 1).toLocaleString('en-GB', { month: 'long', year: 'numeric' });
 
-  const cur = sumMonth(now.getFullYear(), now.getMonth());
-  if (cur.gamma > 0) {
-    return { total: cur.gamma + cur.venture, ...cur, monthLabel: label(now.getFullYear(), now.getMonth()), isFallback: false };
+  const items = transactions
+    .map(tx => ({ tx, kind: classify(tx), date: parseUkDate(tx.posted_at) }))
+    .filter(x => x.kind && x.date <= now);
+
+  // --- Gamma: latest payday (group deposits within 3 days of it as one pay) ---
+  const gammaItems = items.filter(x => x.kind === 'gamma').sort((a, b) => b.date.getTime() - a.date.getTime());
+  let gamma = 0;
+  let gammaDate: Date | null = null;
+  if (gammaItems.length) {
+    gammaDate = gammaItems[0].date;
+    for (const g of gammaItems) {
+      if (gammaDate.getTime() - g.date.getTime() <= 3 * DAY) gamma += baseAmt(g.tx);
+    }
   }
-  const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const p = sumMonth(prev.getFullYear(), prev.getMonth());
-  return { total: p.gamma + p.venture, ...p, monthLabel: label(prev.getFullYear(), prev.getMonth()), isFallback: true };
+  // Next payday = last day of the month after the payday month
+  const nextPayday = gammaDate ? new Date(gammaDate.getFullYear(), gammaDate.getMonth() + 2, 0) : null;
+  const isLate = gammaDate ? (now.getTime() - gammaDate.getTime()) > 35 * DAY : false;
+
+  // --- VA: rolling last 28 days ---
+  const fourWeeksAgo = new Date(now.getTime() - 28 * DAY);
+  const ventureLast4Weeks = items
+    .filter(x => x.kind === 'venture' && x.date > fourWeeksAgo)
+    .reduce((s, x) => s + baseAmt(x.tx), 0);
+  const venture = (ventureLast4Weeks / 4) * 52 / 12;
+
+  // --- Other income: spread over remaining weeks of this pay cycle ---
+  const otherItems: OtherIncomeItem[] = [];
+  let otherWeeklyBonus = 0;
+  if (gammaDate && nextPayday && now <= nextPayday) {
+    for (const x of items) {
+      if (x.kind !== 'other' || x.date <= gammaDate) continue;
+      const weeksSpread = Math.max(1, (nextPayday.getTime() - x.date.getTime()) / (7 * DAY));
+      const amount = baseAmt(x.tx);
+      const perWeek = amount / weeksSpread;
+      otherWeeklyBonus += perWeek;
+      otherItems.push({ name: x.tx.merchant || x.tx.description || 'Other income', amount, date: x.date, weeksSpread, perWeek });
+    }
+  }
+
+  return {
+    total: gamma + venture,
+    gamma, gammaDate, nextPayday, isLate,
+    venture, ventureLast4Weeks,
+    otherWeeklyBonus, otherItems,
+  };
 }
 
 export interface PolicySnapshot {
@@ -395,7 +441,7 @@ export function computePolicySnapshot(
 
   // Apply weekly boost
   const boostAmount = weeklyBoostAmount ?? 0;
-  let weeklyFunBudget = baseWeeklyFun + boostAmount;
+  let weeklyFunBudget = baseWeeklyFun + boostAmount + (!isDrawdownMode ? actualIncome.otherWeeklyBonus : 0);
 
   const weekStart = startOfWeek(now, { weekStartsOn: 1 });
   const spentThisWeek = computeWeeklyFunSpend(transactions, categories, weekStart, undefined, trips);

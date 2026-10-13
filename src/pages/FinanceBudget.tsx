@@ -784,9 +784,20 @@ export default function FinanceBudget() {
               </CollapsibleTrigger>
               <CollapsibleContent className="mt-3 divide-y divide-slate-100">
                 {(() => { const ai = computeActualSpendingIncome(finance.transactions, finance.categories, new Date()); return (<>
-                  {row('Monthly income (actual deposits)', `+${fmt(s.monthlyIncome)}`, ai.isFallback ? `No Gamma pay yet this month — using ${ai.monthLabel}` : `Received in ${ai.monthLabel}`, 'text-emerald-600')}
-                  <div className="flex justify-between pl-4 py-1 text-[11px] text-slate-500"><span>Gamma</span><span className="tabular-nums">{fmt(ai.gamma)}</span></div>
-                  <div className="flex justify-between pl-4 py-1 text-[11px] text-slate-500"><span>Venture Advisory</span><span className="tabular-nums">{fmt(ai.venture)}</span></div>
+                  {row('Monthly income (actual deposits)', `+${fmt(s.monthlyIncome)}`, ai.isLate ? `⚠️ Pay not landed yet — using last pay (${ai.gammaDate ? format(ai.gammaDate, 'd MMM') : '—'}) as a guide` : `Pay cycle ${ai.gammaDate ? format(ai.gammaDate, 'd MMM') : '—'} → ${ai.nextPayday ? format(ai.nextPayday, 'd MMM') : '—'}`, 'text-emerald-600')}
+                  <div className="flex justify-between pl-4 py-1 text-[11px] text-slate-500"><span>Gamma (paid {ai.gammaDate ? format(ai.gammaDate, 'd MMM') : '—'})</span><span className="tabular-nums">{fmt(ai.gamma)}</span></div>
+                  <div className="flex justify-between pl-4 py-1 text-[11px] text-slate-500"><span>Venture Advisory (last 4 wks {fmt(ai.ventureLast4Weeks)} → monthly)</span><span className="tabular-nums">{fmt(ai.venture)}</span></div>
+                  {ai.otherItems.length > 0 && (
+                    <div className="py-2">
+                      <p className="text-sm font-semibold text-slate-800">Other income → fun money</p>
+                      {ai.otherItems.map((o, i) => (
+                        <div key={i} className="flex justify-between pl-4 py-1 text-[11px] text-slate-500">
+                          <span>{o.name} {fmt(o.amount)} on {format(o.date, 'd MMM')} ÷ {o.weeksSpread.toFixed(1)} wks</span>
+                          <span className="tabular-nums">+{fmt(o.perWeek)}/wk</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </>); })()}
                 {row('Fixed bills', `−${fmt(s.mandatoryAmount)}`, 'All fixed expenses (including externally-paid)', 'text-rose-600')}
                 {row('Essentials', `−${fmt(essentialsMonthly)}`, 'Higher of your estimate or normal-week average', 'text-rose-600')}
