@@ -168,7 +168,7 @@ export default function FinanceBudget() {
   const fxRates = (finance.settings?.fx_rates || {}) as Record<string, number>;
   const audToGbp = fxRates['AUD_GBP'] || 0.52;
   const fmt = (n: number) => formatCurrency(n, baseCurrency);
-  const fmtGbp = (n: number) => formatCurrency(n * audToGbp, 'GBP');
+  const fmtGbp = (n: number) => formatCurrency(baseCurrency === 'GBP' ? n : n * audToGbp, 'GBP');
 
   // Savings Stash: find existing goal named "Savings Stash" or marked with is_stash
   const stashGoal = useMemo(() => finance.goals.find(g => (g as any).is_stash === true || g.name.toLowerCase().includes('stash')), [finance.goals]);
@@ -564,14 +564,15 @@ export default function FinanceBudget() {
 
   const weekLabel = `${format(weekStart, 'EEE d MMM')} – ${format(weekEnd, 'EEE d MMM')}`;
   const _dailyPace = daysLeft > 0 ? snapshot.remainingWeeklyFun / daysLeft : snapshot.remainingWeeklyFun;
-  const dailyPaceLine = snapshot.baseWeeklyFun / 7;
+  const dailyPaceLine = (snapshot.weeklyEssentialBudget + snapshot.weeklyFunBudget) / 7;
   const maxDailySpend = Math.max(...dailySpendingStacked.map(d => d.essential + d.fun), dailyPaceLine, 1);
   const effectiveFunSpent = Math.max(0, funSpentThisWeek - boostAmount);
   const funPercentSpent = snapshot.weeklyFunBudget > 0 ? Math.min((effectiveFunSpent / snapshot.weeklyFunBudget) * 100, 100) : 0;
   const essentialWeeklyBudget = snapshot.weeklyEssentialBudget;
   const essentialRemaining = snapshot.remainingEssentials;
   // Use raw budget-minus-spent to avoid double-counting from bidirectional overspend cross-subtraction
-  const combinedSafeToSpend = (snapshot.weeklyFunBudget + essentialWeeklyBudget) - (snapshot.spentThisWeek + snapshot.essentialSpentThisWeek);
+  // Same spent figures as the KPI tiles + pulse bar so every number on the page reconciles
+  const combinedSafeToSpend = (snapshot.weeklyFunBudget + essentialWeeklyBudget) - (essentialSpentThisWeek + effectiveFunSpent);
   const combinedDailyPace = daysLeft > 0 ? combinedSafeToSpend / daysLeft : combinedSafeToSpend;
   const isOverBudget = combinedSafeToSpend < 0;
   const overAmount = Math.abs(combinedSafeToSpend);
@@ -767,7 +768,7 @@ export default function FinanceBudget() {
         <div className="bg-white rounded-2xl border-2 border-[#FF7AD1]/40 p-4 sm:p-5 shadow-[4px_4px_0px_0px_rgba(255,46,184,0.15)]">
           <p className="text-[#FF2EB8] text-[10px] font-display font-bold uppercase tracking-[0.15em] mb-2">Weekly Budget</p>
           <p className="text-slate-900 font-display font-black tabular-nums text-2xl sm:text-3xl leading-none">{fmt(totalWeeklyBudget)}</p>
-          <p className="text-[11px] text-slate-500 mt-1.5 font-medium">{fmtGbp(totalWeeklyBudget)}</p>
+          <p className="text-[11px] text-slate-500 mt-1.5 font-medium">{fmt(essentialWeeklyBudget)} essentials · {fmt(snapshot.weeklyFunBudget)} fun</p>
         </div>
         <div className={cn(
           "bg-white rounded-2xl border-2 p-4 sm:p-5",
