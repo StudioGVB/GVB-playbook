@@ -776,7 +776,7 @@ export default function FinanceBudget() {
           </div>
         );
         return (
-          <Collapsible>
+          <Collapsible defaultOpen>
             <div className="bg-white rounded-2xl border border-pink-200/60 p-4 sm:p-5">
               <CollapsibleTrigger className="w-full flex items-center justify-between text-left">
                 <span className="text-xs font-bold uppercase tracking-[0.15em] text-[#FF2EB8]">How this is calculated</span>
