@@ -142,12 +142,24 @@ export function computeActualSpendingIncome(
     const cat = tx.category_id ? catById.get(tx.category_id) : undefined;
     const catName = cat?.name?.trim().toLowerCase() || '';
     const text = `${tx.merchant || ''} ${tx.description || ''}`.toLowerCase();
-    if (catName === 'income' || catName.includes('gamma') || text.includes('gamma')) return 'gamma';
-    if (catName.includes('venture') || catName.includes('batchbase') ||
-        text.includes('venture') || text.includes('batchbase') || text.includes('batch base') || text.includes('advisory')) return 'venture';
-    // Other income: only genuine income (income category or known side streams), never transfers
+    const amt = Math.abs(tx.amount);
+
+    // 1. Category wins (same rule as the Income page)
+    if (cat?.type === 'income') {
+      if (catName === 'income' || catName.includes('gamma') || catName.includes('salary')) return 'gamma';
+      if (catName.includes('venture') || catName.includes('batchbase') || catName.includes('advisory')) {
+        // VA is a weekly payment — anything large tagged VA is mis-tagged, ignore it
+        return amt <= 300 ? 'venture' : null;
+      }
+      return 'other';
+    }
+
+    // 2. Uncategorised: never count internal transfers
     if (tx.is_transfer || tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') return null;
-    if (cat?.type === 'income' || text.includes('etsy') || text.includes('back pocket') || text.includes('bpg')) return 'other';
+    if (cat) return null; // categorised as something non-income (e.g. refund, spending)
+    if (text.includes('gamma')) return 'gamma';
+    if ((text.includes('venture') || text.includes('batchbase') || text.includes('batch base') || text.includes('advisory')) && amt <= 300) return 'venture';
+    if (text.includes('etsy') || text.includes('back pocket') || text.includes('bpg')) return 'other';
     return null;
   };
 
@@ -165,8 +177,13 @@ export function computeActualSpendingIncome(
       if (gammaDate.getTime() - g.date.getTime() <= 3 * DAY) gamma += baseAmt(g.tx);
     }
   }
-  // Next payday = last day of the month after the payday month
-  const nextPayday = gammaDate ? new Date(gammaDate.getFullYear(), gammaDate.getMonth() + 2, 0) : null;
+  // Next payday: Gamma pays on the last day of the month for the following month.
+  // If it landed on the 1st–5th (weekend/bank-holiday slip), it's still that month's pay → cycle ends at month-end.
+  const nextPayday = gammaDate
+    ? (gammaDate.getDate() <= 5
+        ? new Date(gammaDate.getFullYear(), gammaDate.getMonth() + 1, 0)
+        : new Date(gammaDate.getFullYear(), gammaDate.getMonth() + 2, 0))
+    : null;
   const isLate = gammaDate ? (now.getTime() - gammaDate.getTime()) > 35 * DAY : false;
 
   // --- VA: rolling last 28 days ---
