@@ -9,7 +9,7 @@ import { useFixedExpensePayments } from '@/hooks/useFixedExpensePayments';
 import { useWeeklyBoosts } from '@/hooks/useWeeklyBoosts';
 import { useWeekTypes } from '@/hooks/useWeekTypes';
 import { useFinanceTrips } from '@/hooks/useFinanceTrips';
-import { computePolicySnapshot } from '@/lib/policyEngine';
+import { computePolicySnapshot, computeActualSpendingIncome } from '@/lib/policyEngine';
 import { formatCurrency, baseAmt, parseUkDate } from '@/lib/financeUtils';
 import { subDays, startOfDay, startOfWeek, endOfWeek, differenceInDays, format, addWeeks, subWeeks, isSameWeek, addDays } from 'date-fns';
 import { Lock, ShoppingCart, PartyPopper, Zap, X, Info, TrendingDown, Calendar as CalendarIcon, Shield, Target, ChevronDown, History, Clock, Check, Plane, ChevronLeft, ChevronRight } from 'lucide-react';
@@ -566,7 +566,8 @@ export default function FinanceBudget() {
   const _dailyPace = daysLeft > 0 ? snapshot.remainingWeeklyFun / daysLeft : snapshot.remainingWeeklyFun;
   const dailyPaceLine = (snapshot.weeklyEssentialBudget + snapshot.weeklyFunBudget) / 7;
   const maxDailySpend = Math.max(...dailySpendingStacked.map(d => d.essential + d.fun), dailyPaceLine, 1);
-  const effectiveFunSpent = Math.max(0, funSpentThisWeek - boostAmount);
+  // Boost is already added to snapshot.weeklyFunBudget by the engine — don't also subtract it from spend
+  const effectiveFunSpent = funSpentThisWeek;
   const funPercentSpent = snapshot.weeklyFunBudget > 0 ? Math.min((effectiveFunSpent / snapshot.weeklyFunBudget) * 100, 100) : 0;
   const essentialWeeklyBudget = snapshot.weeklyEssentialBudget;
   const essentialRemaining = snapshot.remainingEssentials;
@@ -782,7 +783,11 @@ export default function FinanceBudget() {
                 <ChevronDown className="w-4 h-4 text-slate-400" />
               </CollapsibleTrigger>
               <CollapsibleContent className="mt-3 divide-y divide-slate-100">
-                {row('Monthly income', `+${fmt(s.monthlyIncome)}`, manualIncome ? 'Expected Monthly Income from Settings' : 'Take-home from gross salary (tax/NI/pension) + Venture £70/wk', 'text-emerald-600')}
+                {(() => { const ai = computeActualSpendingIncome(finance.transactions, finance.categories, new Date()); return (<>
+                  {row('Monthly income (actual deposits)', `+${fmt(s.monthlyIncome)}`, ai.isFallback ? `No Gamma pay yet this month — using ${ai.monthLabel}` : `Received in ${ai.monthLabel}`, 'text-emerald-600')}
+                  <div className="flex justify-between pl-4 py-1 text-[11px] text-slate-500"><span>Gamma</span><span className="tabular-nums">{fmt(ai.gamma)}</span></div>
+                  <div className="flex justify-between pl-4 py-1 text-[11px] text-slate-500"><span>Venture Advisory</span><span className="tabular-nums">{fmt(ai.venture)}</span></div>
+                </>); })()}
                 {row('Fixed bills', `−${fmt(s.mandatoryAmount)}`, 'All fixed expenses (including externally-paid)', 'text-rose-600')}
                 {row('Essentials', `−${fmt(essentialsMonthly)}`, 'Higher of your estimate or normal-week average', 'text-rose-600')}
                 {row('Goal savings', `−${fmt(s.goalSavingsAmount)}`, 'Pools with deadlines: remaining ÷ weeks left', 'text-rose-600')}
