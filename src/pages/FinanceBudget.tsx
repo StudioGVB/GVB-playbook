@@ -10,7 +10,6 @@ import { useWeeklyBoosts } from '@/hooks/useWeeklyBoosts';
 import { useWeekTypes } from '@/hooks/useWeekTypes';
 import { useFinanceTrips } from '@/hooks/useFinanceTrips';
 import { computePolicySnapshot } from '@/lib/policyEngine';
-import { calculateStreamIncomeEstimates } from '@/lib/feasibilityEngine';
 import { formatCurrency, baseAmt, parseUkDate } from '@/lib/financeUtils';
 import { subDays, startOfDay, startOfWeek, endOfWeek, differenceInDays, format, addWeeks, subWeeks, isSameWeek, addDays } from 'date-fns';
 import { Lock, ShoppingCart, PartyPopper, Zap, X, Info, TrendingDown, Calendar as CalendarIcon, Shield, Target, ChevronDown, History, Clock, Check, Plane, ChevronLeft, ChevronRight } from 'lucide-react';
@@ -767,7 +766,6 @@ export default function FinanceBudget() {
       {/* === HOW THIS IS CALCULATED === */}
       {isCurrentWeek && (() => {
         const s = snapshot.split;
-        const streams = calculateStreamIncomeEstimates(finance.transactions, finance.categories, new Date()).streamEstimates;
         const essentialsMonthly = essentialWeeklyBudget * 4.33;
         const externalBills = (fixedExpenses || []).filter((e: any) => e.paid_externally);
         const manualIncome = assumptions?.expected_monthly_income && assumptions.expected_monthly_income > 0;
@@ -785,13 +783,7 @@ export default function FinanceBudget() {
                 <ChevronDown className="w-4 h-4 text-slate-400" />
               </CollapsibleTrigger>
               <CollapsibleContent className="mt-3 divide-y divide-slate-100">
-                {row('Monthly income', `+${fmt(s.monthlyIncome)}`, manualIncome ? 'Manual override from Settings' : '90-day total per stream ÷ 3', 'text-emerald-600')}
-                {!manualIncome && streams.map(st => (
-                  <div key={st.categoryId} className="flex justify-between pl-4 py-1 text-[11px] text-slate-500">
-                    <span>{st.name} {st.totalLast3Months > 0 ? `(${fmt(st.totalLast3Months)} ÷ 3)` : '(no deposits – default used)'}</span>
-                    <span className="tabular-nums">{fmt(st.estimatedMonthlyAmount)}</span>
-                  </div>
-                ))}
+                {row('Monthly income', `+${fmt(s.monthlyIncome)}`, manualIncome ? 'Expected Monthly Income from Settings' : 'Default (no income set in Settings)', 'text-emerald-600')}
                 {row('Fixed bills', `−${fmt(s.mandatoryAmount)}`, externalBills.length ? `Excludes "paid externally": ${externalBills.map((e: any) => e.name).join(', ')}` : 'All fixed expenses', 'text-rose-600')}
                 {row('Essentials', `−${fmt(essentialsMonthly)}`, 'Higher of your estimate or normal-week average', 'text-rose-600')}
                 {row('Goal savings', `−${fmt(s.goalSavingsAmount)}`, 'Pools with deadlines: remaining ÷ weeks left', 'text-rose-600')}
