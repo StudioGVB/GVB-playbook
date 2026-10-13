@@ -245,7 +245,7 @@ export default function FeasibilityBreakdownDialog({
                       <p className="text-[10px] text-slate-400">
                         {hasManualIncomeOverride
                           ? 'Manual override active • Click Reset to use 3-month transaction average'
-                          : 'Average of last 3 months per stream (90-day total ÷ 3)'}
+                          : 'Average of last 3 months per stream (90-day total ÷ 3, or ÷ months paid if newer)'}
                       </p>
                     </div>
                   </div>
@@ -310,14 +310,14 @@ export default function FeasibilityBreakdownDialog({
                       <span
                         key={s.categoryId}
                         className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md bg-slate-100/90 text-slate-700 font-medium border border-slate-200/60"
-                        title={s.totalLast3Months > 0 ? `90-day total: ${fmt(s.totalLast3Months)} ÷ 3 = ${fmt(s.estimatedMonthlyAmount)}/mo` : `${s.name}: ${fmt(s.estimatedMonthlyAmount)}/mo`}
+                        title={s.totalLast3Months > 0 ? `90-day total: ${fmt(s.totalLast3Months)} ÷ ${s.activeMonthsCount || 3} = ${fmt(s.estimatedMonthlyAmount)}/mo` : `${s.name}: ${fmt(s.estimatedMonthlyAmount)}/mo`}
                       >
                         <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: s.color || '#10B981' }} />
                         <span>{s.name}:</span>
                         <strong className="font-bold text-slate-900">+{fmt(s.estimatedMonthlyAmount)}/mo</strong>
                         {s.totalLast3Months > 0 && (
                           <span className="text-[9px] text-slate-400 font-normal">
-                            ({fmt(s.totalLast3Months)} ÷ 3)
+                            ({fmt(s.totalLast3Months)} ÷ {s.activeMonthsCount || 3})
                           </span>
                         )}
                       </span>

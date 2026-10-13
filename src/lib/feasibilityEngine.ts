@@ -68,6 +68,8 @@ export function calculateStreamIncomeEstimates(
     total: number;
     count: number;
     monthlyTarget?: number | null;
+    months: Set<string>;
+    earliest: Date | null;
   }
 
   const streamMap: Record<string, StreamCollector> = {};
@@ -83,6 +85,8 @@ export function calculateStreamIncomeEstimates(
       total: 0,
       count: 0,
       monthlyTarget: cat.monthly_target,
+      months: new Set(),
+      earliest: null,
     };
   }
 
@@ -98,6 +102,8 @@ export function calculateStreamIncomeEstimates(
       total: 0,
       count: 0,
       monthlyTarget: 2896.67,
+      months: new Set(),
+      earliest: null,
     };
   }
 
@@ -112,6 +118,8 @@ export function calculateStreamIncomeEstimates(
       total: 0,
       count: 0,
       monthlyTarget: (70 * 52) / 12,
+      months: new Set(),
+      earliest: null,
     };
   }
 
@@ -121,6 +129,8 @@ export function calculateStreamIncomeEstimates(
     color: '#10B981',
     total: 0,
     count: 0,
+    months: new Set(),
+    earliest: null,
   };
 
   // Helper to match transaction to an income category or stream
@@ -162,14 +172,19 @@ export function calculateStreamIncomeEstimates(
     }
 
     const txDate = parseUkDate(tx.posted_at);
-    if (txDate < ninetyDaysAgo || txDate > now) continue;
+    if (txDate > now) continue;
 
     const streamId = findIncomeStreamId(tx);
     if (!streamId || !streamMap[streamId]) continue;
+    const s = streamMap[streamId];
+    if (!s.earliest || txDate < s.earliest) s.earliest = txDate;
+
+    if (txDate < ninetyDaysAgo) continue;
 
     const bAmt = baseAmt(tx);
-    streamMap[streamId].total += bAmt;
-    streamMap[streamId].count += 1;
+    s.total += bAmt;
+    s.count += 1;
+    s.months.add(format(txDate, 'yyyy-MM'));
   }
 
   // 3. For each stream: calculate average from the last 3 months (Divided by 3)
@@ -180,10 +195,13 @@ export function calculateStreamIncomeEstimates(
     const isVenture = data.name.toLowerCase().includes('venture') || data.name.toLowerCase().includes('batchbase');
 
     let estimatedMonthlyAmount = 0;
+    // Divisor: 3 if the stream has paid for 3+ months; otherwise the number of
+    // months it has actually paid in (e.g. Gamma paid twice so far → ÷ 2).
+    const hasFullHistory = !!data.earliest && data.earliest < ninetyDaysAgo;
+    const divisor = hasFullHistory ? 3 : Math.min(3, Math.max(1, data.months.size));
 
     if (data.total > 0) {
-      // Gabriella's rule: total for the last 3 months Divided by 3
-      estimatedMonthlyAmount = data.total / 3;
+      estimatedMonthlyAmount = data.total / divisor;
     } else {
       // Stream has £0 recorded in 90-day window:
       if (isVenture) {
@@ -207,7 +225,7 @@ export function calculateStreamIncomeEstimates(
       name: data.name,
       color: data.color,
       totalLast3Months: Math.round(data.total * 100) / 100,
-      activeMonthsCount: 3,
+      activeMonthsCount: data.total > 0 ? divisor : 0,
       estimatedMonthlyAmount: Math.round(estimatedMonthlyAmount * 100) / 100,
     });
   }
@@ -297,6 +315,8 @@ export function evaluatePoolFeasibility(params: {
     if ((g as any).is_emergency || (g as any).is_stash || g.name.toLowerCase().includes('stash') || g.name.toLowerCase().includes('emergency')) {
       continue;
     }
+    // Only count goals that have already started.
+    if (g.start_date && new Date(g.start_date) > now) continue;
 
     const gTarget = convertToBase(g.target_amount || 0, g.currency);
     const gAssigned = convertToBase(g.assigned_amount || 0, g.currency);

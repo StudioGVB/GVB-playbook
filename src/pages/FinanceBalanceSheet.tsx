@@ -168,11 +168,6 @@ export default function FinanceBalanceSheet() {
         bills.push({ name: e.auto_pay ? `${e.name} (auto)` : `${e.name} (due)`, amount: abs });
       }
 
-      // Phantom reimbursement income for bills paid from an external account.
-      if (e.paid_externally) {
-        income += abs;
-        reimbursements.push({ name: `${e.name} reimbursement`, amount: abs });
-      }
     }
 
     bills.sort((a, b) => b.amount - a.amount);
@@ -205,7 +200,6 @@ export default function FinanceBalanceSheet() {
 
   const fixedExpensesMonthlyInternal = useMemo(() => {
     return fixedExpenses
-      .filter(e => !e.paid_externally)
       .reduce((sum, e) => {
         return sum + toMonthly(finance.convertToBase(e.amount, e.currency), e.frequency);
       }, 0);

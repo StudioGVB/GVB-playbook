@@ -117,12 +117,8 @@ export function useFixedExpensesState() {
     return sum + inBase;
   }, 0);
 
-  // Excludes externally-paid bills (e.g. rent from Commbank). Use for anything
-  // representing outflows from Up accounts: emergency floor, pools, runway.
-  const monthlyTotalInternal = activeExpenses.filter(e => !e.paid_externally).reduce((sum, e) => {
-    const mult = FREQ_TO_MONTHLY[e.frequency] || 1;
-    return sum + convert(e.amount * mult, e.currency || baseCurrency, baseCurrency, fxRates);
-  }, 0);
+  // "Paid externally" is retired (bank APIs are connected) — all bills count.
+  const monthlyTotalInternal = monthlyTotal;
 
   // Compute monthly total active on an arbitrary date (used by runway projections)
   const monthlyTotalOn = (isoDate: string) =>
@@ -134,18 +130,9 @@ export function useFixedExpensesState() {
   // Reimbursements from bills paid out of an external account (e.g. rent from Commbank).
   // Returns one entry per active, paid_externally monthly expense in base currency —
   // consumers add these to their income totals so the net isn't double-counted.
-  const reimbursementsOn = (isoDate: string): { id: string; name: string; amount: number }[] =>
-    expenses
-      .filter(e => e.paid_externally && isActiveOn(e, isoDate))
-      .map(e => {
-        const mult = FREQ_TO_MONTHLY[e.frequency] || 1;
-        return {
-          id: e.id,
-          name: e.name,
-          amount: convert(e.amount * mult, e.currency || baseCurrency, baseCurrency, fxRates),
-        };
-      })
-      .filter(r => r.amount > 0);
+  // Retired: no phantom reimbursements any more.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const reimbursementsOn = (_isoDate: string): { id: string; name: string; amount: number }[] => [];
 
   return { expenses, activeExpenses, loading, add, update, remove, monthlyTotal, monthlyTotalInternal, monthlyTotalOn, reimbursementsOn, refetch: fetch };
 }

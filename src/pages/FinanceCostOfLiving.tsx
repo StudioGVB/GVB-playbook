@@ -246,15 +246,6 @@ export default function FinanceCostOfLiving() {
                 <Input type="number" inputMode="numeric" min={1} max={31} placeholder="Due day (1-31)" value={form.due_day}
                   onChange={e => setForm(f => ({ ...f, due_day: e.target.value }))} />
               </div>
-              <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  className="w-4 h-4 accent-[#FF2EB8]"
-                  checked={form.paid_externally}
-                  onChange={e => setForm(f => ({ ...f, paid_externally: e.target.checked }))}
-                />
-                <span>Paid from external account (offsets as reimbursement)</span>
-              </label>
               <Button className="w-full bg-[#FF2EB8] hover:bg-[#e5299f] text-white font-display font-bold rounded-2xl" onClick={handleAdd}>Add</Button>
             </div>
           </DialogContent>
@@ -402,9 +393,6 @@ export default function FinanceCostOfLiving() {
                         {e.auto_pay && (
                           <span className="text-[9px] px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-full font-bold uppercase tracking-wide">Auto</span>
                         )}
-                        {e.paid_externally && (
-                          <span className="text-[9px] px-2 py-0.5 bg-sky-100 text-sky-700 rounded-full font-bold uppercase tracking-wide">External</span>
-                        )}
                       </p>
                       <p className="text-[11px] text-slate-500 capitalize">
                         {e.frequency}
@@ -414,12 +402,6 @@ export default function FinanceCostOfLiving() {
                           onClick={() => fx.update(e.id, { auto_pay: !e.auto_pay, due_day: e.due_day || 1 } as any)}
                         >
                           {e.auto_pay ? 'disable auto-pay' : 'enable auto-pay'}
-                        </button>
-                        <button
-                          className="ml-2 underline hover:text-sky-600"
-                          onClick={() => fx.update(e.id, { paid_externally: !e.paid_externally } as any)}
-                        >
-                          {e.paid_externally ? 'not external' : 'mark external'}
                         </button>
                       </p>
                     </div>
