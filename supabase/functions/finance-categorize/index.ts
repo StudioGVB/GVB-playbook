@@ -247,7 +247,7 @@ serve(async (req) => {
         Math.abs(absAmt - 72.8) < 0.5 ||
         Math.abs(absAmt - 140) < 1.0
       )
-      const isVentureIncome = (isBatchbase || (isGabriella && isWeeklyPaycheck)) && tx.amount > 0
+      const isVentureIncome = isBatchbase && tx.amount > 0
       if (isVentureIncome) {
         const ventureCat = categories.find((c: any) =>
           c.type === 'income' && (c.name.toLowerCase().includes('venture') || c.name.toLowerCase().includes('batchbase'))
@@ -275,6 +275,8 @@ serve(async (req) => {
             transfer_status: null,
           }).eq('id', tx.id)
         }
+        // Unsorted incoming money -> generic Income bucket until manually sorted
+        if (tx.amount > 0 && incomeCat) ruleResults.push({ id: tx.id, category_id: incomeCat.id })
         continue
       }
 

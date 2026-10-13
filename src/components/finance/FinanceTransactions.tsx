@@ -727,7 +727,7 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                     fullDesc.includes('advisory') ||
                     (fullDesc.includes('gabriella') && !tx.transfer_group_id)
                   );
-                  const ventureCategory = categories.find(c => c.type === 'income' && (c.name.toLowerCase().includes('venture') || c.name.toLowerCase().includes('batchbase')));
+                  const ventureCategory = categories.find(c => c.name.trim().toLowerCase() === 'income' && c.type === 'income');
                   const displayCat = cat || (isVentureIncome ? ventureCategory : null);
                   const catColor = displayCat ? (CATEGORY_TYPE_COLORS[displayCat.type] || CATEGORY_TYPE_COLORS.variable) : '';
 

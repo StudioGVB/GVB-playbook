@@ -341,7 +341,7 @@ export function useFinanceDataState() {
 
         // Self-healing for Gabriella Blyth / Batchbase transactions & purging fake Travel Savings mirror transactions
         const TRAVEL_SAVINGS_ACCOUNT_ID = '070104ff-80bf-4b70-a19a-23afce14be9b';
-        const batchbaseHealingIds: string[] = [];
+        const healingByCat: Record<string, string[]> = {};
         const transferFlagFixIds: string[] = [];
         const mirrorDeleteIds: string[] = [];
 
@@ -379,19 +379,19 @@ export function useFinanceDataState() {
             );
 
             // Incoming money from Gabriella Blyth without a matched outgoing transfer leg is personal income, never an internal transfer
-            // Only weekly-sized Gabriella deposits are Venture Advisory — large ones (e.g. £3k salary) are left for manual tagging
-            const isVentureIncome = numAmt > 0 && (isBatchbase || isVentureText || (isGabriella && isWeeklyPaycheck));
+            // Only explicit Batchbase/Venture text is VA. Ambiguous "Gabriella" deposits go to the generic Income bucket until sorted.
+            const isVentureIncome = numAmt > 0 && (isBatchbase || isVentureText);
             const isGabriellaSingleDeposit = isGabriella && numAmt > 0 && !t.transfer_group_id;
 
             if (isVentureIncome || isGabriellaSingleDeposit) {
-              // Never override an income category the user has manually assigned
-              const hasManualIncomeCat = !!t.category_id && (catRes.data || []).some((c: any) => c.id === t.category_id && c.type === 'income');
-              const targetCatId = isVentureIncome && ventureCat && !hasManualIncomeCat ? ventureCat.id : t.category_id;
+              // Only auto-assign when uncategorised — never override a category you've set
+              const genericIncome = (catRes.data || []).find((c: any) => c.type === 'income' && c.name.trim().toLowerCase() === 'income');
+              const autoCat = isVentureIncome ? ventureCat : genericIncome;
+              const targetCatId = !t.category_id && autoCat ? autoCat.id : t.category_id;
               const hasTransferFlag = t.is_transfer || t.transfer_status || t.transfer_side;
-              const needsCategoryFix = isVentureIncome && ventureCat && !hasManualIncomeCat && t.category_id !== ventureCat.id;
 
-              if (needsCategoryFix) {
-                batchbaseHealingIds.push(t.id);
+              if (!t.category_id && autoCat) {
+                (healingByCat[autoCat.id] ||= []).push(t.id);
               } else if (hasTransferFlag) {
                 transferFlagFixIds.push(t.id);
               }
@@ -419,14 +419,14 @@ export function useFinanceDataState() {
             console.log(`[self-healing] Purged ${mirrorDeleteIds.length} fake Travel Savings mirror transactions for Gabriella/batchbase`);
           }).catch(console.error);
         }
-        if (batchbaseHealingIds.length > 0 && ventureCat) {
+        for (const [catId, ids] of Object.entries(healingByCat)) {
           supabase.from('finance_transactions').update({
             is_transfer: false,
             transfer_side: null,
             transfer_status: null,
-            category_id: ventureCat.id,
-          }).in('id', batchbaseHealingIds).then(() => {
-            console.log(`[self-healing] Fixed ${batchbaseHealingIds.length} Gabriella/batchbase transactions to Venture Advisory income`);
+            category_id: catId,
+          }).in('id', ids).then(() => {
+            console.log(`[self-healing] Auto-categorised ${ids.length} incoming payments`);
           }).catch(console.error);
         }
         if (transferFlagFixIds.length > 0) {
@@ -1164,7 +1164,7 @@ export function useFinanceDataState() {
           Math.abs(absAmt - 72.8) < 0.5 ||
           Math.abs(absAmt - 140) < 1.0
         );
-        const isVentureIncome = isBatchbase || fullText.includes('VENTURE') || fullText.includes('ADVISORY') || (isGabriella && isWeeklyPaycheck);
+        const isVentureIncome = isBatchbase || fullText.includes('VENTURE') || fullText.includes('ADVISORY');
         const isGabriellaOrUp = !isVentureIncome && (isGabriella || fullText.includes('UP ACCOUNT') || fullText.includes('UP BANK'));
 
         // Flag internal transfers from savings (strictly savings transfer keywords, excluding external batchbase/paychecks)
@@ -1194,26 +1194,26 @@ export function useFinanceDataState() {
         // Income auto-categorization
         if (targetAmount > 0 && !isSavingsTransfer) {
           if (isVentureIncome) {
-            if (ventureCat && (t.category_id !== ventureCat.id || t.is_transfer || t.transfer_status)) {
+            if (ventureCat && (!t.category_id || t.is_transfer || t.transfer_status)) {
               await supabase.from('finance_transactions').update({
                 is_transfer: false,
                 transfer_side: null,
                 transfer_status: null,
-                category_id: ventureCat.id,
+                category_id: t.category_id || ventureCat.id,
               }).eq('id', t.id);
             }
           } else if (isGabriellaOrUp) {
-            // Other Gabriella / Up account incoming money -> ensure not flagged as transfer, category_id null if not set
-            if (t.is_transfer || t.transfer_status || t.transfer_side) {
+            // Unsorted Gabriella / Up incoming money -> generic Income bucket until you sort it
+            if (t.is_transfer || t.transfer_status || t.transfer_side || !t.category_id) {
               await supabase.from('finance_transactions').update({
                 is_transfer: false,
                 transfer_side: null,
                 transfer_status: null,
-                category_id: t.category_id || null,
+                category_id: t.category_id || genericIncomeCat?.id || null,
               }).eq('id', t.id);
             }
           } else if (fullText.includes('GAMMA')) {
-            if (gammaCat && t.category_id !== gammaCat.id) {
+            if (gammaCat && !t.category_id) {
               await supabase.from('finance_transactions').update({
                 is_transfer: false,
                 category_id: gammaCat.id,

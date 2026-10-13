@@ -146,7 +146,9 @@ export function computeActualSpendingIncome(
 
     // 1. Category wins (same rule as the Income page)
     if (cat?.type === 'income') {
-      if (catName === 'income' || catName.includes('gamma') || catName.includes('salary')) return 'gamma';
+      // Generic "Income" = unsorted inbox — not counted until you tag it to a real stream
+      if (catName === 'income') return null;
+      if (catName.includes('gamma') || catName.includes('salary')) return 'gamma';
       if (catName.includes('venture') || catName.includes('batchbase') || catName.includes('advisory')) {
         // VA is a weekly payment — anything large tagged VA is mis-tagged, ignore it
         return amt <= 300 ? 'venture' : null;
