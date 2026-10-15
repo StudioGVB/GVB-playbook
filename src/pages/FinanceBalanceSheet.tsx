@@ -286,20 +286,20 @@ export default function FinanceBalanceSheet() {
 
         {/* Navigation Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <div className="overflow-x-auto touch-scroll max-w-full pb-1">
-            <TabsList className="bg-white/80 backdrop-blur-md p-1.5 rounded-2xl border border-[#FF7AD1]/30 shadow-sm inline-flex mb-2 gap-1 min-w-max">
+          <div className="overflow-x-auto touch-scroll max-w-full">
+            <TabsList className="bg-white/90 backdrop-blur-md p-1 rounded-xl border border-slate-200/80 shadow-xs inline-flex h-auto items-center gap-1 min-w-max">
               <TabsTrigger
                 value="overview"
-                className="rounded-xl px-4 py-2 font-display font-bold text-xs sm:text-sm data-[state=active]:bg-[#FF2EB8] data-[state=active]:text-white transition-all flex items-center gap-2"
+                className="rounded-lg px-3.5 py-1.5 font-display font-semibold text-xs text-slate-600 hover:text-slate-900 hover:bg-slate-100/70 data-[state=active]:bg-[#FF2EB8] data-[state=active]:text-white data-[state=active]:shadow-xs transition-all flex items-center gap-1.5"
               >
-                <LayoutGrid className="w-4 h-4" />
+                <LayoutGrid className="w-3.5 h-3.5" />
                 Balance Sheet Overview
               </TabsTrigger>
               <TabsTrigger
                 value="spreadsheet"
-                className="rounded-xl px-4 py-2 font-display font-bold text-xs sm:text-sm data-[state=active]:bg-[#FF2EB8] data-[state=active]:text-white transition-all flex items-center gap-2"
+                className="rounded-lg px-3.5 py-1.5 font-display font-semibold text-xs text-slate-600 hover:text-slate-900 hover:bg-slate-100/70 data-[state=active]:bg-[#FF2EB8] data-[state=active]:text-white data-[state=active]:shadow-xs transition-all flex items-center gap-1.5"
               >
-                <Table className="w-4 h-4" />
+                <Table className="w-3.5 h-3.5" />
                 Spreadsheet View
               </TabsTrigger>
             </TabsList>
