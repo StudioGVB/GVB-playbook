@@ -111,109 +111,153 @@ export interface OtherIncomeItem {
   perWeek: number;
 }
 
+export interface IncomeStreamBreakdownItem {
+  name: string;
+  amount: number;
+  count: number;
+}
+
 export interface ActualSpendingIncome {
-  total: number;            // monthly: Gamma + VA monthly equivalent
-  gamma: number;            // latest Gamma pay amount
+  total: number;            // total actual deposits in the current month (matches Income page)
+  gamma: number;            // Gamma salary deposits in this month/cycle
   gammaDate: Date | null;   // payday of latest Gamma pay
-  nextPayday: Date | null;  // expected end of this pay cycle
-  isLate: boolean;          // latest Gamma pay > 35 days old
-  venture: number;          // VA monthly equivalent (rolling 4 weeks)
+  cycleStart: Date;         // start of the active month/cycle
+  nextPayday: Date | null;  // end of the active month/cycle
+  isLate: boolean;          // true if falling back to previous month before payday lands
+  venture: number;          // actual VA deposits in this month/cycle
   ventureLast4Weeks: number;
-  otherWeeklyBonus: number; // other income spread across remaining weeks
+  otherWeeklyBonus: number; // kept at 0 for backwards compatibility (all streams included in total)
   otherItems: OtherIncomeItem[];
+  streams: IncomeStreamBreakdownItem[];
+}
+
+function isInternalTransferTx(tx: FinanceTransaction): boolean {
+  const text = `${tx.merchant || ''} ${tx.description || ''} ${(tx as any).raw?.message || ''}`.toLowerCase();
+  if (text.includes('batchbase') || text.includes('batch base')) return false;
+  if (text.includes('venture') || text.includes('advisory')) return false;
+  if (text.includes('gabriella') && tx.amount > 0 && !(tx as any).transfer_group_id) return false;
+
+  if (tx.is_transfer) return true;
+  if (tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') return true;
+
+  return (
+    text.includes('transfer from savings') ||
+    text.includes('transfer to savings') ||
+    text.includes('savings transfer') ||
+    text.includes('internal transfer')
+  );
 }
 
 /**
- * Pay-cycle income model (spending side):
- *  - Gamma: most recent Gamma pay funds everything until the next payday.
- *  - VA: rolling last-4-weeks of real deposits, converted to monthly (x 52/12).
- *  - Other income (Etsy, Back Pocket, etc.): each deposit is spread across the
- *    weeks left in the current pay cycle and added to fun money.
+ * Actual monthly deposits model (matches the Income page):
+ *  - Sums all actual earned income deposits in the current calendar month
+ *    (Gamma Salary, Venture Advisory, Back Pocket Games, ElevenLabs, Etsy, etc.).
+ *  - If no income/salary has landed yet at the very start of a new month, falls back
+ *    to the previous calendar month until payday lands.
  */
 export function computeActualSpendingIncome(
   transactions: FinanceTransaction[],
   categories: FinanceCategory[],
   now: Date = new Date(),
 ): ActualSpendingIncome {
-  const DAY = 86400000;
   const catById = new Map(categories.map(c => [c.id, c]));
-  const classify = (tx: FinanceTransaction): 'gamma' | 'venture' | 'other' | null => {
-    if (tx.amount <= 0 || tx.is_reimbursable) return null;
-    const cat = tx.category_id ? catById.get(tx.category_id) : undefined;
-    const catName = cat?.name?.trim().toLowerCase() || '';
-    const text = `${tx.merchant || ''} ${tx.description || ''}`.toLowerCase();
-    const amt = Math.abs(tx.amount);
 
-    // 1. Category wins (same rule as the Income page)
-    if (cat?.type === 'income') {
-      // Generic "Income" = unsorted inbox — not counted until you tag it to a real stream
-      if (catName === 'income') return null;
-      if (catName.includes('gamma') || catName.includes('salary')) return 'gamma';
-      if (catName.includes('venture') || catName.includes('batchbase') || catName.includes('advisory')) {
-        // VA is a weekly payment — anything large tagged VA is mis-tagged, ignore it
-        return amt <= 300 ? 'venture' : null;
+  const resolveStreamName = (tx: FinanceTransaction): { streamName: string; kind: 'gamma' | 'venture' | 'other' } | null => {
+    if (tx.amount <= 0 || tx.is_reimbursable || (tx as any).is_refund) return null;
+    const cat = tx.category_id ? catById.get(tx.category_id) : undefined;
+    const isExplicitIncome = cat?.type === 'income';
+    if (!isExplicitIncome && isInternalTransferTx(tx)) return null;
+    if (cat && cat.type !== 'income') return null;
+
+    const catName = cat?.name?.trim() || '';
+    const catLower = catName.toLowerCase();
+    const text = `${tx.merchant || ''} ${tx.description || ''}`.toLowerCase();
+
+    if (isExplicitIncome) {
+      if (catLower.includes('gamma') || catLower.includes('salary')) {
+        return { streamName: catName, kind: 'gamma' };
       }
-      return 'other';
+      if (catLower.includes('venture') || catLower.includes('batchbase') || catLower.includes('advisory')) {
+        return { streamName: catName, kind: 'venture' };
+      }
+      return { streamName: catName, kind: 'other' };
     }
 
-    // 2. Uncategorised: never count internal transfers
-    if (tx.is_transfer || tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') return null;
-    if (cat) return null; // categorised as something non-income (e.g. refund, spending)
-    if (text.includes('gamma')) return 'gamma';
-    if ((text.includes('venture') || text.includes('batchbase') || text.includes('batch base') || text.includes('advisory')) && amt <= 300) return 'venture';
-    if (text.includes('etsy') || text.includes('back pocket') || text.includes('bpg')) return 'other';
-    return null;
+    if (text.includes('gamma')) return { streamName: 'Gamma Salary', kind: 'gamma' };
+    if (text.includes('venture') || text.includes('batchbase') || text.includes('batch base') || text.includes('advisory')) {
+      return { streamName: 'Venture Advisory', kind: 'venture' };
+    }
+    if (text.includes('back pocket') || text.includes('bpg')) return { streamName: 'Back Pocket Games', kind: 'other' };
+    if (text.includes('etsy')) return { streamName: 'Etsy', kind: 'other' };
+    return { streamName: 'Other', kind: 'other' };
   };
 
-  const items = transactions
-    .map(tx => ({ tx, kind: classify(tx), date: parseUkDate(tx.posted_at) }))
-    .filter(x => x.kind && x.date <= now);
+  const allClassified = transactions
+    .map(tx => {
+      const info = resolveStreamName(tx);
+      return info ? { tx, ...info, date: parseUkDate(tx.posted_at) } : null;
+    })
+    .filter((x): x is NonNullable<typeof x> => x !== null);
 
-  // --- Gamma: latest payday (group deposits within 3 days of it as one pay) ---
-  const gammaItems = items.filter(x => x.kind === 'gamma').sort((a, b) => b.date.getTime() - a.date.getTime());
+  const curMonthStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+  const curMonthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+
+  let monthItems = allClassified.filter(x => x.date >= curMonthStart && x.date <= curMonthEnd);
+  let isLate = false;
+  let cycleStart = curMonthStart;
+  let nextPayday = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+
+  // If no Gamma pay has landed yet this month (e.g. 1st-3rd of the month), fall back to previous month
+  const hasCurrentMonthGamma = monthItems.some(x => x.kind === 'gamma');
+  if (!hasCurrentMonthGamma && monthItems.length === 0) {
+    const prevMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1, 0, 0, 0, 0);
+    const prevMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+    const prevItems = allClassified.filter(x => x.date >= prevMonthStart && x.date <= prevMonthEnd);
+    if (prevItems.length > 0) {
+      monthItems = prevItems;
+      isLate = true;
+      cycleStart = prevMonthStart;
+      nextPayday = new Date(now.getFullYear(), now.getMonth(), 0);
+    }
+  }
+
   let gamma = 0;
   let gammaDate: Date | null = null;
-  if (gammaItems.length) {
-    gammaDate = gammaItems[0].date;
-    for (const g of gammaItems) {
-      if (gammaDate.getTime() - g.date.getTime() <= 3 * DAY) gamma += baseAmt(g.tx);
-    }
-  }
-  // Next payday: Gamma pays on the last day of the month for the following month.
-  // If it landed on the 1st–5th (weekend/bank-holiday slip), it's still that month's pay → cycle ends at month-end.
-  const nextPayday = gammaDate
-    ? (gammaDate.getDate() <= 5
-        ? new Date(gammaDate.getFullYear(), gammaDate.getMonth() + 1, 0)
-        : new Date(gammaDate.getFullYear(), gammaDate.getMonth() + 2, 0))
-    : null;
-  const isLate = gammaDate ? (now.getTime() - gammaDate.getTime()) > 35 * DAY : false;
+  let venture = 0;
+  let total = 0;
+  const streamMap = new Map<string, { amount: number; count: number }>();
 
-  // --- VA: rolling last 28 days ---
-  const fourWeeksAgo = new Date(now.getTime() - 28 * DAY);
-  const ventureLast4Weeks = items
-    .filter(x => x.kind === 'venture' && x.date > fourWeeksAgo)
-    .reduce((s, x) => s + baseAmt(x.tx), 0);
-  const venture = (ventureLast4Weeks / 4) * 52 / 12;
-
-  // --- Other income: spread over remaining weeks of this pay cycle ---
-  const otherItems: OtherIncomeItem[] = [];
-  let otherWeeklyBonus = 0;
-  if (gammaDate && nextPayday && now <= nextPayday) {
-    for (const x of items) {
-      if (x.kind !== 'other' || x.date <= gammaDate) continue;
-      const weeksSpread = Math.max(1, (nextPayday.getTime() - x.date.getTime()) / (7 * DAY));
-      const amount = baseAmt(x.tx);
-      const perWeek = amount / weeksSpread;
-      otherWeeklyBonus += perWeek;
-      otherItems.push({ name: x.tx.merchant || x.tx.description || 'Other income', amount, date: x.date, weeksSpread, perWeek });
+  for (const item of monthItems) {
+    const amt = baseAmt(item.tx);
+    total += amt;
+    if (item.kind === 'gamma') {
+      gamma += amt;
+      if (!gammaDate || item.date > gammaDate) gammaDate = item.date;
+    } else if (item.kind === 'venture') {
+      venture += amt;
     }
+    const existing = streamMap.get(item.streamName) || { amount: 0, count: 0 };
+    existing.amount += amt;
+    existing.count += 1;
+    streamMap.set(item.streamName, existing);
   }
+
+  const streams: IncomeStreamBreakdownItem[] = Array.from(streamMap.entries())
+    .map(([name, data]) => ({ name, amount: data.amount, count: data.count }))
+    .sort((a, b) => b.amount - a.amount);
 
   return {
-    total: gamma + venture,
-    gamma, gammaDate, nextPayday, isLate,
-    venture, ventureLast4Weeks,
-    otherWeeklyBonus, otherItems,
+    total,
+    gamma,
+    gammaDate,
+    cycleStart,
+    nextPayday,
+    isLate,
+    venture,
+    ventureLast4Weeks: venture,
+    otherWeeklyBonus: 0,
+    otherItems: [],
+    streams,
   };
 }
 
