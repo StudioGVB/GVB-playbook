@@ -108,10 +108,10 @@ export default function FinancialReportExporterModal({ trigger }: Props) {
         {trigger || (
           <Button
             size="sm"
-            className="bg-gradient-to-r from-pink-600 to-rose-500 hover:from-pink-700 hover:to-rose-600 text-white font-bold rounded-2xl px-4 shadow-lg shadow-pink-500/20 gap-2 transition-all"
+            className="bg-[#FF2EB8] hover:bg-[#e024a0] text-white font-bold rounded-xl px-4 shadow-sm gap-2 transition-colors"
           >
-            <Bot className="w-4 h-4 animate-bounce" />
-            Export 3-Mo AI Financial Report
+            <FileText className="w-4 h-4" />
+            Summary
           </Button>
         )}
       </DialogTrigger>
@@ -119,7 +119,7 @@ export default function FinancialReportExporterModal({ trigger }: Props) {
       <DialogContent className="max-w-4xl max-h-[92vh] rounded-3xl p-6 sm:p-8 overflow-hidden font-body bg-white dark:bg-slate-900 border border-pink-200/50 shadow-2xl">
         <DialogHeader className="border-b border-slate-100 dark:border-slate-800 pb-4">
           <div className="flex items-start gap-4">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-pink-500 to-rose-500 text-white flex items-center justify-center shadow-lg shadow-pink-500/20 shrink-0 mt-0.5">
+            <div className="w-12 h-12 rounded-2xl bg-[#FF2EB8] text-white flex items-center justify-center shadow-sm shrink-0 mt-0.5">
               <Bot className="w-6 h-6" />
             </div>
             <div className="space-y-1 flex-1">
@@ -193,7 +193,7 @@ export default function FinancialReportExporterModal({ trigger }: Props) {
 
               <Button
                 onClick={handleCopyPrompt}
-                className="bg-gradient-to-r from-pink-600 to-rose-500 hover:from-pink-700 hover:to-rose-600 text-white font-bold rounded-xl px-6 py-2 shadow-lg shadow-pink-500/20 gap-2 transition-all"
+                className="bg-[#FF2EB8] hover:bg-[#e024a0] text-white font-bold rounded-xl px-6 py-2 shadow-sm gap-2 transition-colors"
               >
                 {copied ? <Check className="w-4 h-4 text-emerald-300" /> : <Copy className="w-4 h-4" />}
                 {copied ? 'Copied Master AI Prompt!' : 'Copy Master AI Prompt'}
