@@ -17,20 +17,17 @@ import { useWeeklyBoosts } from '@/hooks/useWeeklyBoosts';
 import { useWeekTypes } from '@/hooks/useWeekTypes';
 import { computePolicySnapshot, computeRequiredGoalSavingsMonthly } from '@/lib/policyEngine';
 import { formatCurrency, baseAmt, parseUkDate } from '@/lib/financeUtils';
-import { MetricCard } from '@/components/finance/MetricCard';
-import { MultiSegmentDonut } from '@/components/finance/MultiSegmentDonut';
 import MonthlyCashFlowBreakdown from '@/components/finance/MonthlyCashFlowBreakdown';
-import { calcTakeHome } from '@/lib/ukTakeHome';
 import {
-  startOfMonth, endOfMonth, subMonths, addMonths, format, addWeeks,
+  startOfMonth, endOfMonth, subMonths, addMonths, format,
   getDaysInMonth, getDate,
 } from 'date-fns';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import {
   ChevronLeft, ChevronRight, ShoppingCart, PartyPopper,
-  Lock, TrendingUp, TrendingDown, Minus, DollarSign, Shield,
-  ShoppingBasket, Pill, Bus, Utensils, Pencil, Gauge, LayoutGrid, Sparkles,
-  Award, MapPin, BarChart3, PiggyBank, Percent, ArrowUpRight, CheckCircle2,
+  Lock, TrendingUp, TrendingDown, Minus, DollarSign,
+  Pencil, Gauge, LayoutGrid, Sparkles,
+  Award, MapPin, BarChart3, PiggyBank, Percent, CheckCircle2, Clock,
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -78,13 +75,6 @@ const MONTHLY_PEER_BENCHMARKS = [
   },
 ];
 
-const FREQ_TO_MONTHLY: Record<string, number> = {
-  weekly: 52 / 12,
-  fortnightly: 26 / 12,
-  monthly: 1,
-  quarterly: 1 / 3,
-  yearly: 1 / 12,
-};
 
 export default function FinanceMonthly() {
   const finance = useFinanceData();
@@ -92,7 +82,6 @@ export default function FinanceMonthly() {
   const { expenses: fixedExpenses, monthlyTotalInternal: fixedExpensesMonthly, monthlyTotal: fixedExpensesMonthlyAll, reimbursementsOn } = useFixedExpenses();
   const { totalBoostThisWeek } = useWeeklyBoosts();
   const { weekTypeMap: wtMap } = useWeekTypes();
-
 
   const snapshot = useMemo(() => {
     if (!assumptions) return null;
@@ -111,30 +100,25 @@ export default function FinanceMonthly() {
   const monthLabel = format(monthStart, 'MMMM yyyy');
 
   const baseCurrency = finance.settings?.base_currency || 'GBP';
-  const fxRates = (finance.settings?.fx_rates || {}) as Record<string, number>;
-  const audToGbp = fxRates['AUD_GBP'] || 0.52;
   const fmt = (n: number) => formatCurrency(n, baseCurrency);
-  const fmtGbp = (n: number) => formatCurrency(n * audToGbp, 'GBP');
 
   const catMap = useMemo(() => new Map(finance.categories.map(c => [c.id, c])), [finance.categories]);
   const essentialCatIds = useMemo(() => new Set(
     finance.categories.filter(c => c.is_essential && c.type === 'variable').map(c => c.id)
   ), [finance.categories]);
 
-  // Monthly overview should show every committed fixed bill, including bills
-  // paid from external accounts like rent. Pool/runway logic still receives the
-  // internal-only total separately via the policy snapshot above.
+  // Monthly overview shows every committed fixed bill, including external bills like rent
   const fixedMonthly = fixedExpensesMonthlyAll;
 
-
   // Monthly budgets
-  const monthlyEssentialBudget = snapshot 
-    ? snapshot.weeklyEssentialBudget * 4.33 
+  const monthlyEssentialBudget = snapshot
+    ? snapshot.weeklyEssentialBudget * 4.33
     : (assumptions?.estimated_essential_variable || 400);
-  const monthlyFunBudget = snapshot 
-    ? snapshot.baseWeeklyFun * 4.33 
+  const monthlyFunBudget = snapshot
+    ? snapshot.baseWeeklyFun * 4.33
     : (assumptions ? (assumptions.weekly_fun_budget || 100) * 4.33 : 0);
-  const autoTotalBudget = monthlyEssentialBudget + monthlyFunBudget + fixedMonthly;
+  const monthlyVariableBudget = monthlyEssentialBudget + monthlyFunBudget;
+  const autoTotalBudget = monthlyVariableBudget + fixedMonthly;
   const budgetOverride = (assumptions as any)?.monthly_budget_override;
   const monthlyTotalBudget = (budgetOverride != null && budgetOverride !== '') ? Number(budgetOverride) : autoTotalBudget;
   const expectedIncomeVal = snapshot?.split.monthlyIncome ?? (assumptions?.expected_monthly_income || 0);
@@ -166,19 +150,20 @@ export default function FinanceMonthly() {
     return cat?.type === 'fixed';
   }, [catMap]);
 
-  // Spending breakdown
-  const { essentialSpent, funSpent, fixedSpent, incomeTotal, categoryBreakdown, dailyData } = useMemo(() => {
+  // Spending breakdown (strictly separating Fixed Bills from Variable Categories)
+  const { essentialSpent, funSpent, fixedSpent, incomeTotal, variableCategoryBreakdown, paidFixedTxns, dailyData } = useMemo(() => {
     let essentialSpent = 0;
     let funSpent = 0;
     let fixedSpent = 0;
     let incomeTotal = 0;
     const catTotals = new Map<string, number>();
+    const paidFixedTxns: Array<{ id: string; name: string; amount: number; date: Date; fixedExpenseId?: string | null }> = [];
 
     for (const tx of monthTxns) {
       const cat = catMap.get(tx.category_id || '');
       const rawText = `${tx.merchant || ''} ${tx.description || ''}`.toLowerCase();
       const isIncomeCategory = cat?.type === 'income';
-      const isGabriellaIncome = rawText.includes('gabriella') && tx.amount > 0 && !tx.transfer_group_id;
+      const isGabriellaIncome = rawText.includes('gabriella') && tx.amount > 0 && !tx.transfer_group_id && !tx.is_transfer;
       const isIncomeKeyword = rawText.includes('batchbase') || rawText.includes('batch base') || rawText.includes('payroll') || rawText.includes('salary') || rawText.includes('venture') || rawText.includes('etsy') || isGabriellaIncome;
 
       if (tx.amount > 0 && (!tx.is_transfer || isIncomeCategory || isIncomeKeyword)) {
@@ -189,15 +174,19 @@ export default function FinanceMonthly() {
       }
       if (tx.amount >= 0 || tx.is_transfer) continue;
       if ((tx as any).goal_id) continue;
-
       if (cat?.exclude_from_reports) continue;
 
       const amt = Math.abs(baseAmt(tx));
 
       if (isFixedTx(tx)) {
         fixedSpent += amt;
-        const catId = tx.category_id || '__uncategorised';
-        catTotals.set(catId, (catTotals.get(catId) || 0) + amt);
+        paidFixedTxns.push({
+          id: tx.id,
+          name: tx.merchant || tx.description || cat?.name || 'Fixed Bill',
+          amount: amt,
+          date: parseUkDate(tx.posted_at),
+          fixedExpenseId: (tx as any).fixed_expense_id,
+        });
         continue;
       }
       if (cat?.type === 'income' || cat?.type === 'transfer') continue;
@@ -212,8 +201,7 @@ export default function FinanceMonthly() {
       }
     }
 
-
-    const categoryBreakdown = Array.from(catTotals.entries()).map(([catId, total]) => {
+    const variableCategoryBreakdown = Array.from(catTotals.entries()).map(([catId, total]) => {
       const cat = catMap.get(catId);
       return {
         catId,
@@ -224,7 +212,7 @@ export default function FinanceMonthly() {
       };
     }).sort((a, b) => b.total - a.total);
 
-    // Daily data
+    // Daily variable data
     const daysInMonth = getDaysInMonth(monthStart);
     const dailyData = Array.from({ length: daysInMonth }, () => ({ essential: 0, fun: 0 }));
 
@@ -246,58 +234,49 @@ export default function FinanceMonthly() {
       }
     }
 
-    // Add phantom reimbursements from externally-paid bills so income isn't understated.
+    // Add phantom reimbursements from externally-paid bills so income isn't understated
     const monthIso = format(monthStart, 'yyyy-MM-dd');
     for (const r of reimbursementsOn(monthIso)) incomeTotal += r.amount;
 
-    return { essentialSpent, funSpent, fixedSpent, incomeTotal, categoryBreakdown, dailyData };
+    return { essentialSpent, funSpent, fixedSpent, incomeTotal, variableCategoryBreakdown, paidFixedTxns, dailyData };
   }, [monthTxns, catMap, essentialCatIds, monthStart, isFixedTx, reimbursementsOn]);
 
-  const totalSpent = essentialSpent + funSpent + fixedSpent;
+  const variableSpent = essentialSpent + funSpent;
+  const totalSpent = variableSpent + fixedSpent;
   const netProfit = incomeTotal - totalSpent;
   const savingsRate = incomeTotal > 0 ? (netProfit / incomeTotal) * 100 : 0;
 
-  // Pace projection (only meaningful for current month)
+  // Pool savings monthly target
+  const poolSavingsMonthly = useMemo(() => {
+    const directGoalSavings = computeRequiredGoalSavingsMonthly(
+      finance.goals,
+      finance.convertToBase,
+      selectedMonth,
+      incomeTotal || expectedIncomeVal
+    );
+    return (snapshot?.split.goalSavingsAmount && snapshot.split.goalSavingsAmount > 0)
+      ? snapshot.split.goalSavingsAmount
+      : directGoalSavings;
+  }, [finance.goals, finance.convertToBase, selectedMonth, incomeTotal, expectedIncomeVal, snapshot]);
+
+  // Pace projection (focused on Variable Spending: Essentials + Fun)
   const today = new Date();
   const isCurrentMonth = today >= monthStart && today <= monthEnd;
   const daysInMonth = getDaysInMonth(monthStart);
   const daysElapsed = isCurrentMonth ? getDate(today) : daysInMonth;
   const daysRemaining = Math.max(0, daysInMonth - daysElapsed);
-  const variableSpent = essentialSpent + funSpent;
+
   const dailyVariablePace = daysElapsed > 0 ? variableSpent / daysElapsed : 0;
+  const targetDailyVariable = daysInMonth > 0 ? monthlyVariableBudget / daysInMonth : 0;
+  const variableRemaining = Math.max(0, monthlyVariableBudget - variableSpent);
+  const safeDailyRemaining = daysRemaining > 0 ? variableRemaining / daysRemaining : 0;
+
   const projectedVariableSpend = dailyVariablePace * daysInMonth;
   const projectedSpend = projectedVariableSpend + fixedMonthly;
   const projectedDiff = projectedSpend - monthlyTotalBudget; // positive => over
-  const spendPct = monthlyTotalBudget > 0 ? (totalSpent / monthlyTotalBudget) * 100 : 0;
+
   const timePct = (daysElapsed / daysInMonth) * 100;
-
-  // Effective spending for peer benchmark comparison:
-  // For current active month, use projected full-month pace so comparison is 1:1 proportional (full month vs full month).
-  const effectiveSpent = isCurrentMonth ? projectedSpend : totalSpent;
-  const effectiveNetProfit = incomeTotal - effectiveSpent;
-
-  const selectedBenchmark = useMemo(() => (
-    MONTHLY_PEER_BENCHMARKS.find(b => b.id === selectedBenchmarkId) || MONTHLY_PEER_BENCHMARKS[0]
-  ), [selectedBenchmarkId]);
-
-  const diffProfit = effectiveNetProfit - selectedBenchmark.monthlySavings;
-  const diffExpenses = selectedBenchmark.monthlyExpenses - effectiveSpent; // positive = spending less than benchmark!
-  const annualizedNetProfit = netProfit * 12;
-
-  const incomeDiffPct = selectedBenchmark.monthlyIncome > 0 ? ((incomeTotal - selectedBenchmark.monthlyIncome) / selectedBenchmark.monthlyIncome) * 100 : 0;
-  const spendingDiffPct = selectedBenchmark.monthlyExpenses > 0 ? ((effectiveSpent - selectedBenchmark.monthlyExpenses) / selectedBenchmark.monthlyExpenses) * 100 : 0;
-  const netProfitDiffPct = selectedBenchmark.monthlySavings > 0 ? ((effectiveNetProfit - selectedBenchmark.monthlySavings) / selectedBenchmark.monthlySavings) * 100 : 0;
-
-  const { percentileLabel, percentileRank } = useMemo(() => {
-    const p = netProfit;
-    if (p >= 1500) return { percentileLabel: 'Top 2%', percentileRank: 98 };
-    if (p >= 1050) return { percentileLabel: 'Top 5%', percentileRank: 95 };
-    if (p >= 750) return { percentileLabel: 'Top 10%', percentileRank: 90 };
-    if (p >= 550) return { percentileLabel: 'Top 25%', percentileRank: 75 };
-    if (p >= 400) return { percentileLabel: 'Top 45%', percentileRank: 55 };
-    if (p > 0) return { percentileLabel: 'Top 60%', percentileRank: 40 };
-    return { percentileLabel: 'Building Surplus', percentileRank: 20 };
-  }, [netProfit]);
+  const variableUsedPct = monthlyVariableBudget > 0 ? (variableSpent / monthlyVariableBudget) * 100 : 0;
 
   // Previous month totals for comparison
   const prevTotals = useMemo(() => {
@@ -320,14 +299,12 @@ export default function FinanceMonthly() {
       if ((tx as any).goal_id) continue;
       if (cat?.exclude_from_reports) continue;
       const amt = Math.abs(baseAmt(tx));
-      if (isFixedTx(tx)) { 
-        fixed += amt; 
-        const catId = tx.category_id || '__uncategorised';
-        catTotals.set(catId, (catTotals.get(catId) || 0) + amt);
-        continue; 
+      if (isFixedTx(tx)) {
+        fixed += amt;
+        continue;
       }
       if (cat?.type === 'income' || cat?.type === 'transfer') continue;
-      
+
       const catId = tx.category_id || '__uncategorised';
       catTotals.set(catId, (catTotals.get(catId) || 0) + amt);
 
@@ -343,9 +320,7 @@ export default function FinanceMonthly() {
     return { essential, fun, fixed, income, total: essential + fun + fixed, catTotals };
   }, [prevMonthTxns, catMap, essentialCatIds, isFixedTx, prevMonthStart, reimbursementsOn]);
 
-  const netBudget = monthlyTotalBudget - totalSpent;
-
-  // Pro-rated comparison scaling for month-to-date (e.g. Day 11 of 30 vs Day 11 of 31)
+  // Pro-rated comparison scaling for month-to-date
   const daysInPrevMonth = useMemo(() => getDaysInMonth(prevMonthStart), [prevMonthStart]);
   const proRateFactor = useMemo(() => {
     return (isCurrentMonth && daysInPrevMonth > 0) ? (daysElapsed / daysInPrevMonth) : 1;
@@ -361,9 +336,29 @@ export default function FinanceMonthly() {
     };
   }, [prevTotals, proRateFactor]);
 
-  const expectedPct = monthlyTotalBudget > 0 
-    ? ((fixedMonthly + (monthlyEssentialBudget + monthlyFunBudget) * (daysElapsed / daysInMonth)) / monthlyTotalBudget) * 100 
-    : 0;
+  // Effective spending for peer benchmark comparison
+  const effectiveSpent = isCurrentMonth ? projectedSpend : totalSpent;
+  const effectiveNetProfit = incomeTotal - effectiveSpent;
+
+  const selectedBenchmark = useMemo(() => (
+    MONTHLY_PEER_BENCHMARKS.find(b => b.id === selectedBenchmarkId) || MONTHLY_PEER_BENCHMARKS[0]
+  ), [selectedBenchmarkId]);
+
+  const annualizedNetProfit = netProfit * 12;
+  const incomeDiffPct = selectedBenchmark.monthlyIncome > 0 ? ((incomeTotal - selectedBenchmark.monthlyIncome) / selectedBenchmark.monthlyIncome) * 100 : 0;
+  const spendingDiffPct = selectedBenchmark.monthlyExpenses > 0 ? ((effectiveSpent - selectedBenchmark.monthlyExpenses) / selectedBenchmark.monthlyExpenses) * 100 : 0;
+  const netProfitDiffPct = selectedBenchmark.monthlySavings > 0 ? ((effectiveNetProfit - selectedBenchmark.monthlySavings) / selectedBenchmark.monthlySavings) * 100 : 0;
+
+  const { percentileLabel } = useMemo(() => {
+    const p = netProfit;
+    if (p >= 1500) return { percentileLabel: 'Top 2%', percentileRank: 98 };
+    if (p >= 1050) return { percentileLabel: 'Top 5%', percentileRank: 95 };
+    if (p >= 750) return { percentileLabel: 'Top 10%', percentileRank: 90 };
+    if (p >= 550) return { percentileLabel: 'Top 25%', percentileRank: 75 };
+    if (p >= 400) return { percentileLabel: 'Top 45%', percentileRank: 55 };
+    if (p > 0) return { percentileLabel: 'Top 60%', percentileRank: 40 };
+    return { percentileLabel: 'Building Surplus', percentileRank: 20 };
+  }, [netProfit]);
 
   // Budget editor
   const [budgetDialogOpen, setBudgetDialogOpen] = useState(false);
@@ -376,6 +371,7 @@ export default function FinanceMonthly() {
     const v = budgetInput.trim();
     await updateAssumptions({ monthly_budget_override: v === '' ? null : Number(v) } as any);
     setBudgetDialogOpen(false);
+    toast.success('Monthly budget updated');
   };
 
   const trendIcon = (current: number, previous: number, invert = false) => {
@@ -395,26 +391,63 @@ export default function FinanceMonthly() {
     return `${pct > 0 ? '+' : ''}${pct.toFixed(0)}%`;
   };
 
-  const essentialCats = categoryBreakdown.filter(c => c.isEssential);
-  const funCats = categoryBreakdown.filter(c => !c.isEssential);
+  const essentialCats = variableCategoryBreakdown.filter(c => c.isEssential);
+  const funCats = variableCategoryBreakdown.filter(c => !c.isEssential);
 
-  // Category / merchant / description spotlight tiles
-  const [selectedSpotlight, setSelectedSpotlight] = useState<{
-    key: string;
-    label: string;
-    icon: typeof ShoppingBasket;
-    kw: string[];
-  } | null>(null);
+  // Build Fixed Bills checklist (committed bills matched against paid fixed transactions this month)
+  const fixedBillsStatusList = useMemo(() => {
+    const activeExpenses = fixedExpenses.filter(e => (e as any).is_active !== false);
+    const usedTxIds = new Set<string>();
 
-  // Category drill-down (for "All categories" grid)
+    const items = activeExpenses.map(exp => {
+      const monthlyAmt = finance.convertToBase(exp.amount, exp.currency) * (FREQ_TO_MONTHLY[exp.frequency] ?? 1);
+      const expWords = exp.name.toLowerCase().split(/\s+/).filter(w => w.length >= 3);
+
+      const matchedTx = paidFixedTxns.find(tx => {
+        if (usedTxIds.has(tx.id)) return false;
+        if (tx.fixedExpenseId && tx.fixedExpenseId === exp.id) return true;
+        const txLower = tx.name.toLowerCase();
+        if (expWords.some(w => txLower.includes(w))) return true;
+        return Math.abs(tx.amount - monthlyAmt) <= Math.max(2, monthlyAmt * 0.08);
+      });
+
+      if (matchedTx) usedTxIds.add(matchedTx.id);
+
+      const isExternalPaid = Boolean(exp.paid_externally);
+      const isPaid = Boolean(matchedTx) || (isExternalPaid && exp.due_day ? exp.due_day <= daysElapsed : isExternalPaid);
+
+      return {
+        id: exp.id,
+        name: exp.name,
+        committedAmount: monthlyAmt,
+        paidAmount: matchedTx ? matchedTx.amount : (isPaid ? monthlyAmt : 0),
+        isPaid,
+        dueDay: exp.due_day,
+        paidExternally: exp.paid_externally,
+      };
+    });
+
+    // Include any extra fixed transactions that didn't match a template bill
+    for (const tx of paidFixedTxns) {
+      if (!usedTxIds.has(tx.id)) {
+        items.push({
+          id: tx.id,
+          name: tx.name,
+          committedAmount: tx.amount,
+          paidAmount: tx.amount,
+          isPaid: true,
+          dueDay: getDate(tx.date),
+          paidExternally: false,
+        });
+      }
+    }
+
+    return items.sort((a, b) => b.committedAmount - a.committedAmount);
+  }, [fixedExpenses, paidFixedTxns, finance.convertToBase, daysElapsed]);
+
+  // Category drill-down (for clicking any category row)
   const [selectedCategory, setSelectedCategory] = useState<{ catId: string; name: string; color: string } | null>(null);
-  const [categoryModalView, setCategoryModalView] = useState<'transactions' | 'merchants'>('transactions');
-  const [spotlightModalView, setSpotlightModalView] = useState<'transactions' | 'merchants'>('transactions');
   const [selectedDayNum, setSelectedDayNum] = useState<number | null>(null);
-
-  const availableCategories = useMemo(() => {
-    return [...finance.categories].sort((a, b) => a.name.localeCompare(b.name));
-  }, [finance.categories]);
 
   const selectedMonthlyDayDate = useMemo(() => {
     if (selectedDayNum === null) return null;
@@ -438,50 +471,45 @@ export default function FinanceMonthly() {
     return selectedMonthlyDayTxns.reduce((sum, tx) => sum + Math.abs(baseAmt(tx)), 0);
   }, [selectedMonthlyDayTxns]);
 
-
-  // Known-brand dictionary: maps regex hits in raw txn text to a canonical merchant + spotlight bucket.
-  const BRAND_MAP: Array<{ match: RegExp; name: string; category: string }> = [
-    // Transport
-    { match: /\bbolt(\.eu|\.com)?\b/i, name: 'Bolt', category: 'transport' },
-    { match: /\buber(?!\s*eats)\b/i, name: 'Uber', category: 'transport' },
-    { match: /\blyft\b/i, name: 'Lyft', category: 'transport' },
-    { match: /\btfl\b|transport for london/i, name: 'TfL', category: 'transport' },
-    { match: /\btfgm\b|beenetwork/i, name: 'TfGM (Manchester)', category: 'transport' },
-    { match: /national\s*rail|trainline|lner|avanti|northern rail/i, name: 'National Rail', category: 'transport' },
-    // Supermarkets
-    { match: /sainsbury/i, name: "Sainsbury's", category: 'supermarkets' },
-    { match: /tesco/i, name: 'Tesco', category: 'supermarkets' },
-    { match: /\basda\b/i, name: 'Asda', category: 'supermarkets' },
-    { match: /\baldi\b/i, name: 'Aldi', category: 'supermarkets' },
-    { match: /\blidl\b/i, name: 'Lidl', category: 'supermarkets' },
-    { match: /waitrose/i, name: 'Waitrose', category: 'supermarkets' },
-    { match: /\bco[- ]?op\b|cooperative/i, name: 'Co-op', category: 'supermarkets' },
-    { match: /marks\s*&?\s*spencer|\bm&s\b/i, name: 'M&S', category: 'supermarkets' },
-    { match: /morrisons/i, name: 'Morrisons', category: 'supermarkets' },
-    { match: /iceland/i, name: 'Iceland', category: 'supermarkets' },
-    // Pharmacies
-    { match: /\bboots\b/i, name: 'Boots', category: 'pharmacies' },
-    { match: /super\s*drug/i, name: 'Superdrug', category: 'pharmacies' },
-    { match: /lloyds\s*pharm/i, name: 'Lloyds Pharmacy', category: 'pharmacies' },
-    { match: /well\s*pharmacy/i, name: 'Well Pharmacy', category: 'pharmacies' },
-    { match: /day\s*lewis/i, name: 'Day Lewis', category: 'pharmacies' },
-    { match: /rowlands/i, name: 'Rowlands', category: 'pharmacies' },
-    // Eating out
-    { match: /deliveroo/i, name: 'Deliveroo', category: 'eatingout' },
-    { match: /just\s*eat/i, name: 'Just Eat', category: 'eatingout' },
-    { match: /uber\s*eats/i, name: 'Uber Eats', category: 'eatingout' },
-    { match: /gousto/i, name: 'Gousto', category: 'eatingout' },
-    { match: /hellofresh/i, name: 'HelloFresh', category: 'eatingout' },
-    { match: /wetherspoon/i, name: 'Wetherspoons', category: 'eatingout' },
-    { match: /pret\s*a\s*manger|\bpret\b/i, name: 'Pret A Manger', category: 'eatingout' },
-    { match: /greggs/i, name: 'Greggs', category: 'eatingout' },
-    { match: /mcdonald/i, name: "McDonald's", category: 'eatingout' },
-    { match: /starbucks/i, name: 'Starbucks', category: 'eatingout' },
-    { match: /costa\s*coffee|\bcosta\b/i, name: 'Costa', category: 'eatingout' },
-    { match: /caff[eè]?\s*nero|\bnero\b/i, name: 'Caffè Nero', category: 'eatingout' },
-    { match: /leno\s*ex\s*machina/i, name: 'Leno Ex Machina', category: 'eatingout' },
-    { match: /freemount/i, name: 'Freemount', category: 'eatingout' },
-    { match: /slemani/i, name: 'Slemani Restaurant', category: 'eatingout' },
+  // Known-brand dictionary for clean merchant names
+  const BRAND_MAP: Array<{ match: RegExp; name: string }> = [
+    { match: /\bbolt(\.eu|\.com)?\b/i, name: 'Bolt' },
+    { match: /\buber(?!\s*eats)\b/i, name: 'Uber' },
+    { match: /\blyft\b/i, name: 'Lyft' },
+    { match: /\btfl\b|transport for london/i, name: 'TfL' },
+    { match: /\btfgm\b|beenetwork/i, name: 'TfGM (Manchester)' },
+    { match: /national\s*rail|trainline|lner|avanti|northern rail/i, name: 'National Rail' },
+    { match: /sainsbury/i, name: "Sainsbury's" },
+    { match: /tesco/i, name: 'Tesco' },
+    { match: /\basda\b/i, name: 'Asda' },
+    { match: /\baldi\b/i, name: 'Aldi' },
+    { match: /\blidl\b/i, name: 'Lidl' },
+    { match: /waitrose/i, name: 'Waitrose' },
+    { match: /\bco[- ]?op\b|cooperative/i, name: 'Co-op' },
+    { match: /marks\s*&?\s*spencer|\bm&s\b/i, name: 'M&S' },
+    { match: /morrisons/i, name: 'Morrisons' },
+    { match: /iceland/i, name: 'Iceland' },
+    { match: /\bboots\b/i, name: 'Boots' },
+    { match: /super\s*drug/i, name: 'Superdrug' },
+    { match: /lloyds\s*pharm/i, name: 'Lloyds Pharmacy' },
+    { match: /well\s*pharmacy/i, name: 'Well Pharmacy' },
+    { match: /day\s*lewis/i, name: 'Day Lewis' },
+    { match: /rowlands/i, name: 'Rowlands' },
+    { match: /deliveroo/i, name: 'Deliveroo' },
+    { match: /just\s*eat/i, name: 'Just Eat' },
+    { match: /uber\s*eats/i, name: 'Uber Eats' },
+    { match: /gousto/i, name: 'Gousto' },
+    { match: /hellofresh/i, name: 'HelloFresh' },
+    { match: /wetherspoon/i, name: 'Wetherspoons' },
+    { match: /pret\s*a\s*manger|\bpret\b/i, name: 'Pret A Manger' },
+    { match: /greggs/i, name: 'Greggs' },
+    { match: /mcdonald/i, name: "McDonald's" },
+    { match: /starbucks/i, name: 'Starbucks' },
+    { match: /costa\s*coffee|\bcosta\b/i, name: 'Costa' },
+    { match: /caff[eè]?\s*nero|\bnero\b/i, name: 'Caffè Nero' },
+    { match: /leno\s*ex\s*machina/i, name: 'Leno Ex Machina' },
+    { match: /freemount/i, name: 'Freemount' },
+    { match: /slemani/i, name: 'Slemani Restaurant' },
   ];
 
   const NOISE = /\b(london|manchester|manches|watford|leeds|birmingham|liverpool|glasgow|edinburgh|bristol|cardiff|nottingham|notting|uk|gbr|ltd|limited|plc|tickets?|purchase|payment|contactless|visa|mastercard|ref|txn|the)\b/gi;
@@ -502,135 +530,24 @@ export default function FinanceMonthly() {
     return words.toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
   };
 
-  const categoryTransactions = useMemo(() => {
-    if (!selectedCategory) return [];
-    return monthTxns
-      .filter(tx => {
-        if (tx.amount >= 0 || tx.is_transfer) return false;
-        if ((tx as any).goal_id) return false;
-        const catId = tx.category_id || '__uncategorised';
-        return catId === selectedCategory.catId;
-      })
-      .sort((a, b) => {
-        const da = parseUkDate(a.posted_at).getTime();
-        const db = parseUkDate(b.posted_at).getTime();
-        return db - da;
-      });
-  }, [selectedCategory, monthTxns]);
-
   const categoryMerchantBreakdown = useMemo(() => {
-    if (!selectedCategory) return [] as { name: string; total: number; transactions: typeof monthTxns }[];
-    const map = new Map<string, { total: number; transactions: typeof monthTxns }>();
-    for (const tx of categoryTransactions) {
-      const key = canonicaliseMerchant(tx.merchant || tx.description || 'Unknown');
-      const existing = map.get(key);
-      if (existing) {
-        existing.total += Math.abs(baseAmt(tx));
-        existing.transactions.push(tx);
-      } else {
-        map.set(key, {
-          total: Math.abs(baseAmt(tx)),
-          transactions: [tx],
-        });
-      }
+    if (!selectedCategory) return [] as { name: string; total: number; count: number }[];
+    const map = new Map<string, { total: number; count: number }>();
+    for (const tx of monthTxns) {
+      if (tx.amount >= 0 || tx.is_transfer) continue;
+      if ((tx as any).goal_id || isFixedTx(tx)) continue;
+      const catId = tx.category_id || '__uncategorised';
+      if (catId !== selectedCategory.catId) continue;
+      const key = canonicaliseMerchant(tx.merchant || tx.description || '');
+      const prev = map.get(key) || { total: 0, count: 0 };
+      map.set(key, { total: prev.total + Math.abs(baseAmt(tx)), count: prev.count + 1 });
     }
     return Array.from(map.entries())
-      .map(([name, data]) => ({ name, total: data.total, transactions: data.transactions }))
+      .map(([name, data]) => ({ name, total: data.total, count: data.count }))
       .sort((a, b) => b.total - a.total);
-  }, [selectedCategory, categoryTransactions]);
+  }, [selectedCategory, monthTxns, isFixedTx]);
 
-  const categoryTransactionsTotal = useMemo(() => {
-    return categoryTransactions.reduce((sum, tx) => sum + Math.abs(baseAmt(tx)), 0);
-  }, [categoryTransactions]);
-
-  const matchesSpotlightCategory = (tx: typeof monthTxns[0], keywords: string[]) => {
-    if (tx.amount >= 0 || tx.is_transfer) return false;
-    if ((tx as any).goal_id) return false;
-    const cat = catMap.get(tx.category_id || '');
-    if (cat?.exclude_from_reports) return false;
-    if (isFixedTx(tx)) return false;
-    const name = (cat?.name || '').toLowerCase();
-    return keywords.some(k => name.includes(k));
-  };
-
-  const spotlight = useMemo(() => {
-    return [
-      { key: 'supermarkets', label: 'Supermarkets', icon: ShoppingBasket, kw: ['grocer', 'supermarket'] },
-      { key: 'pharmacies', label: 'Pharmacies', icon: Pill, kw: ['pharma', 'pharmacy', 'chemist'] },
-      { key: 'transport', label: 'Transport', icon: Bus, kw: ['transport', 'transit', 'train', 'tube', 'bus', 'taxi', 'fuel', 'petrol'] },
-      { key: 'eatingout', label: 'Eating Out', icon: Utensils, kw: ['eating', 'restaurant', 'cafe', 'takeaway', 'coffee'] },
-    ].map(s => {
-      const current = categoryBreakdown
-        .filter(c => {
-          const name = (c.name || '').toLowerCase();
-          return s.kw.some(k => name.includes(k));
-        })
-        .reduce((sum, c) => sum + c.total, 0);
-
-      const previousFull = Array.from(prevTotals.catTotals.entries())
-        .filter(([catId]) => {
-          const cat = catMap.get(catId);
-          const name = (cat?.name || '').toLowerCase();
-          return s.kw.some(k => name.includes(k));
-        })
-        .reduce((sum, [, total]) => sum + total, 0);
-
-      const previous = previousFull * proRateFactor;
-
-      return {
-        ...s,
-        current,
-        previous,
-      };
-    });
-  }, [categoryBreakdown, prevTotals.catTotals, catMap, proRateFactor]);
-
-  const spotlightTransactions = useMemo(() => {
-    if (!selectedSpotlight) return [];
-    return monthTxns
-      .filter(tx => matchesSpotlightCategory(tx, selectedSpotlight.kw))
-      .sort((a, b) => {
-        const da = parseUkDate(a.posted_at).getTime();
-        const db = parseUkDate(b.posted_at).getTime();
-        return db - da;
-      });
-  }, [selectedSpotlight, monthTxns, catMap, isFixedTx]);
-
-  const spotlightBreakdown = useMemo(() => {
-    if (!selectedSpotlight) return [] as { name: string; total: number; transactions: typeof monthTxns }[];
-    const map = new Map<string, { total: number; transactions: typeof monthTxns }>();
-    for (const tx of spotlightTransactions) {
-      const key = canonicaliseMerchant(tx.merchant || tx.description || 'Unknown');
-      const existing = map.get(key);
-      if (existing) {
-        existing.total += Math.abs(baseAmt(tx));
-        existing.transactions.push(tx);
-      } else {
-        map.set(key, {
-          total: Math.abs(baseAmt(tx)),
-          transactions: [tx],
-        });
-      }
-    }
-    return Array.from(map.entries())
-      .map(([name, data]) => ({ name, total: data.total, transactions: data.transactions }))
-      .sort((a, b) => b.total - a.total);
-  }, [selectedSpotlight, spotlightTransactions]);
-
-  const spotlightTransactionsTotal = useMemo(() => {
-    return spotlightTransactions.reduce((sum, tx) => sum + Math.abs(baseAmt(tx)), 0);
-  }, [spotlightTransactions]);
-
-
-
-  // Donut segments
-  const donutSegments = categoryBreakdown.slice(0, 8).map(c => ({
-    color: c.color,
-    value: c.total,
-    label: c.name,
-  }));
-
-  const maxDaily = Math.max(...dailyData.map(d => d.essential + d.fun), 1);
+  const maxDaily = Math.max(...dailyData.map(d => d.essential + d.fun), targetDailyVariable * 1.2, 1);
 
   if (finance.loading || assumptionsLoading) {
     return (
@@ -645,10 +562,17 @@ export default function FinanceMonthly() {
     <div className="space-y-6 w-full font-body -mx-4 sm:-mx-6 -mt-6 px-4 sm:px-6 pt-6 pb-24 min-h-screen bg-[#FFF5FA]">
       {/* Header with month selector */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <h1 className="text-3xl sm:text-4xl font-display font-bold text-slate-900 tracking-tight">Monthly Overview</h1>
+        <div>
+          <h1 className="text-3xl sm:text-4xl font-display font-bold text-slate-900 tracking-tight">Monthly Overview</h1>
+          <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
+            {isCurrentMonth
+              ? `Day ${daysElapsed} of ${daysInMonth} (${daysRemaining} days remaining in ${monthLabel})`
+              : `Full month summary for ${monthLabel} (${daysInMonth} days)`}
+          </p>
+        </div>
         <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
           <FinancialReportExporterModal />
-          <div className="flex items-center gap-1 bg-white/70 backdrop-blur-sm p-1 rounded-2xl border border-pink-200/50">
+          <div className="flex items-center gap-1 bg-white/80 backdrop-blur-sm p-1 rounded-2xl border border-pink-200/60 shadow-2xs">
             <Button variant="ghost" size="icon" onClick={() => setSelectedMonth(m => subMonths(m, 1))}>
               <ChevronLeft className="w-4 h-4" />
             </Button>
@@ -671,996 +595,600 @@ export default function FinanceMonthly() {
           <TabsList className="bg-white/90 backdrop-blur-md p-1 rounded-xl border border-slate-200/80 shadow-xs inline-flex h-auto items-center gap-1 min-w-max">
             <TabsTrigger
               value="overview"
-              className="rounded-lg px-3.5 py-1.5 font-display font-semibold text-xs text-slate-600 hover:text-slate-900 hover:bg-slate-100/70 data-[state=active]:bg-[#FF2EB8] data-[state=active]:text-white data-[state=active]:shadow-xs transition-all flex items-center gap-1.5"
+              className="rounded-lg px-4 py-2 font-display font-semibold text-xs text-slate-600 hover:text-slate-900 hover:bg-slate-100/70 data-[state=active]:bg-[#FF2EB8] data-[state=active]:text-white data-[state=active]:shadow-xs transition-all flex items-center gap-1.5"
             >
               <LayoutGrid className="w-3.5 h-3.5" />
-              Monthly Overview & KPIs
+              Monthly Tracker & Spend
             </TabsTrigger>
             <TabsTrigger
               value="breakdown"
-              className="rounded-lg px-3.5 py-1.5 font-display font-semibold text-xs text-slate-600 hover:text-slate-900 hover:bg-slate-100/70 data-[state=active]:bg-[#FF2EB8] data-[state=active]:text-white data-[state=active]:shadow-xs transition-all flex items-center gap-1.5"
+              className="rounded-lg px-4 py-2 font-display font-semibold text-xs text-slate-600 hover:text-slate-900 hover:bg-slate-100/70 data-[state=active]:bg-[#FF2EB8] data-[state=active]:text-white data-[state=active]:shadow-xs transition-all flex items-center gap-1.5"
             >
               <Sparkles className="w-3.5 h-3.5" />
-              Intuitive Cash Flow Engine
+              Cash Flow Engine & Peer Benchmarks
             </TabsTrigger>
           </TabsList>
         </div>
 
-        <TabsContent value="overview" className="mt-4 space-y-6 focus-visible:outline-none">
-          {/* KPI Cards — candy bento style (5 across condensed on one line) */}
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 sm:gap-3">
-            {([
-              {
-                label: 'Total Spent',
-                value: fmt(totalSpent),
-                icon: DollarSign,
-                sub: <span className="flex items-center gap-1">{trendIcon(totalSpent, prevTotalsProrated.total)} {trendPercent(totalSpent, prevTotalsProrated.total)} vs last mo {isCurrentMonth ? `(d${daysElapsed})` : ''}</span>,
-                meta: `Budget: ${fmt(monthlyTotalBudget)}`,
-                border: '#FF2EB8',
-                shadow: 'rgba(255,46,184,0.20)',
-                iconBg: '#FFE0F1',
-                iconColor: '#FF2EB8',
-                valueColor: '#FF2EB8',
-                over: false,
-              },
-              {
-                label: 'Essentials',
-                value: fmt(essentialSpent),
-                icon: ShoppingCart,
-                sub: <span className="flex items-center gap-1">{trendIcon(essentialSpent, prevTotalsProrated.essential)} {trendPercent(essentialSpent, prevTotalsProrated.essential)} vs last mo {isCurrentMonth ? `(d${daysElapsed})` : ''}</span>,
-                meta: `Budget: ${fmt(monthlyEssentialBudget)}`,
-                border: '#A855F7',
-                shadow: 'rgba(168,85,247,0.20)',
-                iconBg: '#F3E8FF',
-                iconColor: '#A855F7',
-                valueColor: '#A855F7',
-                over: essentialSpent > monthlyEssentialBudget,
-              },
-              {
-                label: 'Fun Money',
-                value: fmt(funSpent),
-                icon: PartyPopper,
-                sub: <span className="flex items-center gap-1">{trendIcon(funSpent, prevTotalsProrated.fun)} {trendPercent(funSpent, prevTotalsProrated.fun)} vs last mo {isCurrentMonth ? `(d${daysElapsed})` : ''}</span>,
-                meta: `Budget: ${fmt(monthlyFunBudget)}`,
-                border: '#22C55E',
-                shadow: 'rgba(34,197,94,0.22)',
-                iconBg: '#DCFCE7',
-                iconColor: '#166534',
-                valueColor: '#22C55E',
-                over: funSpent > monthlyFunBudget,
-              },
-              {
-                label: 'Fixed Bills',
-                value: fmt(fixedMonthly),
-                icon: Lock,
-                sub: <span className="text-slate-500">{fmt(fixedSpent)} paid · {fmt(Math.max(0, fixedMonthly - fixedSpent))} left</span>,
-                meta: `Committed monthly`,
-                border: '#FF7AD1',
-                shadow: 'rgba(255,122,209,0.22)',
-                iconBg: '#FFF0F8',
-                iconColor: '#FF2EB8',
-                valueColor: '#FF7AD1',
-                over: false,
-              },
-              {
-                label: 'Income (to date)',
-                value: fmt(incomeTotal),
-                icon: TrendingUp,
-                sub: prevTotalsProrated.income > 0 ? (
-                  <span className="flex items-center gap-1">
-                    {trendIcon(incomeTotal, prevTotalsProrated.income, true)}{' '}
-                    {trendPercent(incomeTotal, prevTotalsProrated.income)} vs last mo{' '}
-                    {isCurrentMonth ? `(d${daysElapsed})` : ''}
-                  </span>
-                ) : (
-                  <span className="text-slate-500">Earned this month</span>
-                ),
-                meta: expectedIncomeVal > 0 ? `Expected: ${fmt(expectedIncomeVal)}` : 'Earned to date',
-                border: '#0284C7',
-                shadow: 'rgba(2,132,199,0.20)',
-                iconBg: '#E0F2FE',
-                iconColor: '#0284C7',
-                valueColor: '#0284C7',
-                over: false,
-              },
-            ] as const).map((c) => {
-              const Icon = c.icon;
-              const isOver = c.over;
-              return (
-                <div
-                  key={c.label}
-                  className="rounded-2xl border-2 bg-white p-3.5 sm:p-4 lg:p-4 flex flex-col justify-between gap-1.5 transition-transform hover:-translate-y-0.5 min-w-0"
-                  style={{
-                    borderColor: isOver ? '#DC2626' : c.border,
-                    boxShadow: `4px 4px 0 ${isOver ? 'rgba(220,38,38,0.20)' : c.shadow}`,
-                  }}
-                >
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <div
-                      className="w-6 h-6 sm:w-7 sm:h-7 rounded-lg flex items-center justify-center shrink-0"
-                      style={{ background: c.iconBg }}
-                    >
-                      <Icon className="w-3.5 h-3.5 sm:w-4 sm:h-4" style={{ color: c.iconColor }} />
-                    </div>
-                    <p
-                      className="text-[10px] font-display font-bold uppercase tracking-[0.1em] truncate"
-                      style={{ color: isOver ? '#DC2626' : c.iconColor }}
-                    >
-                      {c.label}
-                    </p>
+        {/* ========================================================= */}
+        {/* TAB 1: MONTHLY TRACKER & SPEND                            */}
+        {/* ========================================================= */}
+        <TabsContent value="overview" className="mt-5 space-y-6 focus-visible:outline-none">
+
+          {/* BLOCK 1: THE MONTHLY EQUATION STRIP (Numbers strictly add up!) */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+            {/* 1. Total Spent So Far */}
+            <div className="rounded-2xl border-2 border-[#FF2EB8] bg-white p-4 shadow-[4px_4px_0_rgba(255,46,184,0.14)] flex flex-col justify-between gap-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-lg bg-[#FFE0F1] flex items-center justify-center shrink-0">
+                    <DollarSign className="w-4 h-4 text-[#FF2EB8]" />
                   </div>
-                  <div className="min-w-0">
-                    <div
-                      className="font-display font-black tabular-nums text-xl sm:text-2xl lg:text-[1.65rem] leading-none truncate"
-                      style={{ color: isOver ? '#DC2626' : c.valueColor }}
-                    >
-                      {c.value}
-                    </div>
-                    <p className="text-[11px] font-semibold text-slate-700 mt-1 truncate">{c.meta}</p>
-                    <div className="text-[11px] text-slate-500 mt-0.5 truncate">{c.sub}</div>
-                  </div>
+                  <p className="text-[11px] font-display font-bold uppercase tracking-wider text-[#FF2EB8]">
+                    Total Spent So Far
+                  </p>
                 </div>
-              );
-            })}
+              </div>
+              <div>
+                <div className="font-display font-black tabular-nums text-2xl sm:text-[1.65rem] text-slate-900 leading-none">
+                  {fmt(totalSpent)}
+                </div>
+                <p className="text-xs font-semibold text-slate-600 mt-1.5">
+                  of {fmt(monthlyTotalBudget)} monthly budget
+                </p>
+                <div className="mt-2 h-1.5 w-full rounded-full bg-slate-100 overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-[#FF2EB8]"
+                    style={{ width: `${Math.min(100, monthlyTotalBudget > 0 ? (totalSpent / monthlyTotalBudget) * 100 : 0)}%` }}
+                  />
+                </div>
+                <div className="text-[11px] text-slate-500 mt-1.5 flex items-center justify-between">
+                  <span>{fmt(fixedSpent)} bills + {fmt(variableSpent)} var</span>
+                  <span className="flex items-center gap-0.5 font-medium">
+                    {trendIcon(totalSpent, prevTotalsProrated.total)}
+                    {trendPercent(totalSpent, prevTotalsProrated.total)}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* 2. Fixed Bills (Paid vs Committed) */}
+            <div className="rounded-2xl border border-slate-200/90 bg-white p-4 shadow-2xs flex flex-col justify-between gap-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-lg bg-rose-50 flex items-center justify-center shrink-0">
+                    <Lock className="w-4 h-4 text-rose-600" />
+                  </div>
+                  <p className="text-[11px] font-display font-bold uppercase tracking-wider text-slate-700">
+                    1. Fixed Bills Paid
+                  </p>
+                </div>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-50 text-rose-700">
+                  {fixedMonthly > 0 ? `${Math.min(100, Math.round((fixedSpent / fixedMonthly) * 100))}%` : '0%'}
+                </span>
+              </div>
+              <div>
+                <div className="font-display font-black tabular-nums text-2xl sm:text-[1.65rem] text-slate-900 leading-none">
+                  {fmt(fixedSpent)}
+                </div>
+                <p className="text-xs font-semibold text-slate-600 mt-1.5">
+                  of {fmt(fixedMonthly)} committed
+                </p>
+                <div className="mt-2 h-1.5 w-full rounded-full bg-slate-100 overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-rose-500"
+                    style={{ width: `${Math.min(100, fixedMonthly > 0 ? (fixedSpent / fixedMonthly) * 100 : 0)}%` }}
+                  />
+                </div>
+                <p className="text-[11px] text-slate-500 mt-1.5">
+                  {Math.max(0, fixedMonthly - fixedSpent) > 0.5
+                    ? `${fmt(Math.max(0, fixedMonthly - fixedSpent))} still to clear`
+                    : 'All monthly bills cleared ✓'}
+                </p>
+              </div>
+            </div>
+
+            {/* 3. Essentials Variable */}
+            <div className={cn(
+              "rounded-2xl border bg-white p-4 shadow-2xs flex flex-col justify-between gap-2",
+              essentialSpent > monthlyEssentialBudget ? "border-rose-300 bg-rose-50/20" : "border-slate-200/90"
+            )}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-lg bg-purple-100 flex items-center justify-center shrink-0">
+                    <ShoppingCart className="w-4 h-4 text-purple-700" />
+                  </div>
+                  <p className="text-[11px] font-display font-bold uppercase tracking-wider text-purple-800">
+                    2. Essentials
+                  </p>
+                </div>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-50 text-purple-700">
+                  {monthlyEssentialBudget > 0 ? `${Math.round((essentialSpent / monthlyEssentialBudget) * 100)}%` : '0%'}
+                </span>
+              </div>
+              <div>
+                <div className="font-display font-black tabular-nums text-2xl sm:text-[1.65rem] text-purple-700 leading-none">
+                  {fmt(essentialSpent)}
+                </div>
+                <p className="text-xs font-semibold text-slate-600 mt-1.5">
+                  of {fmt(monthlyEssentialBudget)} budget
+                </p>
+                <div className="mt-2 h-1.5 w-full rounded-full bg-slate-100 overflow-hidden">
+                  <div
+                    className={cn("h-full rounded-full", essentialSpent > monthlyEssentialBudget ? "bg-rose-500" : "bg-purple-600")}
+                    style={{ width: `${Math.min(100, monthlyEssentialBudget > 0 ? (essentialSpent / monthlyEssentialBudget) * 100 : 0)}%` }}
+                  />
+                </div>
+                <div className="text-[11px] text-slate-500 mt-1.5 flex items-center justify-between">
+                  <span>
+                    {essentialSpent <= monthlyEssentialBudget
+                      ? `${fmt(monthlyEssentialBudget - essentialSpent)} left`
+                      : `${fmt(essentialSpent - monthlyEssentialBudget)} over`}
+                  </span>
+                  <span className="flex items-center gap-0.5">
+                    {trendIcon(essentialSpent, prevTotalsProrated.essential)}
+                    {trendPercent(essentialSpent, prevTotalsProrated.essential)}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* 4. Fun & Lifestyle */}
+            <div className={cn(
+              "rounded-2xl border bg-white p-4 shadow-2xs flex flex-col justify-between gap-2",
+              funSpent > monthlyFunBudget ? "border-rose-300 bg-rose-50/20" : "border-slate-200/90"
+            )}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-lg bg-emerald-100 flex items-center justify-center shrink-0">
+                    <PartyPopper className="w-4 h-4 text-emerald-700" />
+                  </div>
+                  <p className="text-[11px] font-display font-bold uppercase tracking-wider text-emerald-800">
+                    3. Fun Money
+                  </p>
+                </div>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700">
+                  {monthlyFunBudget > 0 ? `${Math.round((funSpent / monthlyFunBudget) * 100)}%` : '0%'}
+                </span>
+              </div>
+              <div>
+                <div className="font-display font-black tabular-nums text-2xl sm:text-[1.65rem] text-emerald-600 leading-none">
+                  {fmt(funSpent)}
+                </div>
+                <p className="text-xs font-semibold text-slate-600 mt-1.5">
+                  of {fmt(monthlyFunBudget)} budget
+                </p>
+                <div className="mt-2 h-1.5 w-full rounded-full bg-slate-100 overflow-hidden">
+                  <div
+                    className={cn("h-full rounded-full", funSpent > monthlyFunBudget ? "bg-rose-500" : "bg-emerald-500")}
+                    style={{ width: `${Math.min(100, monthlyFunBudget > 0 ? (funSpent / monthlyFunBudget) * 100 : 0)}%` }}
+                  />
+                </div>
+                <div className="text-[11px] text-slate-500 mt-1.5 flex items-center justify-between">
+                  <span>
+                    {funSpent <= monthlyFunBudget
+                      ? `${fmt(monthlyFunBudget - funSpent)} left`
+                      : `${fmt(funSpent - monthlyFunBudget)} over`}
+                  </span>
+                  <span className="flex items-center gap-0.5">
+                    {trendIcon(funSpent, prevTotalsProrated.fun)}
+                    {trendPercent(funSpent, prevTotalsProrated.fun)}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* 5. Income & Pool Savings */}
+            <div className="rounded-2xl border border-sky-200/90 bg-gradient-to-br from-sky-50/50 via-white to-white p-4 shadow-2xs flex flex-col justify-between gap-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-lg bg-sky-100 flex items-center justify-center shrink-0">
+                    <TrendingUp className="w-4 h-4 text-sky-700" />
+                  </div>
+                  <p className="text-[11px] font-display font-bold uppercase tracking-wider text-sky-800">
+                    Income &amp; Savings
+                  </p>
+                </div>
+              </div>
+              <div>
+                <div className="font-display font-black tabular-nums text-2xl sm:text-[1.65rem] text-sky-700 leading-none">
+                  {fmt(incomeTotal)}
+                </div>
+                <p className="text-xs font-semibold text-slate-600 mt-1.5">
+                  {expectedIncomeVal > 0 ? `Expected: ${fmt(expectedIncomeVal)}/mo` : 'Landed this month'}
+                </p>
+                <div className="mt-2 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px]">
+                  <span className="text-slate-500 font-medium">Pool Target:</span>
+                  <span className="font-bold text-slate-800 tabular-nums">{fmt(poolSavingsMonthly)}/mo</span>
+                </div>
+              </div>
+            </div>
           </div>
 
-          {/* Pace / Projection Widget */}
+          {/* BLOCK 2: TRUE VARIABLE PACING WIDGET (Pacing Essentials + Fun Day-by-Day) */}
           {(() => {
-            const overBudget = projectedDiff > 0;
-            const paceBorder = overBudget ? '#DC2626' : '#22C55E';
-            const paceShadow = overBudget ? 'rgba(220,38,38,0.20)' : 'rgba(34,197,94,0.22)';
-            const paceTint = overBudget ? '#FEE2E2' : '#DCFCE7';
-            const paceAccent = overBudget ? '#DC2626' : '#166534';
+            const isOverVariablePace = dailyVariablePace > targetDailyVariable * 1.05;
+            const paceColor = isOverVariablePace ? '#DC2626' : '#16A34A';
+            const paceBg = isOverVariablePace ? 'bg-rose-50/70 border-rose-200' : 'bg-emerald-50/70 border-emerald-200';
+
             return (
-              <div
-                className="rounded-2xl border-2 bg-white p-4 sm:p-5"
-                style={{ borderColor: paceBorder, boxShadow: `4px 4px 0 ${paceShadow}` }}
-              >
-                <div className="flex items-start justify-between gap-3 mb-4">
-                  <div className="flex items-center gap-2">
-                    <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ background: paceTint }}>
-                      <Gauge className="w-5 h-5" style={{ color: paceAccent }} />
+              <div className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-xs space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <div
+                      className={cn(
+                        "w-9 h-9 rounded-xl flex items-center justify-center shrink-0",
+                        isOverVariablePace ? "bg-rose-100 text-rose-600" : "bg-emerald-100 text-emerald-700"
+                      )}
+                    >
+                      <Gauge className="w-5 h-5" />
                     </div>
                     <div>
-                      <p className="text-[10px] font-display font-bold uppercase tracking-[0.14em]" style={{ color: paceAccent }}>
-                        Monthly Pace
-                      </p>
-                      <p className="text-xs text-slate-500">
-                        {isCurrentMonth
-                          ? `Day ${daysElapsed} of ${daysInMonth} — ${daysRemaining} left`
-                          : `Month complete (${daysInMonth} days)`}
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h2 className="text-sm font-display font-bold text-slate-900">
+                          Daily Variable Spending Pace (Essentials + Fun)
+                        </h2>
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            "text-[10px] font-bold px-2 py-0.5 rounded-full",
+                            isOverVariablePace
+                              ? "border-rose-300 bg-rose-50 text-rose-700"
+                              : "border-emerald-300 bg-emerald-50 text-emerald-700"
+                          )}
+                        >
+                          {isOverVariablePace ? 'Pacing Above Target' : 'On Track'}
+                        </Badge>
+                      </div>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Fixed bills ({fmt(fixedMonthly)}/mo) are separated so your daily pace only tracks controllable spending ({fmt(monthlyVariableBudget)}/mo budget).
                       </p>
                     </div>
                   </div>
                   <button
                     type="button"
                     onClick={openBudgetDialog}
-                    className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 border border-slate-200 rounded-lg px-2.5 py-1.5 hover:bg-slate-50"
+                    className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 border border-slate-200 rounded-xl px-3 py-1.5 hover:bg-slate-50 self-start sm:self-auto shrink-0"
                   >
                     <Pencil className="w-3 h-3" />
                     Edit budget
                   </button>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
-                  <div className="rounded-xl bg-slate-50 p-3">
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Spent so far</p>
-                    <p className="text-2xl font-display font-black tabular-nums text-slate-900 mt-1">{fmt(totalSpent)}</p>
-                    <p className="text-[11px] text-slate-500 mt-0.5">{fmt(dailyVariablePace)}/day var pace</p>
-                  </div>
-                  <div className="rounded-xl bg-slate-50 p-3">
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Projected total</p>
-                    <p className="text-2xl font-display font-black tabular-nums mt-1" style={{ color: paceAccent }}>
-                      {fmt(projectedSpend)}
+                {/* 3 Clear Pacing Pillars */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {/* Pillar 1: Variable Spent So Far */}
+                  <div className="rounded-xl bg-slate-50/90 border border-slate-200/60 p-3.5">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                      Variable Spent ({daysElapsed}d elapsed)
                     </p>
-                    <p className="text-[11px] text-slate-500 mt-0.5">
-                      Budget {fmt(monthlyTotalBudget)}
-                      {budgetOverride == null || budgetOverride === '' ? (
-                        <span className="block text-[10px] text-slate-400 font-medium">
-                          Auto: {fmt(fixedMonthly)} Bills + {fmt(monthlyEssentialBudget)} Ess + {fmt(monthlyFunBudget)} Fun
-                        </span>
-                      ) : (
-                        <span className="block text-[10px] text-indigo-600 font-medium">Custom override</span>
-                      )}
+                    <div className="flex items-baseline gap-2 mt-1">
+                      <span className="text-2xl font-display font-black tabular-nums text-slate-900">
+                        {fmt(variableSpent)}
+                      </span>
+                      <span className="text-xs font-semibold text-slate-500">
+                        of {fmt(monthlyVariableBudget)}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-600 mt-1 font-medium">
+                      Averaging <strong className="text-slate-900">{fmt(dailyVariablePace)}/day</strong> (target: {fmt(targetDailyVariable)}/day)
                     </p>
                   </div>
-                  <div className="rounded-xl p-3" style={{ background: paceTint }}>
-                    <p className="text-[10px] font-bold uppercase tracking-wider" style={{ color: paceAccent }}>
-                      {overBudget ? 'Projected over by' : 'Projected under by'}
+
+                  {/* Pillar 2: Safe Daily Spend for Remaining Days */}
+                  <div className={cn("rounded-xl border p-3.5", paceBg)}>
+                    <p className="text-[10px] font-bold uppercase tracking-wider" style={{ color: paceColor }}>
+                      {isCurrentMonth ? `Safe to Spend (${daysRemaining}d left)` : 'Variable Remaining'}
                     </p>
-                    <p className="text-2xl font-display font-black tabular-nums mt-1" style={{ color: paceAccent }}>
-                      {fmt(Math.abs(projectedDiff))}
+                    <div className="flex items-baseline gap-2 mt-1">
+                      <span className="text-2xl font-display font-black tabular-nums" style={{ color: paceColor }}>
+                        {isCurrentMonth && daysRemaining > 0 ? `${fmt(safeDailyRemaining)}/day` : fmt(variableRemaining)}
+                      </span>
+                    </div>
+                    <p className="text-[11px] font-medium mt-1" style={{ color: paceColor }}>
+                      {fmt(variableRemaining)} variable budget left ({fmt(Math.max(0, monthlyEssentialBudget - essentialSpent))} Ess · {fmt(Math.max(0, monthlyFunBudget - funSpent))} Fun)
                     </p>
-                    <p className="text-[11px] mt-0.5" style={{ color: paceAccent }}>
-                      {overBudget
-                        ? `Cut ${fmt(daysRemaining > 0 ? projectedDiff / daysRemaining : 0)}/day to stay on track`
-                        : `You've got ${fmt(daysRemaining > 0 ? Math.abs(projectedDiff) / daysRemaining : 0)}/day of headroom`}
+                  </div>
+
+                  {/* Pillar 3: Full-Month Projection (including Fixed Bills) */}
+                  <div className="rounded-xl bg-slate-50/90 border border-slate-200/60 p-3.5">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                      Projected Month-End Total
+                    </p>
+                    <div className="flex items-baseline gap-2 mt-1">
+                      <span className="text-2xl font-display font-black tabular-nums text-slate-900">
+                        {fmt(projectedSpend)}
+                      </span>
+                      <span className="text-xs font-semibold text-slate-500">
+                        / {fmt(monthlyTotalBudget)}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-600 mt-1">
+                      {projectedDiff > 1
+                        ? `On pace to finish ${fmt(projectedDiff)} over budget`
+                        : projectedDiff < -1
+                          ? `On pace to finish ${fmt(Math.abs(projectedDiff))} under budget`
+                          : `Right on your ${fmt(monthlyTotalBudget)} monthly budget`}
                     </p>
                   </div>
                 </div>
 
-                {/* Progress bars: expected pace vs actual spend */}
-                <div className="mt-4 space-y-2.5">
-                  <div>
-                    <div className="flex justify-between text-[11px] font-semibold text-slate-600 mb-1">
-                      <span>Pace target (incl. fixed bills)</span>
-                      <span className="tabular-nums">{expectedPct.toFixed(0)}%</span>
-                    </div>
-                    <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
-                      <div className="h-full rounded-full bg-slate-400" style={{ width: `${Math.min(100, expectedPct)}%` }} />
-                    </div>
+                {/* Single Unified Bar: Variable Budget Used vs. Calendar Time Elapsed */}
+                <div className="space-y-1.5 pt-1">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-semibold text-slate-700">
+                      Variable Budget Used: <strong className="tabular-nums">{variableUsedPct.toFixed(0)}%</strong> ({fmt(variableSpent)} of {fmt(monthlyVariableBudget)})
+                    </span>
+                    <span className="text-slate-500 font-medium tabular-nums">
+                      Month Elapsed: <strong>{timePct.toFixed(0)}%</strong> (Day {daysElapsed}/{daysInMonth})
+                    </span>
                   </div>
-                  <div>
-                    <div className="flex justify-between text-[11px] font-semibold mb-1" style={{ color: paceAccent }}>
-                      <span>Budget used</span>
-                      <span className="tabular-nums">{spendPct.toFixed(0)}%</span>
-                    </div>
-                    <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
-                      <div className="h-full rounded-full" style={{ width: `${Math.min(100, spendPct)}%`, background: paceBorder }} />
-                    </div>
+                  <div className="relative h-3 rounded-full bg-slate-100 overflow-hidden">
+                    <div
+                      className={cn(
+                        "h-full rounded-full transition-all duration-500",
+                        isOverVariablePace ? "bg-rose-500" : "bg-emerald-500"
+                      )}
+                      style={{ width: `${Math.min(100, variableUsedPct)}%` }}
+                    />
+                    {/* Calendar marker line */}
+                    {isCurrentMonth && (
+                      <div
+                        className="absolute top-0 bottom-0 w-0.5 bg-slate-900 z-10"
+                        style={{ left: `${Math.min(99, timePct)}%` }}
+                        title={`Today: Day ${daysElapsed} (${timePct.toFixed(0)}% of month elapsed)`}
+                      />
+                    )}
                   </div>
                 </div>
               </div>
             );
           })()}
 
-          {/* Edit Budget Dialog */}
-          <Dialog open={budgetDialogOpen} onOpenChange={setBudgetDialogOpen}>
-            <DialogContent className="sm:max-w-sm">
-              <DialogHeader>
-                <DialogTitle>Monthly budget</DialogTitle>
-                <DialogDescription className="space-y-2">
-                  <span>Your auto monthly budget of <strong>{fmt(autoTotalBudget)}</strong> is calculated from:</span>
-                  <span className="block text-xs space-y-1 text-slate-600 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
-                    <span className="block">• Fixed Bills: <strong>{fmt(fixedMonthly)}</strong>/mo</span>
-                    <span className="block">• Essentials Variable: <strong>{fmt(monthlyEssentialBudget)}</strong>/mo ({fmt(snapshot?.weeklyEssentialBudget || 0)}/wk × 4.33)</span>
-                    <span className="block">• Fun Money: <strong>{fmt(monthlyFunBudget)}</strong>/mo ({fmt(snapshot?.baseWeeklyFun || 0)}/wk × 4.33)</span>
-                  </span>
-                  <span>Enter a custom amount to override this, or click "Reset to auto".</span>
-                </DialogDescription>
-              </DialogHeader>
-              <div className="space-y-3">
-                <Input
-                  type="number"
-                  inputMode="decimal"
-                  placeholder={`e.g. ${Math.round(autoTotalBudget)}`}
-                  value={budgetInput}
-                  onChange={(e) => setBudgetInput(e.target.value)}
-                  className="text-lg font-semibold"
-                />
-                <div className="flex gap-2 justify-end">
-                  <Button variant="ghost" onClick={() => { setBudgetInput(''); }}>Reset to auto</Button>
-                  <Button onClick={saveBudget}>Save</Button>
-                </div>
-              </div>
-            </DialogContent>
-          </Dialog>
-
-          {/* Category Spotlight — visually distinct band */}
-          <div className="rounded-2xl border border-border/60 bg-gradient-to-br from-muted/40 via-background to-muted/20 p-4 sm:p-5 shadow-sm">
-            <div className="flex items-center justify-between mb-3">
+          {/* BLOCK 3: UNIFIED 3-COLUMN "WHERE YOUR MONEY WENT" */}
+          <div className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-xs space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3.5">
               <div>
-                <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-muted-foreground">Where the money went</p>
-                <p className="text-xs text-muted-foreground/70 mt-0.5">Tap a tile to see merchants</p>
-              </div>
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 px-2 py-1 rounded-full border border-border/60">
-                {monthLabel}
-              </span>
-            </div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-              {spotlight.map(s => {
-                const palette: Record<string, { bg: string; ring: string; icon: string; value: string }> = {
-                  supermarkets: { bg: 'bg-emerald-500/10', ring: 'ring-emerald-500/30', icon: 'text-emerald-500 bg-emerald-500/15', value: 'text-emerald-600 dark:text-emerald-400' },
-                  pharmacies:   { bg: 'bg-sky-500/10',     ring: 'ring-sky-500/30',     icon: 'text-sky-500 bg-sky-500/15',         value: 'text-sky-600 dark:text-sky-400' },
-                  transport:    { bg: 'bg-amber-500/10',   ring: 'ring-amber-500/30',   icon: 'text-amber-600 bg-amber-500/15',     value: 'text-amber-600 dark:text-amber-400' },
-                  eatingout:    { bg: 'bg-rose-500/10',    ring: 'ring-rose-500/30',    icon: 'text-rose-500 bg-rose-500/15',       value: 'text-rose-600 dark:text-rose-400' },
-                };
-                const p = palette[s.key];
-                const Icon = s.icon;
-                const trendDown = s.previous > 0 && s.current < s.previous;
-                return (
-                  <button
-                    key={s.key}
-                    onClick={() => setSelectedSpotlight(s)}
-                    className={`group relative text-left rounded-xl p-3 ${p.bg} ring-1 ${p.ring} hover:ring-2 transition-all active:scale-[0.98] min-h-[44px]`}
-                  >
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className={`inline-flex items-center justify-center w-7 h-7 rounded-lg ${p.icon}`}>
-                        <Icon className="w-3.5 h-3.5" />
-                      </span>
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-foreground/80 truncate">
-                        {s.label}
-                      </span>
-                    </div>
-                    <div className={`text-2xl font-black tabular-nums leading-none ${p.value}`}>
-                      {fmt(s.current)}
-                    </div>
-                    <div className="mt-2 flex items-center justify-between text-[11px]">
-                      <span className="text-muted-foreground truncate">
-                        was {fmt(s.previous)}
-                      </span>
-                      {s.previous > 0 && (
-                        <span className={`font-semibold tabular-nums ${trendDown ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-500'}`}>
-                          {trendPercent(s.current, s.previous)}
-                        </span>
-                      )}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Other categories — everything NOT already in the 4 spotlight tiles */}
-          {(() => {
-            const otherCats = categoryBreakdown;
-            console.log("otherCats array:", otherCats);
-            return (
-              <div className="rounded-2xl border border-border/60 bg-gradient-to-br from-muted/40 via-background to-muted/20 p-4 sm:p-5 shadow-sm">
-                <div className="flex items-center justify-between mb-3">
-                  <div>
-                    <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-muted-foreground">All categories</p>
-                    <p className="text-xs text-muted-foreground/70 mt-0.5">Every category with spend this month · tap for merchants</p>
-                  </div>
-                  <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 px-2 py-1 rounded-full border border-border/60">
-                    {otherCats.length} {otherCats.length === 1 ? 'category' : 'categories'}
-                  </span>
-                </div>
-                {otherCats.length === 0 ? (
-                  <p className="text-sm text-muted-foreground py-4 text-center">No other categorised spend yet this month.</p>
-                ) : (
-                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5">
-                    {otherCats.map(c => {
-                      const share = totalSpent > 0 ? (c.total / totalSpent) * 100 : 0;
-                      return (
-                        <button
-                          key={c.catId}
-                          onClick={() => setSelectedCategory({ catId: c.catId, name: c.name, color: c.color })}
-                          className="group text-left rounded-xl p-3 bg-white/70 border border-border/50 hover:border-foreground/20 hover:shadow-sm transition-all active:scale-[0.98] min-h-[44px]"
-                        >
-                          <div className="flex items-center gap-2 mb-1.5">
-                            <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: c.color }} />
-                            <span className="text-[10px] font-bold uppercase tracking-wider text-foreground/80 truncate">
-                              {c.name}
-                            </span>
-                            {c.isEssential && (
-                              <span className="text-[8px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-purple-500/15 text-purple-700 dark:text-purple-300">
-                                Ess
-                              </span>
-                            )}
-                          </div>
-                          <div className="text-xl font-black tabular-nums leading-none" style={{ color: c.color }}>
-                            {fmt(c.total)}
-                          </div>
-                          <div className="mt-2 h-1 rounded-full bg-black/5 overflow-hidden">
-                            <div className="h-full rounded-full" style={{ width: `${Math.min(100, share)}%`, backgroundColor: c.color }} />
-                          </div>
-                          <div className="mt-1.5 text-[10px] text-muted-foreground tabular-nums">
-                            {share.toFixed(0)}% of month
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            );
-          })()}
-
-          {/* Category merchant breakdown dialog */}
-          <Dialog open={!!selectedCategory} onOpenChange={() => setSelectedCategory(null)}>
-            <DialogContent className="sm:max-w-lg">
-              <DialogHeader>
-                <div className="flex items-center justify-between pr-6 gap-2">
-                  <DialogTitle className="flex items-center gap-2 text-base">
-                    {selectedCategory && (
-                      <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: selectedCategory.color || '#94a3b8' }} />
-                    )}
-                    <span className="truncate">{selectedCategory?.name}</span>
-                  </DialogTitle>
-                  <div className="inline-flex rounded-lg border border-border/60 p-0.5 bg-muted/40 text-[11px] shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => setCategoryModalView('transactions')}
-                      className={cn(
-                        'px-2 py-0.5 rounded-md font-medium transition-all',
-                        categoryModalView === 'transactions'
-                          ? 'bg-background shadow-xs text-foreground font-semibold'
-                          : 'text-muted-foreground hover:text-foreground'
-                      )}
-                    >
-                      Transactions ({categoryTransactions.length})
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setCategoryModalView('merchants')}
-                      className={cn(
-                        'px-2 py-0.5 rounded-md font-medium transition-all',
-                        categoryModalView === 'merchants'
-                          ? 'bg-background shadow-xs text-foreground font-semibold'
-                          : 'text-muted-foreground hover:text-foreground'
-                      )}
-                    >
-                      Merchants ({categoryMerchantBreakdown.length})
-                    </button>
-                  </div>
-                </div>
-                <DialogDescription className="text-xs">
-                  Total spent this month: <span className="font-semibold text-foreground">{fmt(categoryTransactionsTotal)}</span> · {categoryTransactions.length} transaction{categoryTransactions.length === 1 ? '' : 's'}
-                </DialogDescription>
-              </DialogHeader>
-              <ScrollArea className="max-h-[60vh] -mr-4 pr-4">
-                {categoryModalView === 'transactions' ? (
-                  <div className="space-y-2 py-1">
-                    {categoryTransactions.length === 0 ? (
-                      <div className="text-center py-8 space-y-2">
-                        <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto" />
-                        <p className="text-sm font-semibold text-foreground">All sorted!</p>
-                        <p className="text-xs text-muted-foreground">No transactions remaining in this category.</p>
-                      </div>
-                    ) : (
-                      categoryTransactions.map((tx) => {
-                        const cat = catMap.get(tx.category_id || '');
-                        const isEssential = essentialCatIds.has(tx.category_id || '');
-                        const amt = Math.abs(baseAmt(tx));
-                        const dateFormatted = format(parseUkDate(tx.posted_at), 'd MMM');
-                        return (
-                          <div
-                            key={tx.id}
-                            className="flex items-center justify-between p-2.5 rounded-xl bg-muted/30 border border-border/50 hover:border-border transition-colors gap-3"
-                          >
-                            <div className="flex flex-col gap-1 min-w-0 flex-1">
-                              <div className="flex items-center gap-2">
-                                <span className="text-sm font-semibold text-foreground truncate">
-                                  {tx.merchant || tx.description || 'Expense'}
-                                </span>
-                                <span className="text-[10px] text-muted-foreground tabular-nums shrink-0">
-                                  {dateFormatted}
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-1.5 flex-wrap text-[11px] mt-0.5">
-                                <Select
-                                  value={tx.category_id || '__uncategorised'}
-                                  onValueChange={async (newCatId) => {
-                                    const targetCatId = newCatId === '__uncategorised' ? null : newCatId;
-                                    await finance.updateTransaction(tx.id, { category_id: targetCatId } as any);
-                                    const newCatName = finance.categories.find(c => c.id === targetCatId)?.name || 'Uncategorised';
-                                    toast.success(`Categorised as ${newCatName}`);
-                                  }}
-                                >
-                                  <SelectTrigger className="h-6.5 text-[11px] border border-border/60 bg-background shadow-none px-2 rounded-lg gap-1 focus:ring-1 max-w-[170px]">
-                                    <div className="flex items-center gap-1.5 truncate">
-                                      {cat ? (
-                                        <>
-                                          <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: cat.color || '#888' }} />
-                                          <span className="truncate font-medium">{cat.name}</span>
-                                        </>
-                                      ) : (
-                                        <>
-                                          <span className="w-2 h-2 rounded-full shrink-0 bg-slate-400" />
-                                          <span className="text-muted-foreground font-medium">Uncategorised</span>
-                                        </>
-                                      )}
-                                    </div>
-                                  </SelectTrigger>
-                                  <SelectContent className="max-h-56 z-[100]">
-                                    <SelectItem value="__uncategorised">
-                                      <div className="flex items-center gap-2">
-                                        <span className="w-2.5 h-2.5 rounded-full shrink-0 bg-slate-400" />
-                                        <span className="text-muted-foreground font-medium">Uncategorised</span>
-                                      </div>
-                                    </SelectItem>
-                                    {availableCategories.map((c) => (
-                                      <SelectItem key={c.id} value={c.id}>
-                                        <div className="flex items-center gap-2">
-                                          <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: c.color || '#888' }} />
-                                          <span className="font-medium">{c.name}</span>
-                                        </div>
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                                {cat && (
-                                  <span
-                                    className={`inline-block px-1.5 py-0.5 rounded-md font-bold text-[9px] uppercase ${
-                                      isEssential ? 'bg-purple-100 text-purple-700 dark:bg-purple-950/60 dark:text-purple-300' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
-                                    }`}
-                                  >
-                                    {isEssential ? 'Essential' : 'Fun'}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                            <div className="text-right shrink-0">
-                              <span className="text-sm font-bold tabular-nums text-foreground">
-                                {fmt(amt)}
-                              </span>
-                            </div>
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                ) : (
-                  <div className="space-y-2 py-1">
-                    {categoryMerchantBreakdown.length === 0 ? (
-                      <div className="text-center py-8 space-y-2">
-                        <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto" />
-                        <p className="text-sm font-semibold text-foreground">All sorted!</p>
-                        <p className="text-xs text-muted-foreground">No merchants remaining in this category.</p>
-                      </div>
-                    ) : (
-                      categoryMerchantBreakdown.map((item, i) => (
-                        <div
-                          key={i}
-                          className="flex items-center justify-between p-2.5 rounded-xl bg-muted/30 border border-border/50 hover:border-border transition-colors gap-3"
-                        >
-                          <div className="flex flex-col gap-1 min-w-0 flex-1">
-                            <div className="flex items-center gap-2">
-                              <span className="text-sm font-semibold text-foreground truncate">
-                                {item.name}
-                              </span>
-                              <span className="text-[10px] text-muted-foreground tabular-nums shrink-0">
-                                {item.transactions.length} tx{item.transactions.length === 1 ? '' : 's'}
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-1.5 flex-wrap text-[11px] mt-0.5">
-                              <Select
-                                value={selectedCategory?.catId || '__uncategorised'}
-                                onValueChange={async (newCatId) => {
-                                  const targetCatId = newCatId === '__uncategorised' ? null : newCatId;
-                                  for (const tx of item.transactions) {
-                                    await finance.updateTransaction(tx.id, { category_id: targetCatId } as any);
-                                  }
-                                  const newCatName = finance.categories.find(c => c.id === targetCatId)?.name || 'Uncategorised';
-                                  toast.success(`Categorised all ${item.name} (${item.transactions.length}) as ${newCatName}`);
-                                }}
-                              >
-                                <SelectTrigger className="h-6.5 text-[11px] border border-border/60 bg-background shadow-none px-2 rounded-lg gap-1 focus:ring-1 max-w-[170px]">
-                                  <div className="flex items-center gap-1.5 truncate">
-                                    {selectedCategory && selectedCategory.catId !== '__uncategorised' ? (
-                                      <>
-                                        <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: selectedCategory.color || '#888' }} />
-                                        <span className="truncate font-medium">{selectedCategory.name}</span>
-                                      </>
-                                    ) : (
-                                      <>
-                                        <span className="w-2 h-2 rounded-full shrink-0 bg-slate-400" />
-                                        <span className="text-muted-foreground font-medium">Uncategorised</span>
-                                      </>
-                                    )}
-                                  </div>
-                                </SelectTrigger>
-                                <SelectContent className="max-h-56 z-[100]">
-                                  <SelectItem value="__uncategorised">
-                                    <div className="flex items-center gap-2">
-                                      <span className="w-2.5 h-2.5 rounded-full shrink-0 bg-slate-400" />
-                                      <span className="text-muted-foreground font-medium">Uncategorised</span>
-                                    </div>
-                                  </SelectItem>
-                                  {availableCategories.map((c) => (
-                                    <SelectItem key={c.id} value={c.id}>
-                                      <div className="flex items-center gap-2">
-                                        <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: c.color || '#888' }} />
-                                        <span className="font-medium">{c.name}</span>
-                                      </div>
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                          </div>
-                          <div className="text-right shrink-0">
-                            <span className="text-sm font-bold tabular-nums text-foreground">
-                              {fmt(item.total)}
-                            </span>
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                )}
-              </ScrollArea>
-            </DialogContent>
-          </Dialog>
-
-
-          {/* Spotlight Breakdown Dialog */}
-          <Dialog open={!!selectedSpotlight} onOpenChange={() => setSelectedSpotlight(null)}>
-            <DialogContent className="sm:max-w-lg">
-              <DialogHeader>
-                <div className="flex items-center justify-between pr-6 gap-2">
-                  <DialogTitle className="flex items-center gap-2 text-base">
-                    {selectedSpotlight && <selectedSpotlight.icon className="w-4 h-4" />}
-                    <span>{selectedSpotlight?.label}</span>
-                  </DialogTitle>
-                  <div className="inline-flex rounded-lg border border-border/60 p-0.5 bg-muted/40 text-[11px] shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => setSpotlightModalView('transactions')}
-                      className={cn(
-                        'px-2 py-0.5 rounded-md font-medium transition-all',
-                        spotlightModalView === 'transactions'
-                          ? 'bg-background shadow-xs text-foreground font-semibold'
-                          : 'text-muted-foreground hover:text-foreground'
-                      )}
-                    >
-                      Transactions ({spotlightTransactions.length})
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setSpotlightModalView('merchants')}
-                      className={cn(
-                        'px-2 py-0.5 rounded-md font-medium transition-all',
-                        spotlightModalView === 'merchants'
-                          ? 'bg-background shadow-xs text-foreground font-semibold'
-                          : 'text-muted-foreground hover:text-foreground'
-                      )}
-                    >
-                      Merchants ({spotlightBreakdown.length})
-                    </button>
-                  </div>
-                </div>
-                <DialogDescription className="text-xs">
-                  Total spent this month: <span className="font-semibold text-foreground">{fmt(spotlightTransactionsTotal)}</span> · {spotlightTransactions.length} transaction{spotlightTransactions.length === 1 ? '' : 's'}
-                </DialogDescription>
-              </DialogHeader>
-              <ScrollArea className="max-h-[60vh] -mr-4 pr-4">
-                {spotlightModalView === 'transactions' ? (
-                  <div className="space-y-2 py-1">
-                    {spotlightTransactions.length === 0 ? (
-                      <div className="text-center py-8 space-y-2">
-                        <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto" />
-                        <p className="text-sm font-semibold text-foreground">All sorted!</p>
-                        <p className="text-xs text-muted-foreground">No transactions matching this spotlight category.</p>
-                      </div>
-                    ) : (
-                      spotlightTransactions.map((tx) => {
-                        const cat = catMap.get(tx.category_id || '');
-                        const isEssential = essentialCatIds.has(tx.category_id || '');
-                        const amt = Math.abs(baseAmt(tx));
-                        const dateFormatted = format(parseUkDate(tx.posted_at), 'd MMM');
-                        return (
-                          <div
-                            key={tx.id}
-                            className="flex items-center justify-between p-2.5 rounded-xl bg-muted/30 border border-border/50 hover:border-border transition-colors gap-3"
-                          >
-                            <div className="flex flex-col gap-1 min-w-0 flex-1">
-                              <div className="flex items-center gap-2">
-                                <span className="text-sm font-semibold text-foreground truncate">
-                                  {tx.merchant || tx.description || 'Expense'}
-                                </span>
-                                <span className="text-[10px] text-muted-foreground tabular-nums shrink-0">
-                                  {dateFormatted}
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-1.5 flex-wrap text-[11px] mt-0.5">
-                                <Select
-                                  value={tx.category_id || '__uncategorised'}
-                                  onValueChange={async (newCatId) => {
-                                    const targetCatId = newCatId === '__uncategorised' ? null : newCatId;
-                                    await finance.updateTransaction(tx.id, { category_id: targetCatId } as any);
-                                    const newCatName = finance.categories.find(c => c.id === targetCatId)?.name || 'Uncategorised';
-                                    toast.success(`Categorised as ${newCatName}`);
-                                  }}
-                                >
-                                  <SelectTrigger className="h-6.5 text-[11px] border border-border/60 bg-background shadow-none px-2 rounded-lg gap-1 focus:ring-1 max-w-[170px]">
-                                    <div className="flex items-center gap-1.5 truncate">
-                                      {cat ? (
-                                        <>
-                                          <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: cat.color || '#888' }} />
-                                          <span className="truncate font-medium">{cat.name}</span>
-                                        </>
-                                      ) : (
-                                        <>
-                                          <span className="w-2 h-2 rounded-full shrink-0 bg-slate-400" />
-                                          <span className="text-muted-foreground font-medium">Uncategorised</span>
-                                        </>
-                                      )}
-                                    </div>
-                                  </SelectTrigger>
-                                  <SelectContent className="max-h-56 z-[100]">
-                                    <SelectItem value="__uncategorised">
-                                      <div className="flex items-center gap-2">
-                                        <span className="w-2.5 h-2.5 rounded-full shrink-0 bg-slate-400" />
-                                        <span className="text-muted-foreground font-medium">Uncategorised</span>
-                                      </div>
-                                    </SelectItem>
-                                    {availableCategories.map((c) => (
-                                      <SelectItem key={c.id} value={c.id}>
-                                        <div className="flex items-center gap-2">
-                                          <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: c.color || '#888' }} />
-                                          <span className="font-medium">{c.name}</span>
-                                        </div>
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                                {cat && (
-                                  <span
-                                    className={`inline-block px-1.5 py-0.5 rounded-md font-bold text-[9px] uppercase ${
-                                      isEssential ? 'bg-purple-100 text-purple-700 dark:bg-purple-950/60 dark:text-purple-300' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
-                                    }`}
-                                  >
-                                    {isEssential ? 'Essential' : 'Fun'}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                            <div className="text-right shrink-0">
-                              <span className="text-sm font-bold tabular-nums text-foreground">
-                                {fmt(amt)}
-                              </span>
-                            </div>
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                ) : (
-                  <div className="space-y-2 py-1">
-                    {spotlightBreakdown.length === 0 ? (
-                      <div className="text-center py-8 space-y-2">
-                        <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto" />
-                        <p className="text-sm font-semibold text-foreground">All sorted!</p>
-                        <p className="text-xs text-muted-foreground">No merchants matching this spotlight category.</p>
-                      </div>
-                    ) : (
-                      spotlightBreakdown.map((item, i) => (
-                        <div
-                          key={i}
-                          className="flex items-center justify-between p-2.5 rounded-xl bg-muted/30 border border-border/50 hover:border-border transition-colors gap-3"
-                        >
-                          <div className="flex flex-col gap-1 min-w-0 flex-1">
-                            <div className="flex items-center gap-2">
-                              <span className="text-sm font-semibold text-foreground truncate">
-                                {item.name}
-                              </span>
-                              <span className="text-[10px] text-muted-foreground tabular-nums shrink-0">
-                                {item.transactions.length} tx{item.transactions.length === 1 ? '' : 's'}
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-1.5 flex-wrap text-[11px] mt-0.5">
-                              <Select
-                                onValueChange={async (newCatId) => {
-                                  const targetCatId = newCatId === '__uncategorised' ? null : newCatId;
-                                  for (const tx of item.transactions) {
-                                    await finance.updateTransaction(tx.id, { category_id: targetCatId } as any);
-                                  }
-                                  const newCatName = finance.categories.find(c => c.id === targetCatId)?.name || 'Uncategorised';
-                                  toast.success(`Categorised all ${item.name} (${item.transactions.length}) as ${newCatName}`);
-                                }}
-                              >
-                                <SelectTrigger className="h-6.5 text-[11px] border border-border/60 bg-background shadow-none px-2 rounded-lg gap-1 focus:ring-1 max-w-[170px]">
-                                  <span className="text-muted-foreground font-medium">Re-categorise all...</span>
-                                </SelectTrigger>
-                                <SelectContent className="max-h-56 z-[100]">
-                                  <SelectItem value="__uncategorised">
-                                    <div className="flex items-center gap-2">
-                                      <span className="w-2.5 h-2.5 rounded-full shrink-0 bg-slate-400" />
-                                      <span className="text-muted-foreground font-medium">Uncategorised</span>
-                                    </div>
-                                  </SelectItem>
-                                  {availableCategories.map((c) => (
-                                    <SelectItem key={c.id} value={c.id}>
-                                      <div className="flex items-center gap-2">
-                                        <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: c.color || '#888' }} />
-                                        <span className="font-medium">{c.name}</span>
-                                      </div>
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                          </div>
-                          <div className="text-right shrink-0">
-                            <span className="text-sm font-bold tabular-nums text-foreground">
-                              {fmt(item.total)}
-                            </span>
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                )}
-              </ScrollArea>
-            </DialogContent>
-          </Dialog>
-
-
-
-
-          {/* Net Budget Card */}
-          <Card className="metric-card">
-            <CardContent className="p-4 flex items-center justify-between">
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/70">Net (Budget vs Actual)</p>
-                <p className={`text-xl font-black tracking-tight ${netBudget >= 0 ? 'text-emerald-500' : 'text-destructive'}`}>
-                  {netBudget >= 0 ? '+' : ''}{fmt(netBudget)}
+                <h2 className="text-base font-display font-bold text-slate-900">
+                  Where Your Money Went ({monthLabel})
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Organized by your 3 spending pillars · Click any Essential or Fun category to inspect merchants
                 </p>
-                <p className="text-xs text-muted-foreground mt-0.5">{fmtGbp(netBudget)}</p>
               </div>
-              <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                {trendIcon(totalSpent, prevTotals.total)}
-                <span>{trendPercent(totalSpent, prevTotals.total)} total spend vs last month</span>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Runway Visual */}
-          {snapshot && (
-            <Card className="metric-card">
-              <CardContent className="p-5">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <Shield className="w-4 h-4 text-primary" />
-                    <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Financial Runway</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-lg font-black tracking-tight text-foreground">
-                      {(() => {
-                        const rw = Math.floor(snapshot.runwayWeeks);
-                        const months = Math.floor(rw / 4.33);
-                        const weeks = rw - Math.round(months * 4.33);
-                        return months > 0
-                          ? `${months}mo ${weeks > 0 ? `${weeks}w` : ''}`
-                          : `${rw}w`;
-                      })()}
-                    </p>
-                    <p className="text-[10px] text-muted-foreground">
-                      until {format(addWeeks(new Date(), Math.floor(snapshot.runwayWeeks)), 'MMM do, yyyy')}
-                    </p>
-                  </div>
+              {/* Proportional visual split pill */}
+              {totalSpent > 0 && (
+                <div className="flex items-center gap-3 text-xs font-semibold text-slate-600">
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-rose-500" />
+                    Bills {Math.round((fixedSpent / totalSpent) * 100)}%
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-purple-600" />
+                    Essentials {Math.round((essentialSpent / totalSpent) * 100)}%
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+                    Fun {Math.round((funSpent / totalSpent) * 100)}%
+                  </span>
                 </div>
+              )}
+            </div>
 
-                {(() => {
-                  const runwayMonths = snapshot.runwayWeeks / 4.33;
-                  const maxMonths = Math.max(12, Math.ceil(runwayMonths) + 2);
-                  const fillPct = Math.min((runwayMonths / maxMonths) * 100, 100);
-                  const dangerZone = (3 / maxMonths) * 100;
-                  const cautionZone = (6 / maxMonths) * 100;
-                  const safeColor = runwayMonths >= 6 ? 'bg-emerald-500' : runwayMonths >= 3 ? 'bg-amber-400' : 'bg-destructive';
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              {/* COLUMN 1: FIXED BILLS CHECKLIST */}
+              <div className="rounded-xl border border-slate-200/80 bg-slate-50/50 p-4 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between mb-3 pb-2 border-b border-slate-200/60">
+                    <div className="flex items-center gap-2">
+                      <Lock className="w-4 h-4 text-rose-600" />
+                      <span className="text-xs font-display font-bold uppercase tracking-wider text-slate-800">
+                        Fixed Bills
+                      </span>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-sm font-display font-black tabular-nums text-slate-900">
+                        {fmt(fixedSpent)}
+                      </span>
+                      <span className="text-[11px] text-slate-500 font-medium"> / {fmt(fixedMonthly)}</span>
+                    </div>
+                  </div>
 
-                  return (
-                    <div className="space-y-2">
-                      <div className="relative h-8 rounded-lg overflow-hidden bg-muted/30">
-                        <div className="absolute inset-y-0 left-0 bg-destructive/10 border-r border-destructive/30" style={{ width: `${dangerZone}%` }} />
-                        <div className="absolute inset-y-0 bg-amber-400/10 border-r border-amber-400/30" style={{ left: `${dangerZone}%`, width: `${cautionZone - dangerZone}%` }} />
-                        <div className="absolute inset-y-0 bg-emerald-500/8" style={{ left: `${cautionZone}%`, right: 0 }} />
-                        <div className={`absolute inset-y-0 left-0 ${safeColor} transition-all duration-700 ease-out`} style={{ width: `${fillPct}%`, opacity: 0.85 }} />
-                        {Array.from({ length: maxMonths }, (_, i) => i + 1).map(m => {
-                          const pos = (m / maxMonths) * 100;
-                          const isKey = m === 3 || m === 6 || m === 12;
-                          return pos < 98 ? (
-                            <div key={m} className="absolute top-0 bottom-0" style={{ left: `${pos}%` }}>
-                              <div className={`w-px h-full ${isKey ? 'bg-foreground/20' : 'bg-foreground/8'}`} />
+                  <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
+                    {fixedBillsStatusList.length === 0 ? (
+                      <p className="text-xs text-slate-400 py-4 text-center">No fixed bills configured</p>
+                    ) : (
+                      fixedBillsStatusList.map((bill) => (
+                        <div
+                          key={bill.id}
+                          className="flex items-center justify-between p-2.5 rounded-xl bg-white border border-slate-200/60 text-xs"
+                        >
+                          <div className="flex items-center gap-2 min-w-0 pr-2">
+                            {bill.isPaid ? (
+                              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                            ) : (
+                              <Clock className="w-4 h-4 text-amber-500 shrink-0" />
+                            )}
+                            <div className="min-w-0">
+                              <p className="font-semibold text-slate-800 truncate">{bill.name}</p>
+                              <p className="text-[10px] text-slate-400">
+                                {bill.isPaid
+                                  ? (bill.paidExternally ? 'Paid (External)' : 'Paid this month')
+                                  : (bill.dueDay ? `Due day ${bill.dueDay}` : 'Upcoming this month')}
+                              </p>
                             </div>
-                          ) : null;
-                        })}
-                      </div>
-
-                      <div className="relative h-4">
-                        {[3, 6, 9, 12].filter(m => m <= maxMonths).map(m => (
-                          <span key={m} className="absolute text-[9px] font-semibold text-muted-foreground/60 -translate-x-1/2" style={{ left: `${(m / maxMonths) * 100}%` }}>
-                            {m}mo
-                          </span>
-                        ))}
-                      </div>
-
-                      <div className="grid grid-cols-3 gap-3 pt-2 border-t border-border/50">
-                        <div>
-                          <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60">Living Pool</p>
-                          <p className="text-sm font-black text-foreground">{fmt(snapshot.livingPool)}</p>
-                          <p className="text-[10px] text-muted-foreground">{fmtGbp(snapshot.livingPool)}</p>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <span className="font-bold tabular-nums text-slate-900">
+                              {fmt(bill.isPaid ? bill.paidAmount : bill.committedAmount)}
+                            </span>
+                            <span
+                              className={cn(
+                                "block text-[9px] font-bold uppercase",
+                                bill.isPaid ? "text-emerald-600" : "text-amber-600"
+                              )}
+                            >
+                              {bill.isPaid ? 'Cleared' : 'Pending'}
+                            </span>
+                          </div>
                         </div>
-                        <div>
-                          <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60">Monthly Burn</p>
-                          <p className="text-sm font-black text-foreground">{fmt(snapshot.totalWeeklyBurn * 4.33)}</p>
-                          <p className="text-[10px] text-muted-foreground">{fmtGbp(snapshot.totalWeeklyBurn * 4.33)}</p>
-                        </div>
-                        <div>
-                          <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60">w/ Emergency</p>
-                          <p className="text-sm font-black text-foreground">
-                            {(() => {
-                              const rw = Math.floor(snapshot.runwayWithEmergencyWeeks);
-                              const months = Math.floor(rw / 4.33);
-                              const weeks = rw - Math.round(months * 4.33);
-                              return months > 0 ? `${months}mo ${weeks > 0 ? `${weeks}w` : ''}` : `${rw}w`;
-                            })()}
-                          </p>
-                          <p className="text-[10px] text-muted-foreground">
-                            until {format(addWeeks(new Date(), Math.floor(snapshot.runwayWithEmergencyWeeks)), 'MMM do')}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })()}
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Category Breakdown with Donut */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Donut */}
-            <Card className="metric-card">
-              <CardContent className="p-5 flex flex-col items-center">
-                <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-4">Where It Went</p>
-                <MultiSegmentDonut
-                  segments={donutSegments}
-                  total={totalSpent}
-                  centerTop={fmt(totalSpent)}
-                  centerBottom="total"
-                  size={160}
-                />
-                <div className="flex flex-wrap gap-2 mt-4 justify-center">
-                  {donutSegments.map((s, i) => (
-                    <div key={i} className="flex items-center gap-1.5 text-xs">
-                      <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: s.color }} />
-                      <span className="text-muted-foreground">{s.label}</span>
-                    </div>
-                  ))}
+                      ))
+                    )}
+                  </div>
                 </div>
-              </CardContent>
-            </Card>
+              </div>
 
-            {/* Category Lists */}
-            <div className="space-y-4">
-              {/* Essentials */}
-              <Card className="metric-card">
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between mb-3">
-                    <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-1.5">
-                      <ShoppingCart className="w-3.5 h-3.5" /> Essentials
-                    </p>
-                    <Badge variant="secondary" className="text-[10px]">{fmt(essentialSpent)}</Badge>
+              {/* COLUMN 2: ESSENTIALS CATEGORIES */}
+              <div className="rounded-xl border border-purple-200/70 bg-purple-50/20 p-4 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between mb-3 pb-2 border-b border-purple-200/50">
+                    <div className="flex items-center gap-2">
+                      <ShoppingCart className="w-4 h-4 text-purple-700" />
+                      <span className="text-xs font-display font-bold uppercase tracking-wider text-purple-900">
+                        Essentials
+                      </span>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-sm font-display font-black tabular-nums text-purple-700">
+                        {fmt(essentialSpent)}
+                      </span>
+                      <span className="text-[11px] text-slate-500 font-medium"> / {fmt(monthlyEssentialBudget)}</span>
+                    </div>
                   </div>
-                  <div className="space-y-2">
-                    {essentialCats.length === 0 && <p className="text-xs text-muted-foreground">No essential spending this month</p>}
-                    {essentialCats.map(c => (
-                      <div key={c.catId} className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: c.color }} />
-                          <span className="text-sm">{c.name}</span>
-                        </div>
-                        <span className="text-sm font-semibold tabular-nums">{fmt(c.total)}</span>
-                      </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
 
-              {/* Fun */}
-              <Card className="metric-card">
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between mb-3">
-                    <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-1.5">
-                      <PartyPopper className="w-3.5 h-3.5" /> Fun Money
-                    </p>
-                    <Badge variant="secondary" className="text-[10px]">{fmt(funSpent)}</Badge>
+                  <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
+                    {essentialCats.length === 0 ? (
+                      <p className="text-xs text-slate-400 py-4 text-center">No essential spending yet this month</p>
+                    ) : (
+                      essentialCats.map((c) => {
+                        const prevCatProrated = (prevTotals.catTotals.get(c.catId) || 0) * proRateFactor;
+                        const shareOfEss = monthlyEssentialBudget > 0 ? (c.total / monthlyEssentialBudget) * 100 : 0;
+                        return (
+                          <button
+                            key={c.catId}
+                            type="button"
+                            onClick={() => setSelectedCategory({ catId: c.catId, name: c.name, color: c.color })}
+                            className="w-full text-left p-2.5 rounded-xl bg-white border border-purple-200/60 hover:border-purple-400 hover:shadow-2xs transition-all"
+                          >
+                            <div className="flex items-center justify-between text-xs">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: c.color }} />
+                                <span className="font-semibold text-slate-800 truncate">{c.name}</span>
+                              </div>
+                              <span className="font-black tabular-nums text-slate-900">{fmt(c.total)}</span>
+                            </div>
+                            <div className="mt-1.5 h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                              <div
+                                className="h-full rounded-full bg-purple-600"
+                                style={{ width: `${Math.min(100, shareOfEss)}%` }}
+                              />
+                            </div>
+                            <div className="mt-1 flex items-center justify-between text-[10px] text-slate-500">
+                              <span>{shareOfEss.toFixed(0)}% of Essentials budget</span>
+                              {prevCatProrated > 0 ? (
+                                <span className="font-semibold">
+                                  {trendPercent(c.total, prevCatProrated)} vs last mo
+                                </span>
+                              ) : (
+                                <span>Tap for merchants →</span>
+                              )}
+                            </div>
+                          </button>
+                        );
+                      })
+                    )}
                   </div>
-                  <div className="space-y-2">
-                    {funCats.length === 0 && <p className="text-xs text-muted-foreground">No fun spending this month</p>}
-                    {funCats.map(c => (
-                      <div key={c.catId} className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: c.color }} />
-                          <span className="text-sm">{c.name}</span>
-                        </div>
-                        <span className="text-sm font-semibold tabular-nums">{fmt(c.total)}</span>
-                      </div>
-                    ))}
+                </div>
+              </div>
+
+              {/* COLUMN 3: FUN & LIFESTYLE CATEGORIES */}
+              <div className="rounded-xl border border-emerald-200/70 bg-emerald-50/20 p-4 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between mb-3 pb-2 border-b border-emerald-200/50">
+                    <div className="flex items-center gap-2">
+                      <PartyPopper className="w-4 h-4 text-emerald-700" />
+                      <span className="text-xs font-display font-bold uppercase tracking-wider text-emerald-900">
+                        Fun &amp; Lifestyle
+                      </span>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-sm font-display font-black tabular-nums text-emerald-700">
+                        {fmt(funSpent)}
+                      </span>
+                      <span className="text-[11px] text-slate-500 font-medium"> / {fmt(monthlyFunBudget)}</span>
+                    </div>
                   </div>
-                </CardContent>
-              </Card>
+
+                  <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
+                    {funCats.length === 0 ? (
+                      <p className="text-xs text-slate-400 py-4 text-center">No fun spending yet this month</p>
+                    ) : (
+                      funCats.map((c) => {
+                        const prevCatProrated = (prevTotals.catTotals.get(c.catId) || 0) * proRateFactor;
+                        const shareOfFun = monthlyFunBudget > 0 ? (c.total / monthlyFunBudget) * 100 : 0;
+                        return (
+                          <button
+                            key={c.catId}
+                            type="button"
+                            onClick={() => setSelectedCategory({ catId: c.catId, name: c.name, color: c.color })}
+                            className="w-full text-left p-2.5 rounded-xl bg-white border border-emerald-200/60 hover:border-emerald-400 hover:shadow-2xs transition-all"
+                          >
+                            <div className="flex items-center justify-between text-xs">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: c.color }} />
+                                <span className="font-semibold text-slate-800 truncate">{c.name}</span>
+                              </div>
+                              <span className="font-black tabular-nums text-slate-900">{fmt(c.total)}</span>
+                            </div>
+                            <div className="mt-1.5 h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                              <div
+                                className="h-full rounded-full bg-emerald-500"
+                                style={{ width: `${Math.min(100, shareOfFun)}%` }}
+                              />
+                            </div>
+                            <div className="mt-1 flex items-center justify-between text-[10px] text-slate-500">
+                              <span>{shareOfFun.toFixed(0)}% of Fun budget</span>
+                              {prevCatProrated > 0 ? (
+                                <span className="font-semibold">
+                                  {trendPercent(c.total, prevCatProrated)} vs last mo
+                                </span>
+                              ) : (
+                                <span>Tap for merchants →</span>
+                              )}
+                            </div>
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
-          {/* Daily Spending Chart */}
-          <Card className="metric-card">
+          {/* BLOCK 4: DAILY VARIABLE SPENDING TIMELINE */}
+          <Card className="rounded-2xl border border-slate-200/90 bg-white shadow-xs">
             <CardContent className="p-5">
-              <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-4">Daily Spending</p>
-              <div className="flex items-end gap-px h-32">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+                <div>
+                  <p className="text-sm font-display font-bold text-slate-900">Daily Variable Spending Timeline</p>
+                  <p className="text-xs text-slate-500">
+                    Click any day to inspect or recategorise transactions · Daily target average: <strong>{fmt(targetDailyVariable)}/day</strong>
+                  </p>
+                </div>
+                <div className="flex items-center gap-4 text-xs">
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-2.5 h-2.5 rounded-full bg-purple-600" />
+                    <span className="text-slate-600 font-medium">Essentials</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+                    <span className="text-slate-600 font-medium">Fun Money</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-end gap-px h-36 pt-4">
                 {dailyData.map((day, i) => {
                   const total = day.essential + day.fun;
                   const essH = total > 0 ? (day.essential / maxDaily) * 100 : 0;
@@ -1674,27 +1202,26 @@ export default function FinanceMonthly() {
                       key={i}
                       onClick={() => setSelectedDayNum(i + 1)}
                       className={cn(
-                        "flex-1 flex flex-col items-center justify-end h-full group relative cursor-pointer hover:bg-slate-100/50 rounded-sm p-0.5 transition-all",
-                        isSelected && "bg-slate-200/60 ring-1 ring-primary"
+                        "flex-1 flex flex-col items-center justify-end h-full group relative cursor-pointer hover:bg-slate-100/80 rounded-sm p-0.5 transition-all",
+                        isSelected && "bg-pink-50 ring-1 ring-[#FF2EB8]"
                       )}
                       title={`Click to view transactions for ${format(monthStart, 'MMM')} ${i + 1}`}
                     >
-                      {/* Tooltip */}
                       {total > 0 && (
-                        <div className="absolute -top-8 bg-popover border border-border rounded px-1.5 py-0.5 text-[10px] font-semibold opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10 whitespace-nowrap">
+                        <div className="absolute -top-7 bg-slate-900 text-white rounded px-1.5 py-0.5 text-[10px] font-semibold opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10 whitespace-nowrap shadow-xs">
                           {fmt(total)}
                         </div>
                       )}
                       <div className="w-full flex flex-col justify-end" style={{ height: '100%' }}>
                         {funH > 0 && (
                           <div
-                            className="w-full rounded-t-sm bg-emerald-500/80 group-hover:brightness-110"
+                            className="w-full rounded-t-sm bg-emerald-500 group-hover:brightness-110"
                             style={{ height: `${funH}%`, minHeight: funH > 0 ? 2 : 0 }}
                           />
                         )}
                         {essH > 0 && (
                           <div
-                            className="w-full bg-primary/80 group-hover:brightness-110"
+                            className="w-full bg-purple-600 group-hover:brightness-110"
                             style={{
                               height: `${essH}%`,
                               minHeight: essH > 0 ? 2 : 0,
@@ -1703,238 +1230,235 @@ export default function FinanceMonthly() {
                           />
                         )}
                       </div>
-                      <span className={`text-[8px] mt-1 tabular-nums ${isToday ? 'font-bold text-primary' : 'text-muted-foreground/50'}`}>
+                      <span className={cn(
+                        "text-[9px] mt-1 tabular-nums",
+                        isToday ? "font-black text-[#FF2EB8]" : "text-slate-400"
+                      )}>
                         {i + 1}
                       </span>
                     </div>
                   );
                 })}
               </div>
-              <div className="flex items-center gap-4 mt-3 justify-center">
-                <div className="flex items-center gap-1.5 text-xs">
-                  <div className="w-2.5 h-2.5 rounded-full bg-primary/80" />
-                  <span className="text-muted-foreground">Essentials</span>
-                </div>
-                <div className="flex items-center gap-1.5 text-xs">
-                  <div className="w-2.5 h-2.5 rounded-full bg-emerald-500/80" />
-                  <span className="text-muted-foreground">Fun</span>
-                </div>
-              </div>
             </CardContent>
           </Card>
+
         </TabsContent>
 
-        <TabsContent value="breakdown" className="mt-4 space-y-6 focus-visible:outline-none">
-          {/* Super Clear Cash Flow Breakdown Card */}
-          {(() => {
-            const directGoalSavings = computeRequiredGoalSavingsMonthly(
-              finance.goals,
-              finance.convertToBase,
-              selectedMonth,
-              incomeTotal || expectedIncomeVal
-            );
-            const poolSavingsMonthly = (snapshot?.split.goalSavingsAmount && snapshot.split.goalSavingsAmount > 0)
-              ? snapshot.split.goalSavingsAmount
-              : directGoalSavings;
+        {/* ========================================================= */}
+        {/* TAB 2: CASH FLOW ENGINE & PEER BENCHMARKS                 */}
+        {/* ========================================================= */}
+        <TabsContent value="breakdown" className="mt-5 space-y-6 focus-visible:outline-none">
+          <MonthlyCashFlowBreakdown
+            income={incomeTotal}
+            expectedIncome={expectedIncomeVal}
+            fixedBills={fixedMonthly}
+            essentialBudget={monthlyEssentialBudget}
+            essentialSpent={essentialSpent}
+            poolSavings={poolSavingsMonthly}
+            funSpent={funSpent}
+            baseCurrency={baseCurrency}
+            monthLabel={monthLabel}
+            defaultViewMode="weekly"
+          />
 
-            return (
-              <MonthlyCashFlowBreakdown
-                income={incomeTotal}
-                expectedIncome={expectedIncomeVal}
-                fixedBills={fixedMonthly}
-                essentialBudget={monthlyEssentialBudget}
-                essentialSpent={essentialSpent}
-                poolSavings={poolSavingsMonthly}
-                funSpent={funSpent}
-                baseCurrency={baseCurrency}
-                monthLabel={monthLabel}
-                defaultViewMode="weekly"
-              />
-            );
-          })()}
+          {/* Monthly Financial Peer Benchmark Model Widget (Now cleanly inside Tab 2) */}
+          <div className="bg-white rounded-[2rem] p-6 sm:p-7 border-2 border-[#FF7AD1]/40 shadow-sm relative overflow-hidden space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-5">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-[#FF2EB8] to-[#FF7AD1] flex items-center justify-center text-white shadow-md shrink-0">
+                  <Award className="w-6 h-6" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="font-display font-black text-xl text-slate-900">23yo Monthly Financial Model</h3>
+                    <Badge variant="outline" className="bg-[#FFF5FA] border-[#FF7AD1]/40 text-[#FF2EB8] font-display font-bold px-2.5 py-0.5 rounded-full text-[11px] flex items-center gap-1">
+                      <MapPin className="w-3 h-3 text-[#FF2EB8]" /> Manchester, UK · 🦘 Full-Time Workers (Excl. Students)
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Benchmarking your monthly spending ({fmt(totalSpent)}) and net profit ({fmt(netProfit)}) against UK &amp; Australian 23yo peers.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-2xl shrink-0 overflow-x-auto">
+                {MONTHLY_PEER_BENCHMARKS.map(b => (
+                  <button
+                    key={b.id}
+                    onClick={() => setSelectedBenchmarkId(b.id)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-display font-bold whitespace-nowrap transition-all ${
+                      selectedBenchmarkId === b.id
+                        ? 'bg-[#FF2EB8] text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                    }`}
+                  >
+                    {b.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3.5 bg-slate-50/80 rounded-2xl border border-slate-200/80">
+              <div className="flex items-center gap-2.5 px-3.5 py-2.5 bg-white rounded-xl border border-emerald-100 shadow-xs">
+                <div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center text-emerald-700 font-bold shrink-0">
+                  <TrendingUp className="w-4 h-4" />
+                </div>
+                <div>
+                  <p className="text-[10px] font-display font-bold uppercase tracking-wider text-slate-400">Income Status</p>
+                  <p className="text-xs font-display font-extrabold text-emerald-700">
+                    {incomeDiffPct >= 0 ? `+${incomeDiffPct.toFixed(0)}% Above Average` : `${Math.abs(incomeDiffPct).toFixed(0)}% Below Average`}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2.5 px-3.5 py-2.5 bg-white rounded-xl border border-sky-100 shadow-xs">
+                <div className="w-8 h-8 rounded-lg bg-sky-100 flex items-center justify-center text-sky-700 font-bold shrink-0">
+                  <TrendingDown className="w-4 h-4" />
+                </div>
+                <div>
+                  <p className="text-[10px] font-display font-bold uppercase tracking-wider text-slate-400">Spending Status</p>
+                  <p className="text-xs font-display font-extrabold text-sky-800">
+                    {spendingDiffPct <= 0
+                      ? `${Math.abs(spendingDiffPct).toFixed(0)}% Leaner (Below Avg)`
+                      : `+${spendingDiffPct.toFixed(0)}% Above Avg spending`}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2.5 px-3.5 py-2.5 bg-white rounded-xl border border-pink-100 shadow-xs">
+                <div className="w-8 h-8 rounded-lg bg-pink-100 flex items-center justify-center text-[#FF2EB8] font-bold shrink-0">
+                  <Sparkles className="w-4 h-4" />
+                </div>
+                <div>
+                  <p className="text-[10px] font-display font-bold uppercase tracking-wider text-slate-400">Overall Peer Standing</p>
+                  <p className="text-xs font-display font-extrabold text-[#FF2EB8]">
+                    {percentileLabel} ({netProfitDiffPct >= 0 ? `+${netProfitDiffPct.toFixed(0)}%` : `${netProfitDiffPct.toFixed(0)}%`} Surplus)
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="bg-gradient-to-br from-[#FFF5FA] to-white rounded-2xl p-5 border border-[#FF7AD1]/30 flex flex-col justify-between">
+                <div className="flex items-center justify-between text-[#FF2EB8] text-xs font-display font-bold uppercase tracking-wider mb-2">
+                  <span>Net Monthly Profit</span>
+                  <PiggyBank className="w-4 h-4 text-[#FF2EB8]" />
+                </div>
+                <div>
+                  <div className={`text-3xl sm:text-4xl font-display font-black tabular-nums ${netProfit >= 0 ? 'text-slate-900' : 'text-rose-600'}`}>
+                    {netProfit >= 0 ? '+' : ''}{fmt(netProfit)}
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1 font-semibold flex items-center gap-1">
+                    <Percent className="w-3 h-3 text-[#FF2EB8]" /> {savingsRate.toFixed(0)}% Savings Rate · {netProfitDiffPct >= 0 ? `+${netProfitDiffPct.toFixed(0)}%` : `${netProfitDiffPct.toFixed(0)}%`} vs peer avg
+                  </p>
+                </div>
+              </div>
+
+              <div className="bg-emerald-50/60 rounded-2xl p-5 border border-emerald-200/80 flex flex-col justify-between">
+                <div className="flex items-center justify-between text-[#166534] text-xs font-display font-bold uppercase tracking-wider mb-2">
+                  <span>Monthly Expenses</span>
+                  <TrendingDown className="w-4 h-4 text-[#22C55E]" />
+                </div>
+                <div>
+                  <div className="text-3xl sm:text-4xl font-display font-black text-[#166534] tabular-nums">
+                    {fmt(totalSpent)}
+                  </div>
+                  <p className="text-xs text-[#166534]/80 mt-1 font-semibold">
+                    {spendingDiffPct <= 0
+                      ? `${Math.abs(spendingDiffPct).toFixed(0)}% lower spending than`
+                      : `${spendingDiffPct.toFixed(0)}% higher than`} {selectedBenchmark.label} ({fmt(selectedBenchmark.monthlyExpenses)}/mo)
+                  </p>
+                </div>
+              </div>
+
+              <div className="bg-sky-50/60 rounded-2xl p-5 border border-sky-200/80 flex flex-col justify-between">
+                <div className="flex items-center justify-between text-sky-800 text-xs font-display font-bold uppercase tracking-wider mb-2">
+                  <span>Annual Wealth Pacing</span>
+                  <BarChart3 className="w-4 h-4 text-[#0284C7]" />
+                </div>
+                <div>
+                  <div className="text-3xl sm:text-4xl font-display font-black text-slate-900 tabular-nums">
+                    {fmt(annualizedNetProfit)}<span className="text-sm font-normal text-slate-500">/yr net</span>
+                  </div>
+                  <p className="text-xs text-sky-900/80 mt-1 font-semibold">
+                    vs {fmt(selectedBenchmark.annualProfit)}/yr avg peer net savings pacing
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
         </TabsContent>
       </Tabs>
 
-      {/* Monthly Financial Peer Benchmark Model Widget */}
-      <div className="bg-white rounded-[2rem] p-6 sm:p-7 border-2 border-[#FF7AD1]/40 shadow-sm relative overflow-hidden space-y-6 mt-8">
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-5">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-[#FF2EB8] to-[#FF7AD1] flex items-center justify-center text-white shadow-md shrink-0">
-              <Award className="w-6 h-6" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <h3 className="font-display font-black text-xl text-slate-900">23yo Monthly Financial Model</h3>
-                <Badge variant="outline" className="bg-[#FFF5FA] border-[#FF7AD1]/40 text-[#FF2EB8] font-display font-bold px-2.5 py-0.5 rounded-full text-[11px] flex items-center gap-1">
-                  <MapPin className="w-3 h-3 text-[#FF2EB8]" /> Manchester, UK · 🦘 Full-Time Workers (Excl. Students)
-                </Badge>
-              </div>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Benchmarking your monthly spending ({fmt(totalSpent)}) and net profit ({fmt(netProfit)}) against UK &amp; Australian 23yo peers.
-              </p>
-            </div>
-          </div>
-
-          {/* Benchmark selector pill tabs */}
-          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-2xl shrink-0 overflow-x-auto">
-            {MONTHLY_PEER_BENCHMARKS.map(b => (
-              <button
-                key={b.id}
-                onClick={() => setSelectedBenchmarkId(b.id)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-display font-bold whitespace-nowrap transition-all ${
-                  selectedBenchmarkId === b.id
-                    ? 'bg-[#FF2EB8] text-white shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
-                }`}
-              >
-                {b.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Peer Standing Percentage Scorecard */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3.5 bg-slate-50/80 rounded-2xl border border-slate-200/80">
-          {/* Income Status */}
-          <div className="flex items-center gap-2.5 px-3.5 py-2.5 bg-white rounded-xl border border-emerald-100 shadow-xs">
-            <div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center text-emerald-700 font-bold shrink-0">
-              <TrendingUp className="w-4 h-4" />
-            </div>
-            <div>
-              <p className="text-[10px] font-display font-bold uppercase tracking-wider text-slate-400">Income Status</p>
-              <p className="text-xs font-display font-extrabold text-emerald-700">
-                {incomeDiffPct >= 0 ? `+${incomeDiffPct.toFixed(0)}% Above Average` : `${Math.abs(incomeDiffPct).toFixed(0)}% Below Average`}
-              </p>
-            </div>
-          </div>
-
-          {/* Spending Status */}
-          <div className="flex items-center gap-2.5 px-3.5 py-2.5 bg-white rounded-xl border border-sky-100 shadow-xs">
-            <div className="w-8 h-8 rounded-lg bg-sky-100 flex items-center justify-center text-sky-700 font-bold shrink-0">
-              <TrendingDown className="w-4 h-4" />
-            </div>
-            <div>
-              <p className="text-[10px] font-display font-bold uppercase tracking-wider text-slate-400">Spending Status</p>
-              <p className="text-xs font-display font-extrabold text-sky-800">
-                {spendingDiffPct <= 0
-                  ? `${Math.abs(spendingDiffPct).toFixed(0)}% Leaner (Below Avg)`
-                  : `+${spendingDiffPct.toFixed(0)}% Above Avg spending`}
-              </p>
-            </div>
-          </div>
-
-          {/* Financial Position Badge */}
-          <div className="flex items-center gap-2.5 px-3.5 py-2.5 bg-white rounded-xl border border-pink-100 shadow-xs">
-            <div className="w-8 h-8 rounded-lg bg-pink-100 flex items-center justify-center text-[#FF2EB8] font-bold shrink-0">
-              <Sparkles className="w-4 h-4" />
-            </div>
-            <div>
-              <p className="text-[10px] font-display font-bold uppercase tracking-wider text-slate-400">Overall Peer Standing</p>
-              <p className="text-xs font-display font-extrabold text-[#FF2EB8]">
-                {percentileLabel} ({netProfitDiffPct >= 0 ? `+${netProfitDiffPct.toFixed(0)}%` : `${netProfitDiffPct.toFixed(0)}%`} Surplus)
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* Stat Summary Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          {/* Card 1: Net Profit & Savings Rate */}
-          <div className="bg-gradient-to-br from-[#FFF5FA] to-white rounded-2xl p-5 border border-[#FF7AD1]/30 flex flex-col justify-between">
-            <div className="flex items-center justify-between text-[#FF2EB8] text-xs font-display font-bold uppercase tracking-wider mb-2">
-              <span>Net Monthly Profit</span>
-              <PiggyBank className="w-4 h-4 text-[#FF2EB8]" />
-            </div>
-            <div>
-              <div className={`text-3xl sm:text-4xl font-display font-black tabular-nums ${netProfit >= 0 ? 'text-slate-900' : 'text-rose-600'}`}>
-                {netProfit >= 0 ? '+' : ''}{fmt(netProfit)}
-              </div>
-              <p className="text-xs text-slate-500 mt-1 font-semibold flex items-center gap-1">
-                <Percent className="w-3 h-3 text-[#FF2EB8]" /> {savingsRate.toFixed(0)}% Savings Rate · {netProfitDiffPct >= 0 ? `+${netProfitDiffPct.toFixed(0)}%` : `${netProfitDiffPct.toFixed(0)}%`} vs peer avg
-              </p>
-            </div>
-          </div>
-
-          {/* Card 2: Monthly Expenses Comparison */}
-          <div className="bg-emerald-50/60 rounded-2xl p-5 border border-emerald-200/80 flex flex-col justify-between">
-            <div className="flex items-center justify-between text-[#166534] text-xs font-display font-bold uppercase tracking-wider mb-2">
-              <span>Monthly Expenses</span>
-              <TrendingDown className="w-4 h-4 text-[#22C55E]" />
-            </div>
-            <div>
-              <div className="text-3xl sm:text-4xl font-display font-black text-[#166534] tabular-nums">
-                {fmt(totalSpent)}
-              </div>
-              <p className="text-xs text-[#166534]/80 mt-1 font-semibold">
-                {spendingDiffPct <= 0
-                  ? `${Math.abs(spendingDiffPct).toFixed(0)}% lower spending than`
-                  : `${spendingDiffPct.toFixed(0)}% higher than`} {selectedBenchmark.label} ({fmt(selectedBenchmark.monthlyExpenses)}/mo)
-              </p>
-            </div>
-          </div>
-
-          {/* Card 3: Annualized Profit Pacing */}
-          <div className="bg-sky-50/60 rounded-2xl p-5 border border-sky-200/80 flex flex-col justify-between">
-            <div className="flex items-center justify-between text-sky-800 text-xs font-display font-bold uppercase tracking-wider mb-2">
-              <span>Annual Wealth Pacing</span>
-              <BarChart3 className="w-4 h-4 text-[#0284C7]" />
-            </div>
-            <div>
-              <div className="text-3xl sm:text-4xl font-display font-black text-slate-900 tabular-nums">
-                {fmt(annualizedNetProfit)}<span className="text-sm font-normal text-slate-500">/yr net</span>
-              </div>
-              <p className="text-xs text-sky-900/80 mt-1 font-semibold">
-                vs {fmt(selectedBenchmark.annualProfit)}/yr avg peer net savings pacing
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* Visual Progress Scale */}
-        <div className="bg-slate-50 rounded-2xl p-5 border border-slate-200/70 space-y-3">
-          <div className="flex justify-between items-center text-xs font-display font-bold text-slate-700">
-            <span>Full-Time Net Profit Spectrum (Monthly Net Cashflow)</span>
-            <span className="text-[#FF2EB8]">★ You: {fmt(netProfit)}/mo net</span>
-          </div>
-          {/* Progress bar line */}
-          <div className="relative w-full bg-slate-200 rounded-full h-4 overflow-hidden flex items-center">
-            <div
-              className="h-full bg-gradient-to-r from-[#FF7AD1] to-[#FF2EB8] transition-all duration-500 rounded-full"
-              style={{ width: `${Math.min(100, Math.max(10, (netProfit / 1500) * 100))}%` }}
+      {/* Edit Budget Dialog */}
+      <Dialog open={budgetDialogOpen} onOpenChange={setBudgetDialogOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Monthly budget</DialogTitle>
+            <DialogDescription className="space-y-2">
+              <span>Your auto monthly budget of <strong>{fmt(autoTotalBudget)}</strong> is calculated from:</span>
+              <span className="block text-xs space-y-1 text-slate-600 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                <span className="block">• Fixed Bills: <strong>{fmt(fixedMonthly)}</strong>/mo</span>
+                <span className="block">• Essentials Variable: <strong>{fmt(monthlyEssentialBudget)}</strong>/mo ({fmt(snapshot?.weeklyEssentialBudget || 0)}/wk × 4.33)</span>
+                <span className="block">• Fun Money: <strong>{fmt(monthlyFunBudget)}</strong>/mo ({fmt(snapshot?.baseWeeklyFun || 0)}/wk × 4.33)</span>
+              </span>
+              <span>Enter a custom amount to override this, or click "Reset to auto".</span>
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Input
+              type="number"
+              inputMode="decimal"
+              placeholder={`e.g. ${Math.round(autoTotalBudget)}`}
+              value={budgetInput}
+              onChange={(e) => setBudgetInput(e.target.value)}
+              className="text-lg font-semibold"
             />
-          </div>
-          {/* Milestone ticks below scale */}
-          <div className="grid grid-cols-4 gap-2 pt-1 text-[11px] font-semibold text-slate-500 text-center">
-            <div className="border-r border-slate-200 pr-1">
-              <p className="text-slate-400 font-normal text-[10px]">Manchester 23yo FT</p>
-              <p className="font-bold text-slate-700">+£500/mo net</p>
-            </div>
-            <div className="border-r border-slate-200 pr-1">
-              <p className="text-slate-400 font-normal text-[10px]">UK 22-29 FT Median</p>
-              <p className="font-bold text-slate-700">+£550/mo net</p>
-            </div>
-            <div className="border-r border-slate-200 pr-1">
-              <p className="text-slate-400 font-normal text-[10px]">Australia 23yo FT</p>
-              <p className="font-bold text-slate-700">+£650/mo net <span className="text-[9px] font-normal text-slate-400">($19.5k AUD)</span></p>
-            </div>
-            <div>
-              <p className="text-slate-400 font-normal text-[10px]">UK Top 10% FT</p>
-              <p className="font-bold text-[#FF2EB8]">+£1,050/mo net</p>
+            <div className="flex gap-2 justify-end">
+              <Button variant="ghost" onClick={() => { setBudgetInput(''); }}>Reset to auto</Button>
+              <Button onClick={saveBudget}>Save</Button>
             </div>
           </div>
-        </div>
+        </DialogContent>
+      </Dialog>
 
-        {/* Personalized Motivational Insight */}
-        <div className="bg-[#FFF5FA] border border-[#FF7AD1]/40 rounded-2xl p-4 flex items-center justify-between text-xs text-slate-700 font-medium">
-          <div className="flex items-center gap-2.5">
-            <span className="text-xl">🦘</span>
-            <p>
-              <strong className="font-bold text-[#FF2EB8]">Financial Position Summary:</strong> For {monthLabel}, your spending is <strong className="text-slate-900">{spendingDiffPct <= 0 ? `${Math.abs(spendingDiffPct).toFixed(0)}% below average (Lean)` : `${spendingDiffPct.toFixed(0)}% above average`}</strong>, your income is <strong className="text-slate-900">{incomeDiffPct >= 0 ? `+${incomeDiffPct.toFixed(0)}% above average` : `${Math.abs(incomeDiffPct).toFixed(0)}% below average`}</strong>, placing your financial position at <strong className="text-slate-900">{percentileLabel}</strong> against UK full-time 23yo peers with <strong className="text-[#FF2EB8]">{fmt(netProfit)}</strong> net monthly profit ({savingsRate.toFixed(0)}% savings rate).
-            </p>
-          </div>
-        </div>
-      </div>
+      {/* Category Merchant Breakdown Dialog */}
+      <Dialog open={!!selectedCategory} onOpenChange={() => setSelectedCategory(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              {selectedCategory && (
+                <span className="w-3 h-3 rounded-full" style={{ backgroundColor: selectedCategory.color }} />
+              )}
+              {selectedCategory?.name} · Merchants
+            </DialogTitle>
+            <DialogDescription>
+              Total spent in {monthLabel}: {selectedCategory ? fmt(variableCategoryBreakdown.find(c => c.catId === selectedCategory.catId)?.total || 0) : fmt(0)}
+            </DialogDescription>
+          </DialogHeader>
+          <ScrollArea className="max-h-[60vh] -mr-4 pr-4">
+            <div className="space-y-1.5">
+              {categoryMerchantBreakdown.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No matching transactions this month.</p>
+              ) : (
+                categoryMerchantBreakdown.map((item, i) => (
+                  <div
+                    key={i}
+                    className="flex items-center justify-between py-2.5 px-3 rounded-xl bg-slate-50 border border-slate-100"
+                  >
+                    <div className="min-w-0 pr-4">
+                      <span className="text-sm font-semibold text-slate-900 truncate block">{item.name}</span>
+                      <span className="text-[10px] text-slate-400">{item.count} {item.count === 1 ? 'transaction' : 'transactions'}</span>
+                    </div>
+                    <span className="text-sm font-black tabular-nums whitespace-nowrap text-slate-900">{fmt(item.total)}</span>
+                  </div>
+                ))
+              )}
+            </div>
+          </ScrollArea>
+        </DialogContent>
+      </Dialog>
 
       {/* Monthly Day Transactions Dialog */}
       <Dialog open={selectedDayNum !== null} onOpenChange={(open) => { if (!open) setSelectedDayNum(null); }}>
@@ -1949,7 +1473,7 @@ export default function FinanceMonthly() {
               </Badge>
             </DialogTitle>
             <DialogDescription>
-              {selectedMonthlyDayTxns.length === 0 
+              {selectedMonthlyDayTxns.length === 0
                 ? 'No variable spending transactions recorded on this day.'
                 : `${selectedMonthlyDayTxns.length} transaction${selectedMonthlyDayTxns.length > 1 ? 's' : ''}`}
             </DialogDescription>
