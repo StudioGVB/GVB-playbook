@@ -338,6 +338,8 @@ export default function FinanceMonthly() {
 
   // Multi-horizon historical comparison (Last Month, Last 3 Months, Last 6 Months, Last Year / 12 Months)
   const [comparisonBaselineMode, setComparisonBaselineMode] = useState<'projected' | 'budget'>('projected');
+  const [selectedHorizonIdx, setSelectedHorizonIdx] = useState<number>(0);
+  const [showFullComparisonTable, setShowFullComparisonTable] = useState<boolean>(false);
 
   const historicalHorizons = useMemo(() => {
     type MonthBucket = {
@@ -1126,7 +1128,7 @@ export default function FinanceMonthly() {
             );
           })()}
 
-          {/* BLOCK 2.5: HISTORICAL COMPARISON (This Month Expected vs. Last Month · 3M · 6M · Last Year) */}
+          {/* BLOCK 2.5: CLEAN FOCUSED HISTORICAL COMPARISON */}
           {(() => {
             const horizons = [
               historicalHorizons.lastMonth,
@@ -1134,270 +1136,263 @@ export default function FinanceMonthly() {
               historicalHorizons.last6Months,
               historicalHorizons.lastYear,
             ];
+            const activeH = horizons[selectedHorizonIdx] || horizons[0];
 
-            const renderDeltaBadge = (currentVal: number, histVal: number, invertGood = false) => {
-              if (histVal <= 0) return <span className="text-[10px] text-slate-400">No prior data</span>;
-              const diff = currentVal - histVal;
-              const pct = (diff / histVal) * 100;
-              if (Math.abs(pct) < 1) {
-                return (
-                  <span className="inline-flex items-center gap-0.5 text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 tabular-nums">
-                    Same (0%)
-                  </span>
-                );
-              }
-              const isGood = invertGood ? diff > 0 : diff < 0;
-              return (
-                <span
-                  className={cn(
-                    "inline-flex items-center gap-0.5 text-[10px] font-bold px-2 py-0.5 rounded-full tabular-nums",
-                    isGood ? "bg-emerald-50 text-emerald-700 border border-emerald-200/70" : "bg-rose-50 text-rose-700 border border-rose-200/70"
-                  )}
-                >
-                  {diff > 0 ? '+' : '−'}{fmt(Math.abs(diff))} ({pct > 0 ? `+${pct.toFixed(0)}%` : `${pct.toFixed(0)}%`})
-                </span>
-              );
-            };
+            const totalDiff = thisMonthComparisonTarget.total - activeH.total;
+            const totalPct = activeH.total > 0 ? (totalDiff / activeH.total) * 100 : 0;
+            const isSpendingLess = totalDiff <= 0;
 
-            const renderCompactPct = (currentVal: number, histVal: number, invertGood = false) => {
-              if (histVal <= 0) return <span className="text-[10px] text-slate-300">—</span>;
-              const diff = currentVal - histVal;
-              const pct = (diff / histVal) * 100;
-              if (Math.abs(pct) < 1) return <span className="text-[10px] text-slate-400 font-medium">0%</span>;
-              const isGood = invertGood ? diff > 0 : diff < 0;
-              return (
-                <span className={cn("text-[10px] font-bold tabular-nums", isGood ? "text-emerald-600" : "text-rose-600")}>
-                  {pct > 0 ? `+${pct.toFixed(0)}%` : `${pct.toFixed(0)}%`}
-                </span>
-              );
-            };
+            const maxBar = Math.max(thisMonthComparisonTarget.total, activeH.total, 1);
+            const thisBarPct = (thisMonthComparisonTarget.total / maxBar) * 100;
+            const histBarPct = (activeH.total / maxBar) * 100;
 
-            const tableRows = [
+            const pillars = [
               {
-                label: 'Total Monthly Spend',
-                dot: 'bg-[#FF2EB8]',
-                bold: true,
-                invertGood: false,
-                current: thisMonthComparisonTarget.total,
-                getVal: (h: typeof historicalHorizons.lastMonth) => h.total,
-              },
-              {
-                label: '1. Fixed Bills',
+                label: 'Fixed Bills',
                 dot: 'bg-rose-500',
-                bold: false,
-                invertGood: false,
                 current: thisMonthComparisonTarget.fixed,
-                getVal: (h: typeof historicalHorizons.lastMonth) => h.fixed,
+                hist: activeH.fixed,
               },
               {
-                label: '2. Essentials (Groceries, Transport)',
+                label: 'Essentials',
                 dot: 'bg-purple-600',
-                bold: false,
-                invertGood: false,
                 current: thisMonthComparisonTarget.essential,
-                getVal: (h: typeof historicalHorizons.lastMonth) => h.essential,
+                hist: activeH.essential,
               },
               {
-                label: '3. Fun & Lifestyle',
+                label: 'Fun & Lifestyle',
                 dot: 'bg-emerald-500',
-                bold: false,
-                invertGood: false,
                 current: thisMonthComparisonTarget.fun,
-                getVal: (h: typeof historicalHorizons.lastMonth) => h.fun,
-              },
-              {
-                label: 'Monthly Income',
-                dot: 'bg-sky-500',
-                bold: false,
-                invertGood: true,
-                current: thisMonthComparisonTarget.income,
-                getVal: (h: typeof historicalHorizons.lastMonth) => h.income,
-              },
-              {
-                label: 'Net Monthly Saved (Surplus)',
-                dot: 'bg-indigo-500',
-                bold: true,
-                invertGood: true,
-                current: thisMonthComparisonTarget.net,
-                getVal: (h: typeof historicalHorizons.lastMonth) => h.net,
+                hist: activeH.fun,
               },
             ];
 
             return (
-              <div className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-xs space-y-5">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-9 h-9 rounded-xl bg-pink-50 text-[#FF2EB8] flex items-center justify-center shrink-0">
-                      <BarChart3 className="w-5 h-5" />
-                    </div>
+              <div className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-xs space-y-4">
+                {/* Header + Horizon Pill Selector */}
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+                  <div>
+                    <h2 className="text-base font-display font-bold text-slate-900">
+                      How This Month Compares to History
+                    </h2>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Select a timeframe below to compare your {thisMonthComparisonTarget.modeLabel.toLowerCase()} ({fmt(thisMonthComparisonTarget.total)})
+                    </p>
+                  </div>
+
+                  {/* 4 Clean Selectable Timeframe Pills */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 bg-slate-100/90 p-1 rounded-xl">
+                    {horizons.map((h, idx) => {
+                      const diff = thisMonthComparisonTarget.total - h.total;
+                      const pct = h.total > 0 ? (diff / h.total) * 100 : 0;
+                      const isSelected = selectedHorizonIdx === idx;
+                      const isBetter = diff <= 0;
+                      return (
+                        <button
+                          key={h.title}
+                          type="button"
+                          onClick={() => setSelectedHorizonIdx(idx)}
+                          className={cn(
+                            "px-3 py-2 rounded-lg text-left transition-all flex items-center justify-between gap-2",
+                            isSelected
+                              ? "bg-white text-slate-900 shadow-xs ring-1 ring-slate-200"
+                              : "text-slate-600 hover:text-slate-900 hover:bg-white/50"
+                          )}
+                        >
+                          <span className="text-xs font-display font-bold whitespace-nowrap">
+                            {h.title}
+                          </span>
+                          {h.total > 0 && (
+                            <span
+                              className={cn(
+                                "text-[10px] font-bold px-1.5 py-0.5 rounded-md tabular-nums",
+                                isBetter
+                                  ? "bg-emerald-50 text-emerald-700"
+                                  : "bg-rose-50 text-rose-700"
+                              )}
+                            >
+                              {pct > 0 ? `+${pct.toFixed(0)}%` : `${pct.toFixed(0)}%`}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Single Focused 2-Column Comparison View */}
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-center pt-1">
+                  {/* Left Focal Summary (5 cols) */}
+                  <div className="lg:col-span-5 rounded-xl bg-slate-50/80 border border-slate-200/70 p-4 space-y-3.5">
                     <div>
-                      <h2 className="text-base font-display font-bold text-slate-900">
-                        This Month Expected vs. Historical Benchmarks
-                      </h2>
-                      <p className="text-xs text-slate-500 mt-0.5">
-                        Comparing <strong>{thisMonthComparisonTarget.modeLabel} ({fmt(thisMonthComparisonTarget.total)})</strong> against Last Month, Last 3 Months, Last 6 Months &amp; Last Year
+                      <span
+                        className={cn(
+                          "inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded-full",
+                          isSpendingLess
+                            ? "bg-emerald-100/80 text-emerald-800"
+                            : "bg-rose-100/80 text-rose-800"
+                        )}
+                      >
+                        {isSpendingLess ? '↓ Spending Less' : '↑ Spending More'} vs. {activeH.title}
+                      </span>
+                      <p className="text-xl sm:text-2xl font-display font-black text-slate-900 mt-2 leading-tight">
+                        {fmt(Math.abs(totalDiff))} {isSpendingLess ? 'less' : 'more'}{' '}
+                        <span className="text-sm font-semibold text-slate-500">
+                          ({totalPct > 0 ? `+${totalPct.toFixed(0)}%` : `${totalPct.toFixed(0)}%`})
+                        </span>
                       </p>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        {activeH.windowMonths === 1
+                          ? `Compared to ${activeH.subtitle} actuals`
+                          : `Compared to your ${activeH.title.toLowerCase()} monthly average (${activeH.activeMonthsCount} mo recorded)`}
+                      </p>
+                    </div>
+
+                    {/* Clean 2-bar visual */}
+                    <div className="space-y-2.5 pt-1">
+                      <div>
+                        <div className="flex justify-between text-xs mb-1">
+                          <span className="font-bold text-slate-800">This Month Expected</span>
+                          <span className="font-display font-black tabular-nums text-[#FF2EB8]">
+                            {fmt(thisMonthComparisonTarget.total)}
+                          </span>
+                        </div>
+                        <div className="h-2.5 rounded-full bg-slate-200/70 overflow-hidden">
+                          <div
+                            className="h-full rounded-full bg-[#FF2EB8] transition-all duration-300"
+                            style={{ width: `${thisBarPct}%` }}
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="flex justify-between text-xs mb-1">
+                          <span className="font-medium text-slate-500">
+                            {activeH.title} ({activeH.windowMonths === 1 ? activeH.subtitle : 'Monthly Avg'})
+                          </span>
+                          <span className="font-display font-bold tabular-nums text-slate-700">
+                            {fmt(activeH.total)}
+                          </span>
+                        </div>
+                        <div className="h-2.5 rounded-full bg-slate-200/70 overflow-hidden">
+                          <div
+                            className="h-full rounded-full bg-slate-400 transition-all duration-300"
+                            style={{ width: `${histBarPct}%` }}
+                          />
+                        </div>
+                      </div>
                     </div>
                   </div>
 
+                  {/* Right 3 Pillar Breakdown Rows (7 cols) */}
+                  <div className="lg:col-span-7 space-y-2.5">
+                    <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-slate-400 px-1">
+                      <span>Where the difference comes from</span>
+                      <span>This Month vs. {activeH.title}</span>
+                    </div>
+
+                    {pillars.map((p) => {
+                      const diff = p.current - p.hist;
+                      const pct = p.hist > 0 ? (diff / p.hist) * 100 : 0;
+                      const isLess = diff <= 0;
+                      return (
+                        <div
+                          key={p.label}
+                          className="flex items-center justify-between p-3 rounded-xl border border-slate-200/70 bg-white hover:border-slate-300 transition-colors"
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <span className={cn("w-2.5 h-2.5 rounded-full shrink-0", p.dot)} />
+                            <div>
+                              <p className="text-xs font-bold text-slate-800">{p.label}</p>
+                              <p className="text-[11px] text-slate-400 tabular-nums">
+                                Was {fmt(p.hist)}/mo
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-3">
+                            <div className="text-right">
+                              <span className="text-sm font-display font-black tabular-nums text-slate-900">
+                                {fmt(p.current)}
+                              </span>
+                            </div>
+                            <span
+                              className={cn(
+                                "min-w-[88px] text-center text-[11px] font-bold px-2 py-1 rounded-lg tabular-nums",
+                                Math.abs(pct) < 1
+                                  ? "bg-slate-100 text-slate-600"
+                                  : isLess
+                                    ? "bg-emerald-50 text-emerald-700"
+                                    : "bg-rose-50 text-rose-700"
+                              )}
+                            >
+                              {Math.abs(pct) < 1
+                                ? 'Same'
+                                : `${diff > 0 ? '+' : '−'}${fmt(Math.abs(diff))} (${pct > 0 ? `+${pct.toFixed(0)}%` : `${pct.toFixed(0)}%`})`}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Subtle Footer Toggle for Full All-Timeframes Table */}
+                <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
+                  <button
+                    type="button"
+                    onClick={() => setShowFullComparisonTable(v => !v)}
+                    className="text-xs font-semibold text-slate-500 hover:text-slate-800 transition-colors"
+                  >
+                    {showFullComparisonTable ? 'Hide full all-timeframes table ▴' : 'View full table across all timeframes ▾'}
+                  </button>
+
                   {isCurrentMonth && (
-                    <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl self-start sm:self-auto shrink-0">
+                    <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
+                      <span>Baseline:</span>
                       <button
                         type="button"
-                        onClick={() => setComparisonBaselineMode('projected')}
-                        className={cn(
-                          "px-3 py-1.5 rounded-lg text-xs font-display font-bold transition-all",
-                          comparisonBaselineMode === 'projected'
-                            ? "bg-[#FF2EB8] text-white shadow-2xs"
-                            : "text-slate-600 hover:text-slate-900"
-                        )}
+                        onClick={() => setComparisonBaselineMode(m => m === 'projected' ? 'budget' : 'projected')}
+                        className="font-semibold text-[#FF2EB8] hover:underline"
                       >
-                        Projected ({fmt(projectedSpend)})
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setComparisonBaselineMode('budget')}
-                        className={cn(
-                          "px-3 py-1.5 rounded-lg text-xs font-display font-bold transition-all",
-                          comparisonBaselineMode === 'budget'
-                            ? "bg-[#FF2EB8] text-white shadow-2xs"
-                            : "text-slate-600 hover:text-slate-900"
-                        )}
-                      >
-                        Planned Budget ({fmt(monthlyTotalBudget)})
+                        {comparisonBaselineMode === 'projected' ? 'Projected Pace (Switch to Budget)' : 'Planned Budget (Switch to Projected)'}
                       </button>
                     </div>
                   )}
                 </div>
 
-                {/* 4 Horizon Cards */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                  {horizons.map((h) => {
-                    const maxBar = Math.max(thisMonthComparisonTarget.total, h.total, 1);
-                    const thisPct = (thisMonthComparisonTarget.total / maxBar) * 100;
-                    const histPct = (h.total / maxBar) * 100;
-
-                    return (
-                      <div
-                        key={h.title}
-                        className="rounded-xl border border-slate-200/80 bg-slate-50/60 p-3.5 flex flex-col justify-between gap-2.5"
-                      >
-                        <div>
-                          <div className="flex items-center justify-between gap-1">
-                            <span className="text-[11px] font-display font-bold uppercase tracking-wider text-slate-700">
-                              vs. {h.title}
-                            </span>
-                            {h.windowMonths > 1 && (
-                              <span className="text-[10px] font-medium text-slate-400">
-                                {h.activeMonthsCount}/{h.windowMonths} mo data
-                              </span>
-                            )}
-                          </div>
-                          <p className="text-[11px] text-slate-400">{h.subtitle}</p>
-                        </div>
-
-                        <div>
-                          <div className="flex items-baseline justify-between gap-2">
-                            <div>
-                              <span className="text-[10px] uppercase font-bold text-slate-400 block">
-                                {h.windowMonths === 1 ? 'Actual Spend' : 'Monthly Avg'}
-                              </span>
-                              <span className="text-xl font-display font-black tabular-nums text-slate-900">
-                                {fmt(h.total)}
-                              </span>
-                            </div>
-                            <div className="text-right">
-                              <span className="text-[10px] uppercase font-bold text-[#FF2EB8] block">
-                                This Mo Expected
-                              </span>
-                              <span className="text-sm font-display font-bold tabular-nums text-[#FF2EB8]">
-                                {fmt(thisMonthComparisonTarget.total)}
-                              </span>
-                            </div>
-                          </div>
-
-                          <div className="mt-2">
-                            {renderDeltaBadge(thisMonthComparisonTarget.total, h.total, false)}
-                          </div>
-
-                          {/* Mini visual comparison bars */}
-                          <div className="mt-2.5 space-y-1">
-                            <div className="flex items-center gap-2 text-[10px]">
-                              <span className="w-12 text-slate-500 font-medium truncate">This mo</span>
-                              <div className="flex-1 h-1.5 rounded-full bg-slate-200/70 overflow-hidden">
-                                <div className="h-full rounded-full bg-[#FF2EB8]" style={{ width: `${thisPct}%` }} />
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-2 text-[10px]">
-                              <span className="w-12 text-slate-400 truncate">{h.windowMonths === 1 ? 'Last mo' : `${h.windowMonths}M avg`}</span>
-                              <div className="flex-1 h-1.5 rounded-full bg-slate-200/70 overflow-hidden">
-                                <div className="h-full rounded-full bg-slate-400" style={{ width: `${histPct}%` }} />
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="pt-2 border-t border-slate-200/60 flex items-center justify-between text-[10px] text-slate-500 tabular-nums">
-                          <span>Ess: <strong>{fmt(h.essential)}</strong></span>
-                          <span>Fun: <strong>{fmt(h.fun)}</strong></span>
-                          <span>Net: <strong className={h.net >= 0 ? 'text-emerald-600' : 'text-rose-600'}>{fmt(h.net)}</strong></span>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* Full Side-by-Side Pillar Matrix */}
-                <div className="overflow-x-auto rounded-xl border border-slate-200/80">
-                  <table className="w-full text-left border-collapse text-xs">
-                    <thead>
-                      <tr className="bg-slate-50 border-b border-slate-200/80 text-[10px] font-display font-bold uppercase tracking-wider text-slate-500">
-                        <th className="py-2.5 px-3.5">Spending / Cashflow Pillar</th>
-                        <th className="py-2.5 px-3 text-right text-[#FF2EB8] bg-pink-50/40">
-                          This Month ({comparisonBaselineMode === 'budget' ? 'Budget' : 'Expected'})
-                        </th>
-                        <th className="py-2.5 px-3 text-right">Last Month</th>
-                        <th className="py-2.5 px-3 text-right">Last 3M Avg</th>
-                        <th className="py-2.5 px-3 text-right">Last 6M Avg</th>
-                        <th className="py-2.5 px-3.5 text-right">Last Year Avg</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 tabular-nums">
-                      {tableRows.map((row) => (
-                        <tr
-                          key={row.label}
-                          className={cn(
-                            "hover:bg-slate-50/60 transition-colors",
-                            row.bold ? "bg-slate-50/30 font-bold text-slate-900" : "text-slate-700"
-                          )}
-                        >
-                          <td className="py-2.5 px-3.5">
-                            <div className="flex items-center gap-2">
-                              <span className={cn("w-2 h-2 rounded-full shrink-0", row.dot)} />
-                              <span>{row.label}</span>
-                            </div>
-                          </td>
-                          <td className="py-2.5 px-3 text-right font-display font-black text-slate-900 bg-pink-50/20">
-                            {fmt(row.current)}
-                          </td>
-                          {horizons.map((h) => {
-                            const val = row.getVal(h);
-                            return (
-                              <td key={h.title} className="py-2.5 px-3 text-right">
-                                <div className="flex items-center justify-end gap-1.5">
-                                  <span className={row.bold ? "font-bold text-slate-900" : "font-medium text-slate-700"}>
-                                    {fmt(val)}
-                                  </span>
-                                  {renderCompactPct(row.current, val, row.invertGood)}
-                                </div>
-                              </td>
-                            );
-                          })}
+                {showFullComparisonTable && (
+                  <div className="overflow-x-auto rounded-xl border border-slate-200/80 mt-2">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="bg-slate-50 border-b border-slate-200/80 text-[10px] font-display font-bold uppercase tracking-wider text-slate-500">
+                          <th className="py-2.5 px-3.5">Pillar</th>
+                          <th className="py-2.5 px-3 text-right text-[#FF2EB8] bg-pink-50/40">This Month</th>
+                          <th className="py-2.5 px-3 text-right">Last Month</th>
+                          <th className="py-2.5 px-3 text-right">3M Avg</th>
+                          <th className="py-2.5 px-3 text-right">6M Avg</th>
+                          <th className="py-2.5 px-3.5 text-right">Last Year Avg</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 tabular-nums">
+                        {[
+                          { label: 'Total Spend', cur: thisMonthComparisonTarget.total, fn: (h: typeof activeH) => h.total, bold: true },
+                          { label: 'Fixed Bills', cur: thisMonthComparisonTarget.fixed, fn: (h: typeof activeH) => h.fixed, bold: false },
+                          { label: 'Essentials', cur: thisMonthComparisonTarget.essential, fn: (h: typeof activeH) => h.essential, bold: false },
+                          { label: 'Fun & Lifestyle', cur: thisMonthComparisonTarget.fun, fn: (h: typeof activeH) => h.fun, bold: false },
+                        ].map((r) => (
+                          <tr key={r.label} className={r.bold ? "bg-slate-50/40 font-bold text-slate-900" : "text-slate-700"}>
+                            <td className="py-2 px-3.5">{r.label}</td>
+                            <td className="py-2 px-3 text-right font-bold bg-pink-50/20">{fmt(r.cur)}</td>
+                            {horizons.map((h) => (
+                              <td key={h.title} className="py-2 px-3 text-right">{fmt(r.fn(h))}</td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             );
           })()}
