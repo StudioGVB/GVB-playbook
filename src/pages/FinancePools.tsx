@@ -1327,9 +1327,9 @@ export default function FinancePoolsPage() {
                     <div className="min-w-0 flex flex-col">
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <h3 className="text-sm font-bold text-slate-900 truncate">{goal.name}</h3>
-                        {isHit && <Badge variant="outline" className="text-[9px] px-1.5 py-0 border-emerald-300 text-emerald-800 bg-emerald-100 font-bold">✓ Goal Hit!</Badge>}
-                        {(goal as any).is_stash && <Badge variant="secondary" className="text-[9px] px-1.5 py-0 bg-slate-100 text-slate-600 border border-slate-200">Stash</Badge>}
-                        {tripInfo && <Badge variant="outline" className="text-[9px] px-1.5 py-0 border-sky-200 text-sky-600 bg-sky-50">Trip</Badge>}
+                        {tripInfo && <Badge variant="outline" className="text-[9px] px-1.5 py-0 rounded-md border-sky-200/60 text-sky-600 bg-sky-50 font-medium">Trip</Badge>}
+                        {isHit && <Badge variant="outline" className="text-[9px] px-1.5 py-0 rounded-md border-emerald-200/60 text-emerald-700 bg-emerald-50 font-medium">✓ Goal Hit!</Badge>}
+                        {(goal as any).is_stash && <Badge variant="secondary" className="text-[9px] px-1.5 py-0 rounded-md bg-slate-50 text-slate-600 border border-slate-200/60 font-medium">Stash</Badge>}
                         {cardFeasibility && cardFeasibility.isFeasible && cardFeasibility.requiredMonthlyPace > 0 && !isHit && (
                           <button
                             type="button"
@@ -1337,10 +1337,10 @@ export default function FinancePoolsPage() {
                               e.stopPropagation();
                               openFeasibilityDialog(goal, cardFeasibility);
                             }}
-                            className="inline-flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-100/90 text-emerald-800 hover:bg-emerald-200 border border-emerald-300 font-bold transition-all shadow-2xs cursor-pointer active:scale-95"
+                            className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-md text-emerald-700 bg-emerald-50 hover:bg-emerald-100/80 border border-emerald-200/50 font-medium transition-colors cursor-pointer"
                             title="Feasible — click to view cashflow math"
                           >
-                            <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
                             <span>Feasible</span>
                           </button>
                         )}
@@ -1351,11 +1351,11 @@ export default function FinancePoolsPage() {
                               e.stopPropagation();
                               openFeasibilityDialog(goal, cardFeasibility);
                             }}
-                            className="inline-flex items-center gap-1 text-[9px] px-2 py-0.5 rounded-full bg-rose-100/90 text-rose-700 hover:bg-rose-200 border border-rose-300 font-bold transition-all shadow-2xs cursor-pointer active:scale-95"
+                            className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-md text-rose-700 bg-rose-50 hover:bg-rose-100/80 border border-rose-200/50 font-medium transition-colors cursor-pointer"
                             title="Click to view why this goal is unfeasible and see solutions"
                           >
-                            <span>⚠️ Unfeasible</span>
-                            <ChevronRight className="w-2.5 h-2.5 opacity-70" />
+                            <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" />
+                            <span>Unfeasible</span>
                           </button>
                         )}
                       </div>
