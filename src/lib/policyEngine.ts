@@ -601,39 +601,26 @@ export function computePolicySnapshot(
     ? totalLiquidCash - (burnForProjection * projectionWeeks)
     : totalLiquidCash;
 
-  // Runway: piecewise — travel weeks burn fixed-only (essentials/fun paused),
-  // then full burn after. Runway represents ALL available cash (minus non-emergency goal
-  // earmarks); the emergency fund IS the runway, not a hard reservation.
+  // Runway: includes Emergency Reserve + unallocated cash, strictly excluding all
+  // non-emergency savings pots (Euro pot, Xmas & Gifts, etc.).
+  // Uses survival burn (fixed bills + essentials, with travel weeks burning fixed-only).
   const runwayCash = Math.max(0, totalLiquidCash - totalGoalAllocations);
+  const survivalWeeklyBurn = weeklyFixedCosts + (essentialVariable / 4.33);
   let runwayWeeks: number;
-  if (travelWeeksRemaining > 0 && fullWeeklyBurn > 0) {
+  if (travelWeeksRemaining > 0 && survivalWeeklyBurn > 0) {
     const travelPhaseSpend = travelWeeksRemaining * fixedOnlyBurn;
     if (runwayCash <= travelPhaseSpend) {
       runwayWeeks = fixedOnlyBurn > 0 ? runwayCash / fixedOnlyBurn : 0;
     } else {
       const remainder = runwayCash - travelPhaseSpend;
-      runwayWeeks = travelWeeksRemaining + (remainder / fullWeeklyBurn);
+      runwayWeeks = travelWeeksRemaining + (remainder / survivalWeeklyBurn);
     }
   } else {
-    const budgetedWeeklyBurn = Math.max(fullWeeklyBurn, 1);
-    runwayWeeks = runwayCash / budgetedWeeklyBurn;
+    const effectiveBurn = Math.max(survivalWeeklyBurn, 1);
+    runwayWeeks = runwayCash / effectiveBurn;
   }
 
-  // Emergency / survival runway: how long runwayCash lasts if discretionary fun spend is paused
-  // (burning only fixed bills + essential variable costs, matching the Emergency Fund survival rate)
-  const survivalWeeklyBurn = weeklyFixedCosts + (essentialVariable / 4.33);
-  let runwayWithEmergencyWeeks: number;
-  if (travelWeeksRemaining > 0 && survivalWeeklyBurn > 0) {
-    const travelPhaseSpend = travelWeeksRemaining * fixedOnlyBurn;
-    if (runwayCash <= travelPhaseSpend) {
-      runwayWithEmergencyWeeks = fixedOnlyBurn > 0 ? runwayCash / fixedOnlyBurn : 0;
-    } else {
-      const remainder = runwayCash - travelPhaseSpend;
-      runwayWithEmergencyWeeks = travelWeeksRemaining + (remainder / survivalWeeklyBurn);
-    }
-  } else {
-    runwayWithEmergencyWeeks = survivalWeeklyBurn > 0 ? runwayCash / survivalWeeklyBurn : runwayWeeks;
-  }
+  const runwayWithEmergencyWeeks = runwayWeeks;
 
 
   return {

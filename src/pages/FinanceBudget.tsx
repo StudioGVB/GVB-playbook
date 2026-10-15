@@ -946,7 +946,7 @@ export default function FinanceBudget() {
             value={(() => {
               const rw = Math.floor(snapshot.runwayWeeks);
               const runwayMonths = Math.floor(rw / 4.33);
-              const remainderWeeks = rw - Math.round(runwayMonths * 4.33);
+              const remainderWeeks = Math.max(0, rw - Math.round(runwayMonths * 4.33));
               return runwayMonths > 0
                 ? `~${runwayMonths}mo ${remainderWeeks > 0 ? remainderWeeks + 'w' : ''}`
                 : `~${rw}w`;
@@ -954,7 +954,7 @@ export default function FinanceBudget() {
             icon={Shield}
             delta={`Until ${format(addWeeks(now, Math.floor(snapshot.runwayWeeks)), 'MMMM do')}`}
             deltaType="neutral"
-            subtitle={`w/ emergency: ${format(addWeeks(now, Math.floor(snapshot.runwayWithEmergencyWeeks)), 'MMM do')}`}
+            subtitle="Incl. emergency · ex. saving pots"
             className="bg-white border-2 border-pink-200 shadow-[4px_4px_0px_0px_rgba(255,46,184,0.06)]"
           />
           <MetricCard
