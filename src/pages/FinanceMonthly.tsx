@@ -30,7 +30,7 @@ import {
   ChevronLeft, ChevronRight, ShoppingCart, PartyPopper,
   Lock, TrendingUp, TrendingDown, Minus, DollarSign, Shield,
   ShoppingBasket, Pill, Bus, Utensils, Pencil, Gauge, LayoutGrid, Sparkles,
-  Award, MapPin, BarChart3, PiggyBank, Percent, ArrowUpRight,
+  Award, MapPin, BarChart3, PiggyBank, Percent, ArrowUpRight, CheckCircle2,
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -408,7 +408,13 @@ export default function FinanceMonthly() {
 
   // Category drill-down (for "All categories" grid)
   const [selectedCategory, setSelectedCategory] = useState<{ catId: string; name: string; color: string } | null>(null);
+  const [categoryModalView, setCategoryModalView] = useState<'transactions' | 'merchants'>('transactions');
+  const [spotlightModalView, setSpotlightModalView] = useState<'transactions' | 'merchants'>('transactions');
   const [selectedDayNum, setSelectedDayNum] = useState<number | null>(null);
+
+  const availableCategories = useMemo(() => {
+    return [...finance.categories].sort((a, b) => a.name.localeCompare(b.name));
+  }, [finance.categories]);
 
   const selectedMonthlyDayDate = useMemo(() => {
     if (selectedDayNum === null) return null;
@@ -496,21 +502,46 @@ export default function FinanceMonthly() {
     return words.toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
   };
 
+  const categoryTransactions = useMemo(() => {
+    if (!selectedCategory) return [];
+    return monthTxns
+      .filter(tx => {
+        if (tx.amount >= 0 || tx.is_transfer) return false;
+        if ((tx as any).goal_id) return false;
+        const catId = tx.category_id || '__uncategorised';
+        return catId === selectedCategory.catId;
+      })
+      .sort((a, b) => {
+        const da = parseUkDate(a.posted_at).getTime();
+        const db = parseUkDate(b.posted_at).getTime();
+        return db - da;
+      });
+  }, [selectedCategory, monthTxns]);
+
   const categoryMerchantBreakdown = useMemo(() => {
-    if (!selectedCategory) return [] as { name: string; total: number }[];
-    const map = new Map<string, number>();
-    for (const tx of monthTxns) {
-      if (tx.amount >= 0 || tx.is_transfer) continue;
-      if ((tx as any).goal_id) continue;
-      const catId = tx.category_id || '__uncategorised';
-      if (catId !== selectedCategory.catId) continue;
-      const key = canonicaliseMerchant(tx.merchant || tx.description || '');
-      map.set(key, (map.get(key) || 0) + Math.abs(baseAmt(tx)));
+    if (!selectedCategory) return [] as { name: string; total: number; transactions: typeof monthTxns }[];
+    const map = new Map<string, { total: number; transactions: typeof monthTxns }>();
+    for (const tx of categoryTransactions) {
+      const key = canonicaliseMerchant(tx.merchant || tx.description || 'Unknown');
+      const existing = map.get(key);
+      if (existing) {
+        existing.total += Math.abs(baseAmt(tx));
+        existing.transactions.push(tx);
+      } else {
+        map.set(key, {
+          total: Math.abs(baseAmt(tx)),
+          transactions: [tx],
+        });
+      }
     }
     return Array.from(map.entries())
-      .map(([name, total]) => ({ name, total }))
+      .map(([name, data]) => ({ name, total: data.total, transactions: data.transactions }))
       .sort((a, b) => b.total - a.total);
-  }, [selectedCategory, monthTxns]);
+  }, [selectedCategory, categoryTransactions]);
+
+  const categoryTransactionsTotal = useMemo(() => {
+    return categoryTransactions.reduce((sum, tx) => sum + Math.abs(baseAmt(tx)), 0);
+  }, [categoryTransactions]);
 
   const matchesSpotlightCategory = (tx: typeof monthTxns[0], keywords: string[]) => {
     if (tx.amount >= 0 || tx.is_transfer) return false;
@@ -554,18 +585,41 @@ export default function FinanceMonthly() {
     });
   }, [categoryBreakdown, prevTotals.catTotals, catMap, proRateFactor]);
 
-  const spotlightBreakdown = useMemo(() => {
+  const spotlightTransactions = useMemo(() => {
     if (!selectedSpotlight) return [];
-    const map = new Map<string, number>();
-    for (const tx of monthTxns) {
-      if (!matchesSpotlightCategory(tx, selectedSpotlight.kw)) continue;
-      const key = canonicaliseMerchant(tx.merchant || tx.description || '');
-      map.set(key, (map.get(key) || 0) + Math.abs(baseAmt(tx)));
+    return monthTxns
+      .filter(tx => matchesSpotlightCategory(tx, selectedSpotlight.kw))
+      .sort((a, b) => {
+        const da = parseUkDate(a.posted_at).getTime();
+        const db = parseUkDate(b.posted_at).getTime();
+        return db - da;
+      });
+  }, [selectedSpotlight, monthTxns, catMap, isFixedTx]);
+
+  const spotlightBreakdown = useMemo(() => {
+    if (!selectedSpotlight) return [] as { name: string; total: number; transactions: typeof monthTxns }[];
+    const map = new Map<string, { total: number; transactions: typeof monthTxns }>();
+    for (const tx of spotlightTransactions) {
+      const key = canonicaliseMerchant(tx.merchant || tx.description || 'Unknown');
+      const existing = map.get(key);
+      if (existing) {
+        existing.total += Math.abs(baseAmt(tx));
+        existing.transactions.push(tx);
+      } else {
+        map.set(key, {
+          total: Math.abs(baseAmt(tx)),
+          transactions: [tx],
+        });
+      }
     }
     return Array.from(map.entries())
-      .map(([name, total]) => ({ name, total }))
+      .map(([name, data]) => ({ name, total: data.total, transactions: data.transactions }))
       .sort((a, b) => b.total - a.total);
-  }, [selectedSpotlight, monthTxns, catMap, isFixedTx]);
+  }, [selectedSpotlight, spotlightTransactions]);
+
+  const spotlightTransactionsTotal = useMemo(() => {
+    return spotlightTransactions.reduce((sum, tx) => sum + Math.abs(baseAmt(tx)), 0);
+  }, [spotlightTransactions]);
 
 
 
@@ -995,34 +1049,217 @@ export default function FinanceMonthly() {
 
           {/* Category merchant breakdown dialog */}
           <Dialog open={!!selectedCategory} onOpenChange={() => setSelectedCategory(null)}>
-            <DialogContent className="sm:max-w-md">
+            <DialogContent className="sm:max-w-lg">
               <DialogHeader>
-                <DialogTitle className="flex items-center gap-2">
-                  {selectedCategory && (
-                    <span className="w-3 h-3 rounded-full" style={{ backgroundColor: selectedCategory.color }} />
-                  )}
-                  {selectedCategory?.name} · merchants
-                </DialogTitle>
-                <DialogDescription>
-                  Total spent this month: {selectedCategory ? fmt(categoryBreakdown.find(c => c.catId === selectedCategory.catId)?.total || 0) : fmt(0)}
+                <div className="flex items-center justify-between pr-6 gap-2">
+                  <DialogTitle className="flex items-center gap-2 text-base">
+                    {selectedCategory && (
+                      <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: selectedCategory.color || '#94a3b8' }} />
+                    )}
+                    <span className="truncate">{selectedCategory?.name}</span>
+                  </DialogTitle>
+                  <div className="inline-flex rounded-lg border border-border/60 p-0.5 bg-muted/40 text-[11px] shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setCategoryModalView('transactions')}
+                      className={cn(
+                        'px-2 py-0.5 rounded-md font-medium transition-all',
+                        categoryModalView === 'transactions'
+                          ? 'bg-background shadow-xs text-foreground font-semibold'
+                          : 'text-muted-foreground hover:text-foreground'
+                      )}
+                    >
+                      Transactions ({categoryTransactions.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCategoryModalView('merchants')}
+                      className={cn(
+                        'px-2 py-0.5 rounded-md font-medium transition-all',
+                        categoryModalView === 'merchants'
+                          ? 'bg-background shadow-xs text-foreground font-semibold'
+                          : 'text-muted-foreground hover:text-foreground'
+                      )}
+                    >
+                      Merchants ({categoryMerchantBreakdown.length})
+                    </button>
+                  </div>
+                </div>
+                <DialogDescription className="text-xs">
+                  Total spent this month: <span className="font-semibold text-foreground">{fmt(categoryTransactionsTotal)}</span> · {categoryTransactions.length} transaction{categoryTransactions.length === 1 ? '' : 's'}
                 </DialogDescription>
               </DialogHeader>
               <ScrollArea className="max-h-[60vh] -mr-4 pr-4">
-                <div className="space-y-1">
-                  {categoryMerchantBreakdown.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">No matching transactions this month.</p>
-                  ) : (
-                    categoryMerchantBreakdown.map((item, i) => (
-                      <div
-                        key={i}
-                        className="flex items-center justify-between py-2 px-3 rounded-md bg-muted/40 hover:bg-muted/60 transition-colors"
-                      >
-                        <span className="text-sm font-medium text-foreground truncate pr-4">{item.name}</span>
-                        <span className="text-sm font-black tabular-nums whitespace-nowrap">{fmt(item.total)}</span>
+                {categoryModalView === 'transactions' ? (
+                  <div className="space-y-2 py-1">
+                    {categoryTransactions.length === 0 ? (
+                      <div className="text-center py-8 space-y-2">
+                        <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto" />
+                        <p className="text-sm font-semibold text-foreground">All sorted!</p>
+                        <p className="text-xs text-muted-foreground">No transactions remaining in this category.</p>
                       </div>
-                    ))
-                  )}
-                </div>
+                    ) : (
+                      categoryTransactions.map((tx) => {
+                        const cat = catMap.get(tx.category_id || '');
+                        const isEssential = essentialCatIds.has(tx.category_id || '');
+                        const amt = Math.abs(baseAmt(tx));
+                        const dateFormatted = format(parseUkDate(tx.posted_at), 'd MMM');
+                        return (
+                          <div
+                            key={tx.id}
+                            className="flex items-center justify-between p-2.5 rounded-xl bg-muted/30 border border-border/50 hover:border-border transition-colors gap-3"
+                          >
+                            <div className="flex flex-col gap-1 min-w-0 flex-1">
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm font-semibold text-foreground truncate">
+                                  {tx.merchant || tx.description || 'Expense'}
+                                </span>
+                                <span className="text-[10px] text-muted-foreground tabular-nums shrink-0">
+                                  {dateFormatted}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1.5 flex-wrap text-[11px] mt-0.5">
+                                <Select
+                                  value={tx.category_id || '__uncategorised'}
+                                  onValueChange={async (newCatId) => {
+                                    const targetCatId = newCatId === '__uncategorised' ? null : newCatId;
+                                    await finance.updateTransaction(tx.id, { category_id: targetCatId } as any);
+                                    const newCatName = finance.categories.find(c => c.id === targetCatId)?.name || 'Uncategorised';
+                                    toast.success(`Categorised as ${newCatName}`);
+                                  }}
+                                >
+                                  <SelectTrigger className="h-6.5 text-[11px] border border-border/60 bg-background shadow-none px-2 rounded-lg gap-1 focus:ring-1 max-w-[170px]">
+                                    <div className="flex items-center gap-1.5 truncate">
+                                      {cat ? (
+                                        <>
+                                          <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: cat.color || '#888' }} />
+                                          <span className="truncate font-medium">{cat.name}</span>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <span className="w-2 h-2 rounded-full shrink-0 bg-slate-400" />
+                                          <span className="text-muted-foreground font-medium">Uncategorised</span>
+                                        </>
+                                      )}
+                                    </div>
+                                  </SelectTrigger>
+                                  <SelectContent className="max-h-56 z-[100]">
+                                    <SelectItem value="__uncategorised">
+                                      <div className="flex items-center gap-2">
+                                        <span className="w-2.5 h-2.5 rounded-full shrink-0 bg-slate-400" />
+                                        <span className="text-muted-foreground font-medium">Uncategorised</span>
+                                      </div>
+                                    </SelectItem>
+                                    {availableCategories.map((c) => (
+                                      <SelectItem key={c.id} value={c.id}>
+                                        <div className="flex items-center gap-2">
+                                          <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: c.color || '#888' }} />
+                                          <span className="font-medium">{c.name}</span>
+                                        </div>
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                                {cat && (
+                                  <span
+                                    className={`inline-block px-1.5 py-0.5 rounded-md font-bold text-[9px] uppercase ${
+                                      isEssential ? 'bg-purple-100 text-purple-700 dark:bg-purple-950/60 dark:text-purple-300' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
+                                    }`}
+                                  >
+                                    {isEssential ? 'Essential' : 'Fun'}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <span className="text-sm font-bold tabular-nums text-foreground">
+                                {fmt(amt)}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-2 py-1">
+                    {categoryMerchantBreakdown.length === 0 ? (
+                      <div className="text-center py-8 space-y-2">
+                        <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto" />
+                        <p className="text-sm font-semibold text-foreground">All sorted!</p>
+                        <p className="text-xs text-muted-foreground">No merchants remaining in this category.</p>
+                      </div>
+                    ) : (
+                      categoryMerchantBreakdown.map((item, i) => (
+                        <div
+                          key={i}
+                          className="flex items-center justify-between p-2.5 rounded-xl bg-muted/30 border border-border/50 hover:border-border transition-colors gap-3"
+                        >
+                          <div className="flex flex-col gap-1 min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-semibold text-foreground truncate">
+                                {item.name}
+                              </span>
+                              <span className="text-[10px] text-muted-foreground tabular-nums shrink-0">
+                                {item.transactions.length} tx{item.transactions.length === 1 ? '' : 's'}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1.5 flex-wrap text-[11px] mt-0.5">
+                              <Select
+                                value={selectedCategory?.catId || '__uncategorised'}
+                                onValueChange={async (newCatId) => {
+                                  const targetCatId = newCatId === '__uncategorised' ? null : newCatId;
+                                  for (const tx of item.transactions) {
+                                    await finance.updateTransaction(tx.id, { category_id: targetCatId } as any);
+                                  }
+                                  const newCatName = finance.categories.find(c => c.id === targetCatId)?.name || 'Uncategorised';
+                                  toast.success(`Categorised all ${item.name} (${item.transactions.length}) as ${newCatName}`);
+                                }}
+                              >
+                                <SelectTrigger className="h-6.5 text-[11px] border border-border/60 bg-background shadow-none px-2 rounded-lg gap-1 focus:ring-1 max-w-[170px]">
+                                  <div className="flex items-center gap-1.5 truncate">
+                                    {selectedCategory && selectedCategory.catId !== '__uncategorised' ? (
+                                      <>
+                                        <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: selectedCategory.color || '#888' }} />
+                                        <span className="truncate font-medium">{selectedCategory.name}</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <span className="w-2 h-2 rounded-full shrink-0 bg-slate-400" />
+                                        <span className="text-muted-foreground font-medium">Uncategorised</span>
+                                      </>
+                                    )}
+                                  </div>
+                                </SelectTrigger>
+                                <SelectContent className="max-h-56 z-[100]">
+                                  <SelectItem value="__uncategorised">
+                                    <div className="flex items-center gap-2">
+                                      <span className="w-2.5 h-2.5 rounded-full shrink-0 bg-slate-400" />
+                                      <span className="text-muted-foreground font-medium">Uncategorised</span>
+                                    </div>
+                                  </SelectItem>
+                                  {availableCategories.map((c) => (
+                                    <SelectItem key={c.id} value={c.id}>
+                                      <div className="flex items-center gap-2">
+                                        <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: c.color || '#888' }} />
+                                        <span className="font-medium">{c.name}</span>
+                                      </div>
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <span className="text-sm font-bold tabular-nums text-foreground">
+                              {fmt(item.total)}
+                            </span>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
               </ScrollArea>
             </DialogContent>
           </Dialog>
@@ -1030,32 +1267,202 @@ export default function FinanceMonthly() {
 
           {/* Spotlight Breakdown Dialog */}
           <Dialog open={!!selectedSpotlight} onOpenChange={() => setSelectedSpotlight(null)}>
-            <DialogContent className="sm:max-w-md">
+            <DialogContent className="sm:max-w-lg">
               <DialogHeader>
-                <DialogTitle className="flex items-center gap-2">
-                  {selectedSpotlight && <selectedSpotlight.icon className="w-4 h-4" />}
-                  {selectedSpotlight?.label} breakdown
-                </DialogTitle>
-                <DialogDescription>
-                  Total spent this month: {selectedSpotlight ? fmt(spotlight.find(s => s.key === selectedSpotlight.key)?.current || 0) : fmt(0)}
+                <div className="flex items-center justify-between pr-6 gap-2">
+                  <DialogTitle className="flex items-center gap-2 text-base">
+                    {selectedSpotlight && <selectedSpotlight.icon className="w-4 h-4" />}
+                    <span>{selectedSpotlight?.label}</span>
+                  </DialogTitle>
+                  <div className="inline-flex rounded-lg border border-border/60 p-0.5 bg-muted/40 text-[11px] shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setSpotlightModalView('transactions')}
+                      className={cn(
+                        'px-2 py-0.5 rounded-md font-medium transition-all',
+                        spotlightModalView === 'transactions'
+                          ? 'bg-background shadow-xs text-foreground font-semibold'
+                          : 'text-muted-foreground hover:text-foreground'
+                      )}
+                    >
+                      Transactions ({spotlightTransactions.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSpotlightModalView('merchants')}
+                      className={cn(
+                        'px-2 py-0.5 rounded-md font-medium transition-all',
+                        spotlightModalView === 'merchants'
+                          ? 'bg-background shadow-xs text-foreground font-semibold'
+                          : 'text-muted-foreground hover:text-foreground'
+                      )}
+                    >
+                      Merchants ({spotlightBreakdown.length})
+                    </button>
+                  </div>
+                </div>
+                <DialogDescription className="text-xs">
+                  Total spent this month: <span className="font-semibold text-foreground">{fmt(spotlightTransactionsTotal)}</span> · {spotlightTransactions.length} transaction{spotlightTransactions.length === 1 ? '' : 's'}
                 </DialogDescription>
               </DialogHeader>
               <ScrollArea className="max-h-[60vh] -mr-4 pr-4">
-                <div className="space-y-1">
-                  {spotlightBreakdown.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">No matching transactions this month.</p>
-                  ) : (
-                    spotlightBreakdown.map((item, i) => (
-                      <div
-                        key={i}
-                        className="flex items-center justify-between py-2 px-3 rounded-md bg-muted/40 hover:bg-muted/60 transition-colors"
-                      >
-                        <span className="text-sm font-medium text-foreground truncate pr-4">{item.name}</span>
-                        <span className="text-sm font-black tabular-nums whitespace-nowrap">{fmt(item.total)}</span>
+                {spotlightModalView === 'transactions' ? (
+                  <div className="space-y-2 py-1">
+                    {spotlightTransactions.length === 0 ? (
+                      <div className="text-center py-8 space-y-2">
+                        <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto" />
+                        <p className="text-sm font-semibold text-foreground">All sorted!</p>
+                        <p className="text-xs text-muted-foreground">No transactions matching this spotlight category.</p>
                       </div>
-                    ))
-                  )}
-                </div>
+                    ) : (
+                      spotlightTransactions.map((tx) => {
+                        const cat = catMap.get(tx.category_id || '');
+                        const isEssential = essentialCatIds.has(tx.category_id || '');
+                        const amt = Math.abs(baseAmt(tx));
+                        const dateFormatted = format(parseUkDate(tx.posted_at), 'd MMM');
+                        return (
+                          <div
+                            key={tx.id}
+                            className="flex items-center justify-between p-2.5 rounded-xl bg-muted/30 border border-border/50 hover:border-border transition-colors gap-3"
+                          >
+                            <div className="flex flex-col gap-1 min-w-0 flex-1">
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm font-semibold text-foreground truncate">
+                                  {tx.merchant || tx.description || 'Expense'}
+                                </span>
+                                <span className="text-[10px] text-muted-foreground tabular-nums shrink-0">
+                                  {dateFormatted}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1.5 flex-wrap text-[11px] mt-0.5">
+                                <Select
+                                  value={tx.category_id || '__uncategorised'}
+                                  onValueChange={async (newCatId) => {
+                                    const targetCatId = newCatId === '__uncategorised' ? null : newCatId;
+                                    await finance.updateTransaction(tx.id, { category_id: targetCatId } as any);
+                                    const newCatName = finance.categories.find(c => c.id === targetCatId)?.name || 'Uncategorised';
+                                    toast.success(`Categorised as ${newCatName}`);
+                                  }}
+                                >
+                                  <SelectTrigger className="h-6.5 text-[11px] border border-border/60 bg-background shadow-none px-2 rounded-lg gap-1 focus:ring-1 max-w-[170px]">
+                                    <div className="flex items-center gap-1.5 truncate">
+                                      {cat ? (
+                                        <>
+                                          <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: cat.color || '#888' }} />
+                                          <span className="truncate font-medium">{cat.name}</span>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <span className="w-2 h-2 rounded-full shrink-0 bg-slate-400" />
+                                          <span className="text-muted-foreground font-medium">Uncategorised</span>
+                                        </>
+                                      )}
+                                    </div>
+                                  </SelectTrigger>
+                                  <SelectContent className="max-h-56 z-[100]">
+                                    <SelectItem value="__uncategorised">
+                                      <div className="flex items-center gap-2">
+                                        <span className="w-2.5 h-2.5 rounded-full shrink-0 bg-slate-400" />
+                                        <span className="text-muted-foreground font-medium">Uncategorised</span>
+                                      </div>
+                                    </SelectItem>
+                                    {availableCategories.map((c) => (
+                                      <SelectItem key={c.id} value={c.id}>
+                                        <div className="flex items-center gap-2">
+                                          <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: c.color || '#888' }} />
+                                          <span className="font-medium">{c.name}</span>
+                                        </div>
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                                {cat && (
+                                  <span
+                                    className={`inline-block px-1.5 py-0.5 rounded-md font-bold text-[9px] uppercase ${
+                                      isEssential ? 'bg-purple-100 text-purple-700 dark:bg-purple-950/60 dark:text-purple-300' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
+                                    }`}
+                                  >
+                                    {isEssential ? 'Essential' : 'Fun'}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <span className="text-sm font-bold tabular-nums text-foreground">
+                                {fmt(amt)}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-2 py-1">
+                    {spotlightBreakdown.length === 0 ? (
+                      <div className="text-center py-8 space-y-2">
+                        <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto" />
+                        <p className="text-sm font-semibold text-foreground">All sorted!</p>
+                        <p className="text-xs text-muted-foreground">No merchants matching this spotlight category.</p>
+                      </div>
+                    ) : (
+                      spotlightBreakdown.map((item, i) => (
+                        <div
+                          key={i}
+                          className="flex items-center justify-between p-2.5 rounded-xl bg-muted/30 border border-border/50 hover:border-border transition-colors gap-3"
+                        >
+                          <div className="flex flex-col gap-1 min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-semibold text-foreground truncate">
+                                {item.name}
+                              </span>
+                              <span className="text-[10px] text-muted-foreground tabular-nums shrink-0">
+                                {item.transactions.length} tx{item.transactions.length === 1 ? '' : 's'}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1.5 flex-wrap text-[11px] mt-0.5">
+                              <Select
+                                onValueChange={async (newCatId) => {
+                                  const targetCatId = newCatId === '__uncategorised' ? null : newCatId;
+                                  for (const tx of item.transactions) {
+                                    await finance.updateTransaction(tx.id, { category_id: targetCatId } as any);
+                                  }
+                                  const newCatName = finance.categories.find(c => c.id === targetCatId)?.name || 'Uncategorised';
+                                  toast.success(`Categorised all ${item.name} (${item.transactions.length}) as ${newCatName}`);
+                                }}
+                              >
+                                <SelectTrigger className="h-6.5 text-[11px] border border-border/60 bg-background shadow-none px-2 rounded-lg gap-1 focus:ring-1 max-w-[170px]">
+                                  <span className="text-muted-foreground font-medium">Re-categorise all...</span>
+                                </SelectTrigger>
+                                <SelectContent className="max-h-56 z-[100]">
+                                  <SelectItem value="__uncategorised">
+                                    <div className="flex items-center gap-2">
+                                      <span className="w-2.5 h-2.5 rounded-full shrink-0 bg-slate-400" />
+                                      <span className="text-muted-foreground font-medium">Uncategorised</span>
+                                    </div>
+                                  </SelectItem>
+                                  {availableCategories.map((c) => (
+                                    <SelectItem key={c.id} value={c.id}>
+                                      <div className="flex items-center gap-2">
+                                        <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: c.color || '#888' }} />
+                                        <span className="font-medium">{c.name}</span>
+                                      </div>
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <span className="text-sm font-bold tabular-nums text-foreground">
+                              {fmt(item.total)}
+                            </span>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
               </ScrollArea>
             </DialogContent>
           </Dialog>
