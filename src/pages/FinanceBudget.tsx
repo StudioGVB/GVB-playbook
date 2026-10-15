@@ -632,7 +632,7 @@ export default function FinanceBudget() {
   return (
     <div className="space-y-8 font-body -mx-4 sm:-mx-6 -my-6 px-4 sm:px-6 py-6 min-h-screen bg-[#FFF5FA]">
       {/* Utility bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white/50 backdrop-blur-sm p-3.5 rounded-2xl border border-pink-200/20 shadow-sm">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <Button
             variant="ghost"
