@@ -336,6 +336,187 @@ export default function FinanceMonthly() {
     };
   }, [prevTotals, proRateFactor]);
 
+  // Multi-horizon historical comparison (Last Month, Last 3 Months, Last 6 Months, Last Year / 12 Months)
+  const [comparisonBaselineMode, setComparisonBaselineMode] = useState<'projected' | 'budget'>('projected');
+
+  const historicalHorizons = useMemo(() => {
+    type MonthBucket = {
+      label: string;
+      essential: number;
+      fun: number;
+      fixed: number;
+      total: number;
+      income: number;
+      net: number;
+      hasActivity: boolean;
+    };
+
+    const buckets: MonthBucket[] = [];
+    for (let m = 1; m <= 12; m++) {
+      const mStart = startOfMonth(subMonths(selectedMonth, m));
+      const mEnd = endOfMonth(subMonths(selectedMonth, m));
+      let essential = 0;
+      let fun = 0;
+      let fixed = 0;
+      let income = 0;
+
+      for (const tx of finance.transactions) {
+        if (tx.is_reimbursable) continue;
+        const d = parseUkDate(tx.posted_at);
+        if (d < mStart || d > mEnd) continue;
+
+        const cat = catMap.get(tx.category_id || '');
+        const rawText = `${tx.merchant || ''} ${tx.description || ''}`.toLowerCase();
+        const isIncomeCategory = cat?.type === 'income';
+        const isGabriellaIncome = rawText.includes('gabriella') && tx.amount > 0 && !tx.transfer_group_id && !tx.is_transfer;
+        const isIncomeKeyword =
+          rawText.includes('batchbase') ||
+          rawText.includes('batch base') ||
+          rawText.includes('payroll') ||
+          rawText.includes('salary') ||
+          rawText.includes('venture') ||
+          rawText.includes('etsy') ||
+          isGabriellaIncome;
+
+        if (tx.amount > 0 && (!tx.is_transfer || isIncomeCategory || isIncomeKeyword)) {
+          if (cat?.type !== 'transfer' || isIncomeKeyword) {
+            income += baseAmt(tx);
+            continue;
+          }
+        }
+
+        if (tx.amount >= 0 || tx.is_transfer) continue;
+        if ((tx as any).goal_id) continue;
+        if (cat?.exclude_from_reports) continue;
+
+        const amt = Math.abs(baseAmt(tx));
+        if (isFixedTx(tx)) {
+          fixed += amt;
+          continue;
+        }
+        if (cat?.type === 'income' || cat?.type === 'transfer') continue;
+
+        if (essentialCatIds.has(tx.category_id || '')) {
+          essential += amt;
+        } else {
+          fun += amt;
+        }
+      }
+
+      const mIso = format(mStart, 'yyyy-MM-dd');
+      for (const r of reimbursementsOn(mIso)) income += r.amount;
+
+      const total = fixed + essential + fun;
+      const hasActivity = total > 0 || income > 0;
+      buckets.push({
+        label: format(mStart, 'MMM yyyy'),
+        essential,
+        fun,
+        fixed,
+        total,
+        income,
+        net: income - total,
+        hasActivity,
+      });
+    }
+
+    const aggregateWindow = (windowMonths: number, title: string, subtitle: string) => {
+      const slice = buckets.slice(0, windowMonths);
+      const active = slice.filter(b => b.hasActivity);
+      const divisor = Math.max(1, active.length);
+      const sum = (fn: (b: MonthBucket) => number) => active.reduce((s, b) => s + fn(b), 0);
+
+      const avgFixed = sum(b => b.fixed) / divisor;
+      const avgEssential = sum(b => b.essential) / divisor;
+      const avgFun = sum(b => b.fun) / divisor;
+      const avgTotal = sum(b => b.total) / divisor;
+      const avgIncome = sum(b => b.income) / divisor;
+      const avgNet = avgIncome - avgTotal;
+
+      return {
+        windowMonths,
+        title,
+        subtitle,
+        activeMonthsCount: active.length,
+        fixed: avgFixed,
+        essential: avgEssential,
+        fun: avgFun,
+        total: avgTotal,
+        income: avgIncome,
+        net: avgNet,
+        cumulativeTotal: sum(b => b.total),
+        cumulativeIncome: sum(b => b.income),
+      };
+    };
+
+    const last1Label = buckets[0]?.label || 'Previous month';
+    return {
+      lastMonth: aggregateWindow(1, 'Last Month', last1Label),
+      last3Months: aggregateWindow(3, 'Last 3 Months', 'Monthly average'),
+      last6Months: aggregateWindow(6, 'Last 6 Months', 'Monthly average'),
+      lastYear: aggregateWindow(12, 'Last Year (12M)', 'Monthly average'),
+    };
+  }, [finance.transactions, selectedMonth, catMap, essentialCatIds, isFixedTx, reimbursementsOn]);
+
+  const projectedEssentialSpend = isCurrentMonth && daysElapsed > 0
+    ? (essentialSpent / daysElapsed) * daysInMonth
+    : essentialSpent;
+  const projectedFunSpend = isCurrentMonth && daysElapsed > 0
+    ? (funSpent / daysElapsed) * daysInMonth
+    : funSpent;
+
+  const thisMonthComparisonTarget = useMemo(() => {
+    const expIncome = Math.max(incomeTotal, expectedIncomeVal);
+    if (!isCurrentMonth) {
+      return {
+        modeLabel: `${monthLabel} Actual`,
+        fixed: fixedSpent,
+        essential: essentialSpent,
+        fun: funSpent,
+        total: totalSpent,
+        income: incomeTotal,
+        net: incomeTotal - totalSpent,
+      };
+    }
+    if (comparisonBaselineMode === 'budget') {
+      return {
+        modeLabel: 'Planned Budget',
+        fixed: fixedMonthly,
+        essential: monthlyEssentialBudget,
+        fun: monthlyFunBudget,
+        total: monthlyTotalBudget,
+        income: expIncome,
+        net: expIncome - monthlyTotalBudget,
+      };
+    }
+    return {
+      modeLabel: 'Projected Finish (Pace)',
+      fixed: fixedMonthly,
+      essential: projectedEssentialSpend,
+      fun: projectedFunSpend,
+      total: projectedSpend,
+      income: expIncome,
+      net: expIncome - projectedSpend,
+    };
+  }, [
+    isCurrentMonth,
+    comparisonBaselineMode,
+    monthLabel,
+    fixedSpent,
+    essentialSpent,
+    funSpent,
+    totalSpent,
+    incomeTotal,
+    expectedIncomeVal,
+    fixedMonthly,
+    monthlyEssentialBudget,
+    monthlyFunBudget,
+    monthlyTotalBudget,
+    projectedEssentialSpend,
+    projectedFunSpend,
+    projectedSpend,
+  ]);
+
   // Effective spending for peer benchmark comparison
   const effectiveSpent = isCurrentMonth ? projectedSpend : totalSpent;
   const effectiveNetProfit = incomeTotal - effectiveSpent;
@@ -940,6 +1121,282 @@ export default function FinanceMonthly() {
                       />
                     )}
                   </div>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* BLOCK 2.5: HISTORICAL COMPARISON (This Month Expected vs. Last Month · 3M · 6M · Last Year) */}
+          {(() => {
+            const horizons = [
+              historicalHorizons.lastMonth,
+              historicalHorizons.last3Months,
+              historicalHorizons.last6Months,
+              historicalHorizons.lastYear,
+            ];
+
+            const renderDeltaBadge = (currentVal: number, histVal: number, invertGood = false) => {
+              if (histVal <= 0) return <span className="text-[10px] text-slate-400">No prior data</span>;
+              const diff = currentVal - histVal;
+              const pct = (diff / histVal) * 100;
+              if (Math.abs(pct) < 1) {
+                return (
+                  <span className="inline-flex items-center gap-0.5 text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 tabular-nums">
+                    Same (0%)
+                  </span>
+                );
+              }
+              const isGood = invertGood ? diff > 0 : diff < 0;
+              return (
+                <span
+                  className={cn(
+                    "inline-flex items-center gap-0.5 text-[10px] font-bold px-2 py-0.5 rounded-full tabular-nums",
+                    isGood ? "bg-emerald-50 text-emerald-700 border border-emerald-200/70" : "bg-rose-50 text-rose-700 border border-rose-200/70"
+                  )}
+                >
+                  {diff > 0 ? '+' : '−'}{fmt(Math.abs(diff))} ({pct > 0 ? `+${pct.toFixed(0)}%` : `${pct.toFixed(0)}%`})
+                </span>
+              );
+            };
+
+            const renderCompactPct = (currentVal: number, histVal: number, invertGood = false) => {
+              if (histVal <= 0) return <span className="text-[10px] text-slate-300">—</span>;
+              const diff = currentVal - histVal;
+              const pct = (diff / histVal) * 100;
+              if (Math.abs(pct) < 1) return <span className="text-[10px] text-slate-400 font-medium">0%</span>;
+              const isGood = invertGood ? diff > 0 : diff < 0;
+              return (
+                <span className={cn("text-[10px] font-bold tabular-nums", isGood ? "text-emerald-600" : "text-rose-600")}>
+                  {pct > 0 ? `+${pct.toFixed(0)}%` : `${pct.toFixed(0)}%`}
+                </span>
+              );
+            };
+
+            const tableRows = [
+              {
+                label: 'Total Monthly Spend',
+                dot: 'bg-[#FF2EB8]',
+                bold: true,
+                invertGood: false,
+                current: thisMonthComparisonTarget.total,
+                getVal: (h: typeof historicalHorizons.lastMonth) => h.total,
+              },
+              {
+                label: '1. Fixed Bills',
+                dot: 'bg-rose-500',
+                bold: false,
+                invertGood: false,
+                current: thisMonthComparisonTarget.fixed,
+                getVal: (h: typeof historicalHorizons.lastMonth) => h.fixed,
+              },
+              {
+                label: '2. Essentials (Groceries, Transport)',
+                dot: 'bg-purple-600',
+                bold: false,
+                invertGood: false,
+                current: thisMonthComparisonTarget.essential,
+                getVal: (h: typeof historicalHorizons.lastMonth) => h.essential,
+              },
+              {
+                label: '3. Fun & Lifestyle',
+                dot: 'bg-emerald-500',
+                bold: false,
+                invertGood: false,
+                current: thisMonthComparisonTarget.fun,
+                getVal: (h: typeof historicalHorizons.lastMonth) => h.fun,
+              },
+              {
+                label: 'Monthly Income',
+                dot: 'bg-sky-500',
+                bold: false,
+                invertGood: true,
+                current: thisMonthComparisonTarget.income,
+                getVal: (h: typeof historicalHorizons.lastMonth) => h.income,
+              },
+              {
+                label: 'Net Monthly Saved (Surplus)',
+                dot: 'bg-indigo-500',
+                bold: true,
+                invertGood: true,
+                current: thisMonthComparisonTarget.net,
+                getVal: (h: typeof historicalHorizons.lastMonth) => h.net,
+              },
+            ];
+
+            return (
+              <div className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-xs space-y-5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-xl bg-pink-50 text-[#FF2EB8] flex items-center justify-center shrink-0">
+                      <BarChart3 className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h2 className="text-base font-display font-bold text-slate-900">
+                        This Month Expected vs. Historical Benchmarks
+                      </h2>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Comparing <strong>{thisMonthComparisonTarget.modeLabel} ({fmt(thisMonthComparisonTarget.total)})</strong> against Last Month, Last 3 Months, Last 6 Months &amp; Last Year
+                      </p>
+                    </div>
+                  </div>
+
+                  {isCurrentMonth && (
+                    <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl self-start sm:self-auto shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setComparisonBaselineMode('projected')}
+                        className={cn(
+                          "px-3 py-1.5 rounded-lg text-xs font-display font-bold transition-all",
+                          comparisonBaselineMode === 'projected'
+                            ? "bg-[#FF2EB8] text-white shadow-2xs"
+                            : "text-slate-600 hover:text-slate-900"
+                        )}
+                      >
+                        Projected ({fmt(projectedSpend)})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setComparisonBaselineMode('budget')}
+                        className={cn(
+                          "px-3 py-1.5 rounded-lg text-xs font-display font-bold transition-all",
+                          comparisonBaselineMode === 'budget'
+                            ? "bg-[#FF2EB8] text-white shadow-2xs"
+                            : "text-slate-600 hover:text-slate-900"
+                        )}
+                      >
+                        Planned Budget ({fmt(monthlyTotalBudget)})
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* 4 Horizon Cards */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                  {horizons.map((h) => {
+                    const maxBar = Math.max(thisMonthComparisonTarget.total, h.total, 1);
+                    const thisPct = (thisMonthComparisonTarget.total / maxBar) * 100;
+                    const histPct = (h.total / maxBar) * 100;
+
+                    return (
+                      <div
+                        key={h.title}
+                        className="rounded-xl border border-slate-200/80 bg-slate-50/60 p-3.5 flex flex-col justify-between gap-2.5"
+                      >
+                        <div>
+                          <div className="flex items-center justify-between gap-1">
+                            <span className="text-[11px] font-display font-bold uppercase tracking-wider text-slate-700">
+                              vs. {h.title}
+                            </span>
+                            {h.windowMonths > 1 && (
+                              <span className="text-[10px] font-medium text-slate-400">
+                                {h.activeMonthsCount}/{h.windowMonths} mo data
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-slate-400">{h.subtitle}</p>
+                        </div>
+
+                        <div>
+                          <div className="flex items-baseline justify-between gap-2">
+                            <div>
+                              <span className="text-[10px] uppercase font-bold text-slate-400 block">
+                                {h.windowMonths === 1 ? 'Actual Spend' : 'Monthly Avg'}
+                              </span>
+                              <span className="text-xl font-display font-black tabular-nums text-slate-900">
+                                {fmt(h.total)}
+                              </span>
+                            </div>
+                            <div className="text-right">
+                              <span className="text-[10px] uppercase font-bold text-[#FF2EB8] block">
+                                This Mo Expected
+                              </span>
+                              <span className="text-sm font-display font-bold tabular-nums text-[#FF2EB8]">
+                                {fmt(thisMonthComparisonTarget.total)}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="mt-2">
+                            {renderDeltaBadge(thisMonthComparisonTarget.total, h.total, false)}
+                          </div>
+
+                          {/* Mini visual comparison bars */}
+                          <div className="mt-2.5 space-y-1">
+                            <div className="flex items-center gap-2 text-[10px]">
+                              <span className="w-12 text-slate-500 font-medium truncate">This mo</span>
+                              <div className="flex-1 h-1.5 rounded-full bg-slate-200/70 overflow-hidden">
+                                <div className="h-full rounded-full bg-[#FF2EB8]" style={{ width: `${thisPct}%` }} />
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 text-[10px]">
+                              <span className="w-12 text-slate-400 truncate">{h.windowMonths === 1 ? 'Last mo' : `${h.windowMonths}M avg`}</span>
+                              <div className="flex-1 h-1.5 rounded-full bg-slate-200/70 overflow-hidden">
+                                <div className="h-full rounded-full bg-slate-400" style={{ width: `${histPct}%` }} />
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="pt-2 border-t border-slate-200/60 flex items-center justify-between text-[10px] text-slate-500 tabular-nums">
+                          <span>Ess: <strong>{fmt(h.essential)}</strong></span>
+                          <span>Fun: <strong>{fmt(h.fun)}</strong></span>
+                          <span>Net: <strong className={h.net >= 0 ? 'text-emerald-600' : 'text-rose-600'}>{fmt(h.net)}</strong></span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Full Side-by-Side Pillar Matrix */}
+                <div className="overflow-x-auto rounded-xl border border-slate-200/80">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-slate-50 border-b border-slate-200/80 text-[10px] font-display font-bold uppercase tracking-wider text-slate-500">
+                        <th className="py-2.5 px-3.5">Spending / Cashflow Pillar</th>
+                        <th className="py-2.5 px-3 text-right text-[#FF2EB8] bg-pink-50/40">
+                          This Month ({comparisonBaselineMode === 'budget' ? 'Budget' : 'Expected'})
+                        </th>
+                        <th className="py-2.5 px-3 text-right">Last Month</th>
+                        <th className="py-2.5 px-3 text-right">Last 3M Avg</th>
+                        <th className="py-2.5 px-3 text-right">Last 6M Avg</th>
+                        <th className="py-2.5 px-3.5 text-right">Last Year Avg</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 tabular-nums">
+                      {tableRows.map((row) => (
+                        <tr
+                          key={row.label}
+                          className={cn(
+                            "hover:bg-slate-50/60 transition-colors",
+                            row.bold ? "bg-slate-50/30 font-bold text-slate-900" : "text-slate-700"
+                          )}
+                        >
+                          <td className="py-2.5 px-3.5">
+                            <div className="flex items-center gap-2">
+                              <span className={cn("w-2 h-2 rounded-full shrink-0", row.dot)} />
+                              <span>{row.label}</span>
+                            </div>
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-display font-black text-slate-900 bg-pink-50/20">
+                            {fmt(row.current)}
+                          </td>
+                          {horizons.map((h) => {
+                            const val = row.getVal(h);
+                            return (
+                              <td key={h.title} className="py-2.5 px-3 text-right">
+                                <div className="flex items-center justify-end gap-1.5">
+                                  <span className={row.bold ? "font-bold text-slate-900" : "font-medium text-slate-700"}>
+                                    {fmt(val)}
+                                  </span>
+                                  {renderCompactPct(row.current, val, row.invertGood)}
+                                </div>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               </div>
             );
