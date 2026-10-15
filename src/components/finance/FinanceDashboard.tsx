@@ -540,7 +540,13 @@ export function FinanceDashboard() {
       </div>
 
       {/* ═══ MONDAY WEEKLY REVIEW CARD (auto on Mondays or when toggled) ═══ */}
-      <MondayWeeklyReviewCard forceShow={showMondayPreview} />
+      <MondayWeeklyReviewCard
+        finance={finance}
+        assumptions={assumptions}
+        trips={trips}
+        snapshot={snapshot}
+        forceShow={showMondayPreview}
+      />
 
       {/* ═══ ROW 1: 4 HERO KPI CARDS ═══ */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

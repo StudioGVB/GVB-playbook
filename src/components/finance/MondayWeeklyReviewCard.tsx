@@ -32,7 +32,7 @@ export function MondayWeeklyReviewCard({ finance, assumptions, trips = [], force
     return localStorage.getItem(`gvb_monday_review_dismissed_${weekKey}`) === 'true';
   });
 
-  const baseCurrency = finance.settings?.base_currency || 'AUD';
+  const baseCurrency = finance?.settings?.base_currency || 'GBP';
   const fmt = (n: number) => formatCurrency(n, baseCurrency);
 
   // Dates for last week (Monday to Sunday)
@@ -46,12 +46,12 @@ export function MondayWeeklyReviewCard({ finance, assumptions, trips = [], force
     let funSpent = 0;
     let essentialSpent = 0;
 
-    for (const tx of finance.transactions) {
+    for (const tx of finance?.transactions || []) {
       if (tx.is_transfer || tx.is_reimbursable || tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') continue;
       if (tx.goal_id) continue;
       if ((tx as any).is_travel_spend || (tx as any).trip_id) continue;
 
-      const cat = finance.categories.find(c => c.id === tx.category_id);
+      const cat = (finance?.categories || []).find(c => c.id === tx.category_id);
       if (cat?.exclude_from_reports || cat?.type === 'transfer') continue;
 
       const txDate = parseUkDate(tx.posted_at);
@@ -106,7 +106,7 @@ export function MondayWeeklyReviewCard({ finance, assumptions, trips = [], force
       isTotalOver,
       totalDiff,
     };
-  }, [finance.transactions, finance.categories, lastWeekStart, lastWeekEnd, assumptions]);
+  }, [finance?.transactions, finance?.categories, lastWeekStart, lastWeekEnd, assumptions, snapshot]);
 
   // Only render on Mondays unless forceShow is active or toggled
   if (!isMonday && !forceShow) {
