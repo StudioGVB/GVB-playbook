@@ -808,8 +808,12 @@ export default function FinanceBudget() {
                 {row('Fixed bills', `−${fmt(s.mandatoryAmount)}`, 'All fixed expenses (including externally-paid)', 'text-rose-600')}
                 {row('Essentials', `−${fmt(essentialsMonthly)}`, 'Higher of your estimate or normal-week average', 'text-rose-600')}
                 {row('Goal savings', `−${fmt(s.goalSavingsAmount)}`, 'Pools with deadlines: remaining ÷ weeks left', 'text-rose-600')}
-                {row('Fun money (monthly)', `=${fmt(s.funAmount)}`, `÷ 4.33 = ${fmt(snapshot.baseWeeklyFun)}/wk${boostAmount ? ` + ${fmt(boostAmount)} boost` : ''}${snapshot.carryForwardDebt ? ` − ${fmt(snapshot.carryForwardDebt)} carried debt` : ''}`)}
-                {row('Weekly budget', fmt(totalWeeklyBudget), `${fmt(essentialWeeklyBudget)} essentials + ${fmt(snapshot.weeklyFunBudget)} fun`)}
+                {row('Fun money (monthly)', `=${fmt(s.funAmount)}`, `÷ 4.33 = ${fmt(snapshot.baseWeeklyFun)}/wk base weekly allowance`)}
+                {row(
+                  'Weekly budget',
+                  fmt(totalWeeklyBudget),
+                  `${fmt(essentialWeeklyBudget)} essentials + ${fmt(snapshot.baseWeeklyFun)} base fun${boostAmount ? ` + ${fmt(boostAmount)} rolled over from last week (same monthly fun total)` : ''}${snapshot.carryForwardDebt ? ` − ${fmt(snapshot.carryForwardDebt)} carried debt` : ''}`
+                )}
               </CollapsibleContent>
             </div>
           </Collapsible>
