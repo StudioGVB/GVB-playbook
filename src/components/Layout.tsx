@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
-import { Home, CheckSquare, FolderKanban, CreditCard, Brain, LogOut, Settings, Menu, X, TrendingUp, ArrowLeftRight, Wallet, Upload, FileText, ChevronDown, History, CalendarDays, Plane, Receipt, DollarSign, Scale, UtensilsCrossed, ShoppingBag, Sparkles } from 'lucide-react';
+import { Home, CheckSquare, FolderKanban, CreditCard, Brain, LogOut, Settings, Menu, X, TrendingUp, ArrowLeftRight, Wallet, Upload, FileText, ChevronDown, History, CalendarDays, Plane, Receipt, DollarSign, Scale, UtensilsCrossed, ShoppingBag, Sparkles, Coins } from 'lucide-react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
@@ -24,7 +24,7 @@ const financeSubItems = [
   { to: '/finance/monthly', icon: CalendarDays, label: 'Monthly Report' },
   { to: '/finance/budget', icon: Wallet, label: 'Weekly Budget' },
   { to: '/finance/income', icon: DollarSign, label: 'Income' },
-  { to: '/finance/pools', icon: Scale, label: 'Pools & Balance Sheet' },
+  { to: '/finance/pools', icon: Coins, label: 'Money Pools' },
   { to: '/finance/transactions', icon: Upload, label: 'Transactions' },
   { to: '/finance/accounts', icon: Wallet, label: 'Accounts & Settings' },
 ];

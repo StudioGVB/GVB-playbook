@@ -225,7 +225,7 @@ export default function FinanceBudget() {
     let prevEssentialSpent = 0;
     let prevFunSpent = 0;
     for (const tx of finance.transactions) {
-      if (tx.amount >= 0 || tx.is_transfer || tx.is_fixed || tx.is_reimbursable) continue;
+      if (tx.amount >= 0 || tx.is_transfer || tx.is_fixed || (tx as any).fixed_expense_id || tx.is_reimbursable) continue;
       if ((tx as any).goal_id) continue;
       const d = parseUkDate(tx.posted_at);
       if (d < prevWeekStart || d > prevWeekEnd) continue;
@@ -390,7 +390,7 @@ export default function FinanceBudget() {
       const cat = catMap.get(tx.category_id || '');
       if (cat?.exclude_from_reports) return false;
       if (cat?.type === 'fixed' || cat?.type === 'income' || cat?.type === 'transfer') return false;
-      if (tx.is_fixed) return false;
+      if (tx.is_fixed || (tx as any).fixed_expense_id) return false;
       return true;
     });
 
@@ -429,7 +429,7 @@ export default function FinanceBudget() {
       const cat = catMap.get(tx.category_id || '');
       if (cat?.exclude_from_reports) return false;
       if (cat?.type === 'fixed' || cat?.type === 'income' || cat?.type === 'transfer') return false;
-      if (tx.is_fixed) return false;
+      if (tx.is_fixed || (tx as any).fixed_expense_id) return false;
       return true;
     });
 
@@ -498,7 +498,7 @@ export default function FinanceBudget() {
   const dailySpendingStacked = useMemo(() => {
     const days = Array.from({ length: 7 }, () => ({ essential: 0, fun: 0 }));
     for (const tx of finance.transactions) {
-      if (tx.amount >= 0 || tx.is_transfer || tx.is_fixed || tx.is_reimbursable) continue;
+      if (tx.amount >= 0 || tx.is_transfer || tx.is_fixed || (tx as any).fixed_expense_id || tx.is_reimbursable) continue;
       if ((tx as any).goal_id) continue;
       const d = parseUkDate(tx.posted_at);
       if (d < weekStart || d > weekEnd) continue;

@@ -665,9 +665,12 @@ export default function FinanceCostOfLiving() {
           </div>
         </div>
 
-        {/* Estimated variable spending */}
+        {/* Estimated variable and savings spending */}
         <div className="bg-white rounded-[2rem] border-2 border-[#FF7AD1]/40 shadow-sm p-6 space-y-6">
-          <h3 className="font-display font-bold text-lg text-slate-900">Estimated Variable</h3>
+          <div>
+            <h3 className="font-display font-bold text-lg text-slate-900">Estimated Variable & Savings</h3>
+            <p className="text-xs text-slate-500 mt-0.5">Living essentials, active goal pots, and discretionary spending</p>
+          </div>
 
           {/* Essentials */}
           <div className="space-y-3">
@@ -676,7 +679,7 @@ export default function FinanceCostOfLiving() {
                 <p className="text-[11px] font-display font-bold text-purple-500 uppercase tracking-widest">Essentials</p>
                 <p className="text-2xl font-display font-black text-slate-900 tabular-nums">{fmt(essentialTotal)}</p>
               </div>
-              <p className="text-[10px] text-slate-500 font-medium">{essentialPct}% of variable</p>
+              <p className="text-[10px] text-slate-500 font-medium">{essentialPct}% of variable & savings</p>
             </div>
             <div className="w-full h-2 bg-purple-100 rounded-full overflow-hidden">
               <div className="h-full bg-purple-500 rounded-full transition-all" style={{ width: `${essentialPct}%` }} />
@@ -694,6 +697,48 @@ export default function FinanceCostOfLiving() {
             </ul>
           </div>
 
+          {/* Saving Goals (Pots) */}
+          <div className="space-y-3">
+            <div className="flex justify-between items-end">
+              <div>
+                <p className="text-[11px] font-display font-bold text-[#FF2EB8] uppercase tracking-widest flex items-center gap-1.5">
+                  <PiggyBank className="w-3.5 h-3.5" />
+                  Saving Goals (Pots)
+                </p>
+                <p className="text-2xl font-display font-black text-slate-900 tabular-nums">{fmt(savingsTotal)}</p>
+              </div>
+              <p className="text-[10px] text-slate-500 font-medium">{savingsPct}% of variable & savings</p>
+            </div>
+            <div className="w-full h-2 bg-pink-100 rounded-full overflow-hidden">
+              <div className="h-full bg-[#FF2EB8] rounded-full transition-all" style={{ width: `${savingsPct}%` }} />
+            </div>
+            <ul className="text-[11px] text-slate-500 space-y-1.5">
+              {savingsBreakdown.filter(s => s.monthlyPace > 0 || !s.isCompleted).slice(0, 4).map(s => (
+                <li key={s.id} className="flex justify-between items-center">
+                  <span className="flex items-center gap-1.5 truncate max-w-[140px] sm:max-w-[180px]">
+                    <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: s.color }} />
+                    <span className="truncate">{s.name}</span>
+                  </span>
+                  <span className="text-slate-900 font-semibold tabular-nums text-right">
+                    {s.isCompleted ? (
+                      <span className="text-emerald-600 font-bold text-[10px]">Fully funded 🎉</span>
+                    ) : (
+                      <>
+                        {fmt(s.monthlyPace)}<span className="text-slate-400">/mo</span>
+                        {s.weeklyPace > 0 && (
+                          <span className="text-[10px] text-slate-400 ml-1">({fmt(s.weeklyPace)}/wk)</span>
+                        )}
+                      </>
+                    )}
+                  </span>
+                </li>
+              ))}
+              {savingsBreakdown.length === 0 && (
+                <li className="text-slate-400">No active savings pots configured yet.</li>
+              )}
+            </ul>
+          </div>
+
           {/* Fun Money */}
           <div className="space-y-3">
             <div className="flex justify-between items-end">
@@ -701,7 +746,7 @@ export default function FinanceCostOfLiving() {
                 <p className="text-[11px] font-display font-bold text-emerald-500 uppercase tracking-widest">Fun Money</p>
                 <p className="text-2xl font-display font-black text-slate-900 tabular-nums">{fmt(funTotal)}</p>
               </div>
-              <p className="text-[10px] text-slate-500 font-medium">{funPct}% of variable</p>
+              <p className="text-[10px] text-slate-500 font-medium">{funPct}% of variable & savings</p>
             </div>
             <div className="w-full h-2 bg-emerald-100 rounded-full overflow-hidden">
               <div className="h-full bg-emerald-500 rounded-full transition-all" style={{ width: `${funPct}%` }} />
@@ -719,17 +764,46 @@ export default function FinanceCostOfLiving() {
             </ul>
           </div>
 
+          {/* Complete Baseline Split */}
           <div className="pt-2">
-            <div className="p-4 bg-[#FFF5FA] rounded-2xl border-2 border-[#FF7AD1]/30">
-              <div className="flex gap-3">
-                <div className="w-9 h-9 rounded-2xl bg-white flex items-center justify-center shrink-0">
-                  <Wallet className="w-4 h-4 text-[#FF2EB8]" />
+            <div className="p-4 bg-[#FFF5FA] rounded-2xl border-2 border-[#FF7AD1]/30 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-white flex items-center justify-center shrink-0 shadow-xs">
+                    <Wallet className="w-4 h-4 text-[#FF2EB8]" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-[#FF2EB8] font-display font-bold uppercase tracking-widest">Complete Baseline Split</p>
+                    <p className="text-xs font-bold text-slate-900">Total Monthly Outflow: {fmt(totalEstimatedMonthly)}</p>
+                  </div>
                 </div>
-                <div className="space-y-1">
-                  <p className="text-[10px] text-[#FF2EB8] font-display font-bold uppercase tracking-widest">Baseline split</p>
-                  <p className="text-xs text-slate-700 leading-relaxed">
-                    Fixed bills make up <span className="font-display font-black text-slate-900">{fixedRatio}%</span> of your monthly baseline. The remaining <span className="font-display font-black text-slate-900">{100 - fixedRatio}%</span> is variable spending.
-                  </p>
+              </div>
+
+              {/* Multi-segment visual progress bar */}
+              <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden flex shadow-inner">
+                {fixedRatio > 0 && <div style={{ width: `${fixedRatio}%` }} className="bg-red-400 h-full" title={`Fixed Bills: ${fixedRatio}%`} />}
+                {essentialRatio > 0 && <div style={{ width: `${essentialRatio}%` }} className="bg-purple-500 h-full" title={`Essentials: ${essentialRatio}%`} />}
+                {savingsRatio > 0 && <div style={{ width: `${savingsRatio}%` }} className="bg-[#FF2EB8] h-full" title={`Savings Goals: ${savingsRatio}%`} />}
+                {funRatio > 0 && <div style={{ width: `${funRatio}%` }} className="bg-emerald-500 h-full" title={`Discretionary Fun: ${funRatio}%`} />}
+              </div>
+
+              {/* 4-Pillar Grid */}
+              <div className="grid grid-cols-2 gap-x-2 gap-y-1.5 pt-1 text-[11px] font-semibold text-slate-600">
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-red-400 shrink-0" />
+                  <span>Fixed Bills: <strong className="text-slate-900">{fixedRatio}%</strong></span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-purple-500 shrink-0" />
+                  <span>Essentials: <strong className="text-slate-900">{essentialRatio}%</strong></span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-[#FF2EB8] shrink-0" />
+                  <span>Saving Goals: <strong className="text-slate-900">{savingsRatio}%</strong></span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+                  <span>Discretionary: <strong className="text-slate-900">{funRatio}%</strong></span>
                 </div>
               </div>
             </div>

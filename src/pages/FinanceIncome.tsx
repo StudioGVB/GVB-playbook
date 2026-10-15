@@ -683,7 +683,7 @@ export default function FinanceIncome() {
                 const data = bucketed[b.key] || { total: 0, count: 0, txs: [] };
                 const pct = grandTotalWithReimbursements > 0 ? (data.total / grandTotalWithReimbursements) * 100 : 0;
                 const Icon = b.icon;
-                const isQuarter = data.total <= 0;
+                const isQuarter = data.total < 20;
 
                 return (
                   <Collapsible
