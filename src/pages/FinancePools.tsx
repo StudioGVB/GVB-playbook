@@ -18,16 +18,17 @@ import {
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Plus, ShoppingCart, Target, Wallet, Lock, ArrowRightLeft, Trash2, Palette, Plane, Car, Home, GraduationCap, Heart, Gift, Laptop, Baby, PiggyBank, Briefcase, UtensilsCrossed, Dumbbell, Music, Gamepad2, BookOpen, Sparkles, Pencil, AlertCircle, RotateCcw, AlertTriangle, ChevronRight, HelpCircle, CheckCircle2, type LucideIcon } from 'lucide-react';
+import { Plus, ShoppingCart, Target, Wallet, Lock, ArrowRightLeft, Trash2, Palette, Plane, Car, Home, GraduationCap, Heart, Gift, Laptop, Baby, PiggyBank, Briefcase, UtensilsCrossed, Dumbbell, Music, Gamepad2, BookOpen, Sparkles, Pencil, AlertCircle, RotateCcw, AlertTriangle, ChevronRight, HelpCircle, CheckCircle2, Milestone, ArrowUpRight, Check, Shield, type LucideIcon } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import PriorMonthAllocator from '@/components/finance/PriorMonthAllocator';
 import FinanceBalanceSheet from '@/pages/FinanceBalanceSheet';
 import WeeklyPoolSavingsCard from '@/components/finance/WeeklyPoolSavingsCard';
-import { format, startOfMonth, endOfMonth } from 'date-fns';
+import { format, startOfMonth, endOfMonth, parseISO } from 'date-fns';
 import { detectPaycheck, calculatePaycheckWaterfall, isPaycheckProcessed, markPaycheckProcessed, unmarkPaycheckProcessed, savePaycheckAllocationMeta, getPaycheckAllocationMeta } from '@/lib/paycheckEngine';
 import { baseAmt } from '@/lib/financeUtils';
 import { evaluatePoolFeasibility } from '@/lib/feasibilityEngine';
+import { computeEmergencyLadder } from '@/lib/emergencyLadderEngine';
 import FeasibilityAlert from '@/components/finance/FeasibilityAlert';
 import OverspendCoverPanel from '@/components/finance/OverspendCoverPanel';
 import FeasibilityBreakdownDialog from '@/components/finance/FeasibilityBreakdownDialog';
@@ -218,6 +219,33 @@ export default function FinancePoolsPage() {
   const essentialVariable = snapshot?.computedEssentialVariable ?? (assumptions as any)?.estimated_essential_variable ?? 0;
   const bufferMonths = assumptions?.buffer_months ?? 3;
   const actualMonthlySurvival = snapshot?.emergencySurvivalMonthly ?? snapshot?.survivalCostMonthly ?? (fixedMonthlyTotal + essentialVariable);
+
+  const [ladderDialogOpen, setLadderDialogOpen] = useState(false);
+  const [ladderBannerDismissed, setLadderBannerDismissed] = useState(false);
+
+  const targetMonthsVal = parseInt(
+    String((finance.settings?.fx_rates as any)?.target_buffer_months || localStorage.getItem('gvb_target_buffer_months') || '6')
+  ) || 6;
+
+  const ladderState = useMemo(() => {
+    return computeEmergencyLadder({
+      activeMonths: bufferMonths,
+      targetMonths: targetMonthsVal,
+      monthlySurvival: actualMonthlySurvival,
+      totalLiquidCash: totalCash,
+      goals: finance.goals,
+      convertToBase: finance.convertToBase,
+    });
+  }, [bufferMonths, targetMonthsVal, actualMonthlySurvival, totalCash, finance.goals, finance.convertToBase]);
+
+  const handleLevelUpEmergencyMonth = async () => {
+    if (!updateAssumptions) return;
+    const nextVal = bufferMonths + 1;
+    await updateAssumptions({
+      buffer_months: nextVal,
+    });
+    toast.success(`🎉 Emergency reserve successfully increased to ${nextVal} months!`);
+  };
 
   // Sub-breakdown of living/spending pool
   const fixedReserve = isDrawdown && weeksUntilIncome > 0
@@ -871,7 +899,6 @@ export default function FinancePoolsPage() {
         </TabsList>
 
         <TabsContent value="pools" className="space-y-6">
-          <OverspendCoverPanel finance={finance} trips={trips} baseCurrency={baseCurrency} />
           {/* Paycheck Landed Auto-Allocation Banner */}
           {paycheckTx && waterfallBreakdown && detectedPaycheck && (!paycheckAllocated || revertSecondsLeft > 0) && (
             <Card className="bg-gradient-to-r from-emerald-50 via-white to-sky-50 border-2 border-emerald-300 shadow-[6px_6px_0px_0px_rgba(16,185,129,0.12)] font-body transition-all duration-300">
@@ -1429,7 +1456,8 @@ export default function FinancePoolsPage() {
           <FinanceBalanceSheet />
         </TabsContent>
 
-        <TabsContent value="allocate" className="space-y-4">
+        <TabsContent value="allocate" className="space-y-6">
+          <OverspendCoverPanel finance={finance} trips={trips} baseCurrency={baseCurrency} />
           <PriorMonthAllocator
             transactions={finance.transactions}
             categories={finance.categories}
@@ -1798,6 +1826,10 @@ export default function FinancePoolsPage() {
           await updateAssumptions({ expected_monthly_income: null });
           toast.success('Reset to 3-month dynamic transaction average');
         }}
+        transactions={finance.transactions}
+        categories={finance.categories}
+        accounts={finance.accounts}
+        onUpdateTransaction={finance.updateTransaction}
       />
     </div>
   );
