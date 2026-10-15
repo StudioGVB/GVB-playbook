@@ -185,7 +185,7 @@ export default function FinanceBudget() {
     ? differenceInDays(today, weekStart) + 1 
     : (selectedDate < today ? 7 : 0);
   const daysLeft = isCurrentWeek 
-    ? Math.max(0, differenceInDays(weekEnd, today)) 
+    ? Math.max(1, 8 - dayOfWeek) 
     : (selectedDate < today ? 0 : 7);
 
   const currentWeekType = getWeekType(selectedDate);
@@ -585,7 +585,7 @@ export default function FinanceBudget() {
   const isOverBudget = combinedSafeToSpend < 0;
   const overAmount = Math.abs(combinedSafeToSpend);
   const nextMonday = addWeeks(weekStart, 1);
-  const daysUntilReset = isCurrentWeek ? Math.max(0, differenceInDays(nextMonday, today)) : 0;
+  const daysUntilReset = isCurrentWeek ? daysLeft : 0;
 
   // === Week Pulse segments (Variable spending only: Essentials + Fun) ===
   const totalWeeklyBudget = essentialWeeklyBudget + snapshot.weeklyFunBudget;
