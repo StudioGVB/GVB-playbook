@@ -29,12 +29,17 @@ import { addWeeks, format } from 'date-fns';
 import { toast } from 'sonner';
 import type { useFinanceData } from '@/hooks/useFinanceData';
 import type { FinanceAssumptions } from '@/hooks/useFinanceAssumptions';
+import type { WeekType } from '@/hooks/useWeekTypes';
+import type { FinanceTrip } from '@/hooks/useFinanceTrips';
 
 interface Props {
   finance: ReturnType<typeof useFinanceData>;
   assumptions: FinanceAssumptions;
   fixedExpensesMonthly: number;
+  fixedExpensesMonthlyAll?: number;
   totalBoost?: number;
+  weekTypeMap?: Map<string, WeekType>;
+  trips?: FinanceTrip[];
   onReservePurchase?: (title: string, amount: number, targetDate?: string) => void;
 }
 
@@ -72,7 +77,10 @@ export default function PurchaseTimingEvaluator({
   finance,
   assumptions,
   fixedExpensesMonthly,
+  fixedExpensesMonthlyAll,
   totalBoost = 0,
+  weekTypeMap,
+  trips = [],
   onReservePurchase
 }: Props) {
   const { transactions, categories, accounts, goals, convertToBase, settings } = finance;
@@ -80,8 +88,20 @@ export default function PurchaseTimingEvaluator({
   const fmt = (n: number) => formatCurrency(n, baseCurrency);
 
   const snapshot = useMemo(
-    () => computePolicySnapshot(assumptions, accounts, transactions, categories, goals, convertToBase, fixedExpensesMonthly, totalBoost),
-    [assumptions, accounts, transactions, categories, goals, convertToBase, fixedExpensesMonthly, totalBoost]
+    () => computePolicySnapshot(
+      assumptions,
+      accounts,
+      transactions,
+      categories,
+      goals,
+      convertToBase,
+      fixedExpensesMonthly,
+      totalBoost,
+      weekTypeMap,
+      trips,
+      fixedExpensesMonthlyAll
+    ),
+    [assumptions, accounts, transactions, categories, goals, convertToBase, fixedExpensesMonthly, fixedExpensesMonthlyAll, totalBoost, weekTypeMap, trips]
   );
 
   const {
@@ -90,8 +110,32 @@ export default function PurchaseTimingEvaluator({
     spentThisWeek,
     essentialSpentThisWeek,
     emergencyFloor,
-    availableSavings
+    availableSavings,
+    totalLiquidCash,
   } = snapshot;
+
+  // Match FinancePools Emergency Fund calculation
+  const { currentEmergencyFunded, emergencyShortfall, isEmergencyIncomplete } = useMemo(() => {
+    const emergencyGoal = goals.find(
+      g => (g as any).is_emergency === true || g.name.toLowerCase().includes('emergency')
+    );
+    const emergencyGoalAssigned = emergencyGoal
+      ? convertToBase(emergencyGoal.assigned_amount || 0, emergencyGoal.currency)
+      : 0;
+    const assignedOtherGoalsTotal = goals
+      .filter(g => !(g as any).is_emergency && !g.name.toLowerCase().includes('emergency'))
+      .filter(g => (g.assigned_amount || 0) > 0)
+      .reduce((s, g) => s + convertToBase(g.assigned_amount || 0, g.currency), 0);
+    const unassignedCash = Math.max(0, totalLiquidCash - assignedOtherGoalsTotal);
+    const cashForEmergency = Math.max(emergencyGoalAssigned, unassignedCash);
+    const funded = Math.min(emergencyFloor, cashForEmergency);
+    const shortfall = Math.max(0, emergencyFloor - funded);
+    return {
+      currentEmergencyFunded: funded,
+      emergencyShortfall: shortfall,
+      isEmergencyIncomplete: shortfall > 0.01,
+    };
+  }, [goals, convertToBase, totalLiquidCash, emergencyFloor]);
 
   const totalWeeklyBudget = weeklyEssentialBudget + weeklyFunBudget;
   const totalWeeklySpent = essentialSpentThisWeek + spentThisWeek;
@@ -142,14 +186,43 @@ export default function PurchaseTimingEvaluator({
     const weeklyBudget = Math.max(1, totalWeeklyBudget);
     const percentOfBudget = Math.round((parsedAmount / weeklyBudget) * 100);
 
-    // Case 1: Ready to buy now out of remaining weekly budget
+    // If Emergency Fund is not yet complete, excess weekly budget should go straight to Emergency Fund first!
+    if (isEmergencyIncomplete) {
+      const remainingAfter = Math.max(0, remainingWeeklyBudget - parsedAmount);
+      const fitsWeekly = parsedAmount <= remainingWeeklyBudget;
+      const estimatedWeeksForEmergency = Math.max(
+        1,
+        Math.ceil(emergencyShortfall / Math.max(25, snapshot.baseWeeklyFun || 50))
+      );
+      const weeksToWait = fitsWeekly
+        ? estimatedWeeksForEmergency
+        : estimatedWeeksForEmergency + Math.max(1, Math.ceil((parsedAmount - budgetRemaining) / weeklyBudget));
+      const targetDate = addWeeks(new Date(), weeksToWait);
+
+      return {
+        status: fitsWeekly ? ('wait' as const) : ('danger' as const),
+        verdict: fitsWeekly ? 'Hold Off · Emergency Fund Incomplete 🟡' : 'Not Ready · Emergency Fund Short 🔴',
+        headline: `Emergency Fund is still ${fmt(emergencyShortfall)} short of its ${fmt(emergencyFloor)} target`,
+        advice: fitsWeekly
+          ? `Although ${itemTitle ? `"${itemTitle}"` : 'this purchase'} (${fmt(parsedAmount)}) fits within your ${fmt(remainingWeeklyBudget)} remaining weekly budget, your Emergency Fund is not finished yet (${fmt(currentEmergencyFunded)} / ${fmt(emergencyFloor)} — ${fmt(emergencyShortfall)} short). Because any unspent weekly excess sweeps straight into your Emergency Fund at week-end, holding off sends +${fmt(parsedAmount)} directly toward completing your safety cushion.`
+          : `Your Emergency Fund is still ${fmt(emergencyShortfall)} short of its ${fmt(emergencyFloor)} target (${fmt(currentEmergencyFunded)} saved so far), and ${itemTitle ? `"${itemTitle}"` : 'this purchase'} (${fmt(parsedAmount)}) also exceeds your remaining weekly budget (${fmt(budgetRemaining)}). Prioritise finishing your Emergency Fund first.`,
+        weeksToWait,
+        targetDate,
+        percentOfWeeklyBudget: percentOfBudget,
+        weeklyBudgetRemainingAfter: remainingAfter,
+        impactOnSafety: fitsWeekly ? ('moderate' as const) : ('danger' as const),
+        weeklySavingsPace: Math.ceil(parsedAmount / Math.max(1, weeksToWait)),
+      };
+    }
+
+    // Case 1: Emergency Fund is complete AND item fits inside remaining weekly budget
     if (parsedAmount <= remainingWeeklyBudget) {
       const remainingAfter = remainingWeeklyBudget - parsedAmount;
       return {
         status: 'ready' as const,
         verdict: 'Financially Ready 🟢',
         headline: `You can buy ${itemTitle ? `"${itemTitle}"` : 'this'} today!`,
-        advice: `${itemTitle ? `"${itemTitle}"` : 'This purchase'} (${fmt(parsedAmount)}) fits fully inside your remaining safe-to-spend weekly budget. You will still have ${fmt(remainingAfter)} left for the rest of the week without dipping into savings.`,
+        advice: `${itemTitle ? `"${itemTitle}"` : 'This purchase'} (${fmt(parsedAmount)}) fits fully inside your remaining safe-to-spend weekly budget, and your ${fmt(emergencyFloor)} Emergency Fund is 100% funded. You will still have ${fmt(remainingAfter)} left for the rest of the week without dipping into savings.`,
         weeksToWait: 0,
         targetDate: new Date(),
         percentOfWeeklyBudget: percentOfBudget,
@@ -195,7 +268,7 @@ export default function PurchaseTimingEvaluator({
       impactOnSafety: 'danger' as const,
       weeklySavingsPace: Math.ceil(parsedAmount / (weeksToWait + 2)),
     };
-  }, [parsedAmount, remainingWeeklyBudget, totalWeeklyBudget, availableSavings, emergencyFloor, itemTitle, fmt]);
+  }, [parsedAmount, remainingWeeklyBudget, totalWeeklyBudget, availableSavings, emergencyFloor, itemTitle, fmt, isEmergencyIncomplete, emergencyShortfall, currentEmergencyFunded, snapshot.baseWeeklyFun]);
 
   const handleApplyPreset = (p: typeof PRESETS[0]) => {
     setItemTitle(p.title);
@@ -414,10 +487,14 @@ export default function PurchaseTimingEvaluator({
 
                 <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200/60 dark:border-slate-800 shadow-sm">
                   <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Protected Safety Cushion</span>
-                  <span className="text-xl font-black text-emerald-600 dark:text-emerald-400 mt-1 block">
-                    {fmt(emergencyFloor)}
+                  <span className={`text-xl font-black mt-1 block ${isEmergencyIncomplete ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
+                    {isEmergencyIncomplete ? fmt(currentEmergencyFunded) : fmt(emergencyFloor)}
                   </span>
-                  <span className="text-[11px] text-slate-500 block">emergency floor untouchable</span>
+                  <span className="text-[11px] text-slate-500 block">
+                    {isEmergencyIncomplete
+                      ? `${fmt(emergencyShortfall)} short of ${fmt(emergencyFloor)}`
+                      : 'emergency floor 100% funded'}
+                  </span>
                 </div>
               </div>
 

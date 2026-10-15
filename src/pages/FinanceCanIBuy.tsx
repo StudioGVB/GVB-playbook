@@ -1,10 +1,11 @@
-import { useMemo } from 'react';
 import { useFinanceData } from '@/hooks/useFinanceData';
 import { useFinanceAssumptions } from '@/hooks/useFinanceAssumptions';
 import { useFixedExpenses } from '@/hooks/useFixedExpenses';
 import { useWeeklyBoosts } from '@/hooks/useWeeklyBoosts';
+import { useWeekTypes } from '@/hooks/useWeekTypes';
+import { useFinanceTrips } from '@/hooks/useFinanceTrips';
 import PurchaseTimingEvaluator from '@/components/finance/PurchaseTimingEvaluator';
-import { Sparkles, ArrowLeft, Wallet } from 'lucide-react';
+import { ArrowLeft, Wallet } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useNavigate } from 'react-router-dom';
 
@@ -12,8 +13,10 @@ export default function FinanceCanIBuyPage() {
   const navigate = useNavigate();
   const finance = useFinanceData();
   const { assumptions, loading: assumptionsLoading } = useFinanceAssumptions();
-  const { monthlyTotalInternal: fixedExpensesMonthly } = useFixedExpenses();
+  const { monthlyTotalInternal: fixedExpensesMonthly, monthlyTotal: fixedExpensesMonthlyAll } = useFixedExpenses();
   const { totalBoostThisWeek } = useWeeklyBoosts();
+  const { weekTypeMap } = useWeekTypes();
+  const { trips } = useFinanceTrips();
 
   if (finance.loading || assumptionsLoading) {
     return (
@@ -66,7 +69,10 @@ export default function FinanceCanIBuyPage() {
           finance={finance}
           assumptions={assumptions}
           fixedExpensesMonthly={fixedExpensesMonthly}
+          fixedExpensesMonthlyAll={fixedExpensesMonthlyAll}
           totalBoost={totalBoostThisWeek}
+          weekTypeMap={weekTypeMap()}
+          trips={trips}
         />
       )}
     </div>
