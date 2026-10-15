@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Plus, Pencil, Trash2, Check, X, Wallet } from 'lucide-react';
+import { Plus, Pencil, Trash2, Check, X, Wallet, PiggyBank, Target, Sparkles } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -16,6 +16,7 @@ import {
   FREQ_TO_MONTHLY,
 } from '@/hooks/useFixedExpenses';
 import { useFinanceData } from '@/hooks/useFinanceData';
+import { useFinanceAssumptions } from '@/hooks/useFinanceAssumptions';
 import { useAutoLinkFixedBills } from '@/hooks/useAutoLinkFixedBills';
 import { formatCurrency, parseUkDate } from '@/lib/financeUtils';
 import { toast } from 'sonner';
@@ -35,6 +36,7 @@ const FREQUENCY_OPTIONS = [
 
 export default function FinanceCostOfLiving() {
   const finance = useFinanceData();
+  const { assumptions } = useFinanceAssumptions();
   const fx = useFixedExpenses();
   const baseCurrency = finance.settings?.base_currency || 'AUD';
 
@@ -155,13 +157,109 @@ export default function FinanceCostOfLiving() {
 
   const essentialTotal = essentialBreakdown.reduce((s, r) => s + r.avg, 0);
   const funTotal = funBreakdown.reduce((s, r) => s + r.avg, 0);
-  const totalVariable = essentialTotal + funTotal || variableMonthly.avg;
-  const essentialPct = totalVariable > 0 ? Math.round((essentialTotal / totalVariable) * 100) : 0;
-  const funPct = totalVariable > 0 ? 100 - essentialPct : 0;
 
-  const totalEstimatedMonthly = fixedMonthlyTotal + variableMonthly.avg;
+  // Saving goals breakdown (active goals with monthly savings target pace or 3-month avg contributions)
+  const savingsBreakdown = useMemo(() => {
+    const now = new Date();
+    const list: {
+      id: string;
+      name: string;
+      target: number;
+      assigned: number;
+      remaining: number;
+      monthlyPace: number;
+      weeklyPace: number;
+      color: string;
+      deadline?: string | null;
+      isEmergency?: boolean;
+      isCompleted: boolean;
+    }[] = [];
+
+    const effectiveIncome = (assumptions?.expected_monthly_income && assumptions.expected_monthly_income > 0)
+      ? assumptions.expected_monthly_income
+      : 0;
+
+    for (const g of (finance.goals || [])) {
+      if ((g as any).is_stash) continue;
+      if (g.start_date && new Date(g.start_date) > now) continue;
+
+      const targetBase = finance.convertToBase(g.target_amount || 0, g.currency);
+      const assignedBase = finance.convertToBase(g.assigned_amount || 0, g.currency);
+      const remainingBase = Math.max(0, targetBase - assignedBase);
+      const isEmergency = (g as any).is_emergency === true || g.name.toLowerCase().includes('emergency');
+      const isCompleted = targetBase > 0 && remainingBase <= 0.01;
+
+      let weeklyPace = 0;
+      let monthlyPace = 0;
+
+      if (!isCompleted) {
+        if (g.deadline) {
+          const dl = new Date(g.deadline);
+          const daysLeft = Math.max(1, Math.ceil((dl.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
+          const weeksLeft = Math.max(1, daysLeft / 7);
+          weeklyPace = Math.min(remainingBase, remainingBase / weeksLeft);
+          monthlyPace = weeklyPace * 4.33;
+        } else if (g.percent_allocation && g.percent_allocation > 0 && effectiveIncome > 0) {
+          monthlyPace = Math.min(remainingBase, (g.percent_allocation / 100) * effectiveIncome);
+          weeklyPace = monthlyPace / 4.33;
+        } else {
+          // If no deadline, check past 3-month average of transactions assigned to this goal
+          let goalTxSum = 0;
+          let monthsCount = 0;
+          for (let i = 1; i <= 3; i++) {
+            const start = new Date(now.getFullYear(), now.getMonth() - i, 1);
+            const end = new Date(now.getFullYear(), now.getMonth() - i + 1, 1);
+            let mSum = 0;
+            for (const tx of finance.transactions) {
+              const d = parseUkDate(tx.posted_at);
+              if (d >= start && d < end && (tx as any).goal_id === g.id) {
+                mSum += finance.convertToBase(Math.abs(tx.amount), tx.currency || baseCurrency);
+              }
+            }
+            if (mSum > 0) { goalTxSum += mSum; monthsCount++; }
+          }
+          if (monthsCount > 0) {
+            monthlyPace = goalTxSum / monthsCount;
+            weeklyPace = monthlyPace / 4.33;
+          }
+        }
+      }
+
+      list.push({
+        id: g.id,
+        name: g.name,
+        target: targetBase,
+        assigned: assignedBase,
+        remaining: remainingBase,
+        monthlyPace,
+        weeklyPace,
+        color: g.color || '#FF2EB8',
+        deadline: g.deadline,
+        isEmergency,
+        isCompleted,
+      });
+    }
+
+    return list.sort((a, b) => b.monthlyPace - a.monthlyPace);
+  }, [finance.goals, finance.transactions, finance.convertToBase, assumptions, baseCurrency]);
+
+  const savingsTotal = savingsBreakdown.reduce((s, r) => s + r.monthlyPace, 0);
+
+  // Total variable and savings combined for the card
+  const totalVariableAndSavings = essentialTotal + savingsTotal + funTotal || 1;
+  const essentialPct = Math.round((essentialTotal / totalVariableAndSavings) * 100);
+  const savingsPct = Math.round((savingsTotal / totalVariableAndSavings) * 100);
+  const funPct = Math.max(0, 100 - essentialPct - savingsPct);
+
+  // True total monthly baseline requirement (Fixed Bills + Essential Living + Savings Goals + Discretionary Fun)
+  const totalEstimatedMonthly = fixedMonthlyTotal + essentialTotal + savingsTotal + funTotal;
   const dailyBurn = totalEstimatedMonthly / 30.44;
-  const fixedRatio = totalEstimatedMonthly > 0 ? Math.round((fixedMonthlyTotal / totalEstimatedMonthly) * 100) : 0;
+
+  const baselineSplitDenom = totalEstimatedMonthly || 1;
+  const fixedRatio = Math.round((fixedMonthlyTotal / baselineSplitDenom) * 100);
+  const essentialRatio = Math.round((essentialTotal / baselineSplitDenom) * 100);
+  const savingsRatio = Math.round((savingsTotal / baselineSplitDenom) * 100);
+  const funRatio = Math.max(0, 100 - fixedRatio - essentialRatio - savingsRatio);
 
   const handleAdd = async () => {
     const amt = parseFloat(form.amount);
@@ -326,38 +424,46 @@ export default function FinanceCostOfLiving() {
       </div>
 
       {/* Bento metric cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
         <div
-          className="bg-white rounded-[2rem] p-6 border-2 border-red-400 relative overflow-hidden"
+          className="bg-white rounded-[2rem] p-5 sm:p-6 border-2 border-red-400 relative overflow-hidden"
           style={{ boxShadow: '6px 6px 0px 0px #F87171' }}
         >
           <p className="text-red-500 font-display font-bold uppercase tracking-widest text-[10px] mb-2">Fixed Monthly</p>
-          <p className="text-3xl sm:text-4xl font-display font-black text-slate-900 tabular-nums leading-none">{fmt(fixedMonthlyTotal)}</p>
-          <p className="text-[11px] text-slate-500 mt-3 font-medium">Committed obligations</p>
+          <p className="text-2xl sm:text-3xl font-display font-black text-slate-900 tabular-nums leading-none">{fmt(fixedMonthlyTotal)}</p>
+          <p className="text-[11px] text-slate-500 mt-2.5 font-medium">Committed obligations</p>
         </div>
         <div
-          className="bg-white rounded-[2rem] p-6 border-2 border-purple-400 relative overflow-hidden"
+          className="bg-white rounded-[2rem] p-5 sm:p-6 border-2 border-purple-400 relative overflow-hidden"
           style={{ boxShadow: '6px 6px 0px 0px #A78BFA' }}
         >
           <p className="text-purple-500 font-display font-bold uppercase tracking-widest text-[10px] mb-2">Variable Est.</p>
-          <p className="text-3xl sm:text-4xl font-display font-black text-slate-900 tabular-nums leading-none">{fmt(variableMonthly.avg)}</p>
-          <p className="text-[11px] text-slate-500 mt-3 font-medium">Essentials + fun projection</p>
+          <p className="text-2xl sm:text-3xl font-display font-black text-slate-900 tabular-nums leading-none">{fmt(essentialTotal + funTotal)}</p>
+          <p className="text-[11px] text-slate-500 mt-2.5 font-medium">Essentials + discretionary</p>
         </div>
         <div
-          className="bg-white rounded-[2rem] p-6 border-2 border-[#FF2EB8] relative overflow-hidden"
+          className="bg-white rounded-[2rem] p-5 sm:p-6 border-2 border-[#FF2EB8] relative overflow-hidden"
           style={{ boxShadow: `6px 6px 0px 0px ${PINK}` }}
         >
-          <p className="text-[#FF2EB8] font-display font-bold uppercase tracking-widest text-[10px] mb-2">Total Baseline</p>
-          <p className="text-3xl sm:text-4xl font-display font-black text-slate-900 tabular-nums leading-none">{fmt(totalEstimatedMonthly)}</p>
-          <p className="text-[11px] text-slate-500 mt-3 font-medium">Estimated total outflow</p>
+          <p className="text-[#FF2EB8] font-display font-bold uppercase tracking-widest text-[10px] mb-2">Savings Goals</p>
+          <p className="text-2xl sm:text-3xl font-display font-black text-slate-900 tabular-nums leading-none">{fmt(savingsTotal)}</p>
+          <p className="text-[11px] text-slate-500 mt-2.5 font-medium">Active goal pots pace</p>
         </div>
         <div
-          className="bg-[#86EFAC] rounded-[2rem] p-6 border-2 border-[#22C55E] relative overflow-hidden"
+          className="bg-white rounded-[2rem] p-5 sm:p-6 border-2 border-slate-700 relative overflow-hidden"
+          style={{ boxShadow: '6px 6px 0px 0px #334155' }}
+        >
+          <p className="text-slate-700 font-display font-bold uppercase tracking-widest text-[10px] mb-2">Total Baseline</p>
+          <p className="text-2xl sm:text-3xl font-display font-black text-slate-900 tabular-nums leading-none">{fmt(totalEstimatedMonthly)}</p>
+          <p className="text-[11px] text-slate-500 mt-2.5 font-medium">Bills + living + savings</p>
+        </div>
+        <div
+          className="bg-[#86EFAC] rounded-[2rem] p-5 sm:p-6 border-2 border-[#22C55E] relative overflow-hidden col-span-2 sm:col-span-1"
           style={{ boxShadow: '6px 6px 0px 0px #22C55E' }}
         >
-          <p className="text-[#166534] font-display font-bold uppercase tracking-widest text-[10px] mb-2">Daily Burn</p>
-          <p className="text-3xl sm:text-4xl font-display font-black text-[#166534] tabular-nums leading-none">{fmt(dailyBurn)}</p>
-          <p className="text-[11px] text-[#166534]/80 mt-3 font-medium">Average cost per day</p>
+          <p className="text-[#166534] font-display font-bold uppercase tracking-widest text-[10px] mb-2">Daily Outflow</p>
+          <p className="text-2xl sm:text-3xl font-display font-black text-[#166534] tabular-nums leading-none">{fmt(dailyBurn)}</p>
+          <p className="text-[11px] text-[#166534]/80 mt-2.5 font-medium">Average cost per day</p>
         </div>
       </div>
 
