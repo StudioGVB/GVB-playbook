@@ -31,6 +31,9 @@ import { evaluatePoolFeasibility } from '@/lib/feasibilityEngine';
 import FeasibilityAlert from '@/components/finance/FeasibilityAlert';
 import OverspendCoverPanel from '@/components/finance/OverspendCoverPanel';
 import FeasibilityBreakdownDialog from '@/components/finance/FeasibilityBreakdownDialog';
+import PurchaseTimingEvaluator from '@/components/finance/PurchaseTimingEvaluator';
+import { useWeeklyBoosts } from '@/hooks/useWeeklyBoosts';
+import { useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 
 
@@ -97,8 +100,11 @@ export default function FinancePoolsPage() {
   const finance = useFinanceData();
   const { assumptions, loading: assumptionsLoading, update: updateAssumptions } = useFinanceAssumptions();
   const { monthlyTotalInternal: fixedMonthlyTotal, monthlyTotal: fixedMonthlyTotalAll } = useFixedExpenses();
+  const { totalBoostThisWeek } = useWeeklyBoosts();
   const { weekTypeMap } = useWeekTypes();
   const { trips } = useFinanceTrips();
+  const [searchParams] = useSearchParams();
+  const initialTab = searchParams.get('tab') || 'pools';
 
   // Map goal_id → trip spent (for goals linked to a trip)
   const goalTripSpent = useMemo(() => {
@@ -836,8 +842,8 @@ export default function FinancePoolsPage() {
         </Button>
       </div>
 
-      <Tabs defaultValue="pools" className="space-y-6">
-        <TabsList className="bg-white/80 backdrop-blur-md p-1.5 rounded-2xl w-fit h-auto shadow-sm border border-[#FF7AD1]/30 gap-1">
+      <Tabs defaultValue={initialTab} className="space-y-6">
+        <TabsList className="bg-white/80 backdrop-blur-md p-1.5 rounded-2xl w-fit h-auto shadow-sm border border-[#FF7AD1]/30 gap-1 flex-wrap">
           <TabsTrigger
             value="pools"
             className="px-5 sm:px-6 py-2.5 rounded-xl font-display font-semibold text-sm text-[#FF2EB8] data-[state=active]:bg-[#FF2EB8] data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-[#FF2EB8]/25 transition-all"
@@ -855,6 +861,12 @@ export default function FinancePoolsPage() {
             className="px-5 sm:px-6 py-2.5 rounded-xl font-display font-semibold text-sm text-[#FF2EB8] data-[state=active]:bg-[#FF2EB8] data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-[#FF2EB8]/25 transition-all"
           >
             Allocate Leftover
+          </TabsTrigger>
+          <TabsTrigger
+            value="can-i-buy"
+            className="px-5 sm:px-6 py-2.5 rounded-xl font-display font-semibold text-sm text-[#FF2EB8] data-[state=active]:bg-[#FF2EB8] data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-[#FF2EB8]/25 transition-all"
+          >
+            Can I Buy This?
           </TabsTrigger>
         </TabsList>
 
@@ -1425,6 +1437,20 @@ export default function FinancePoolsPage() {
             convertToBase={finance.convertToBase}
             updateGoal={finance.updateGoal}
           />
+        </TabsContent>
+
+        <TabsContent value="can-i-buy" className="space-y-4">
+          {assumptions && (
+            <PurchaseTimingEvaluator
+              finance={finance}
+              assumptions={assumptions}
+              fixedExpensesMonthly={fixedMonthlyTotal}
+              fixedExpensesMonthlyAll={fixedMonthlyTotalAll}
+              totalBoost={totalBoostThisWeek}
+              weekTypeMap={typeof wtMap === 'function' ? (wtMap as any)() : wtMap}
+              trips={trips}
+            />
+          )}
         </TabsContent>
       </Tabs>
 

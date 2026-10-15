@@ -73,17 +73,17 @@ const App = () => (
               <Route path="/finance/cost-of-living" element={<FinanceAccountsPage defaultTab="cost-of-living" />} />
               <Route path="/finance/dashboards" element={<FinanceSalarySnapshot />} />
               <Route path="/finance/pools" element={<FinancePoolsPage />} />
-              <Route path="/finance/can-i-buy" element={<FinanceCanIBuyPage />} />
-              <Route path="/finance/can-i-afford" element={<Navigate to="/finance/can-i-buy" replace />} />
+              <Route path="/finance/can-i-buy" element={<Navigate to="/finance/pools?tab=can-i-buy" replace />} />
+              <Route path="/finance/can-i-afford" element={<Navigate to="/finance/pools?tab=can-i-buy" replace />} />
               <Route path="/finance/transactions" element={<FinanceTransactionsPage />} />
               <Route path="/finance/transfers" element={<FinanceTransfersPage />} />
               <Route path="/finance/accounts" element={<FinanceAccountsPage defaultTab="accounts" />} />
               <Route path="/finance/goals" element={<Navigate to="/finance/budget" replace />} />
               <Route path="/finance/settings" element={<FinanceAccountsPage defaultTab="settings" />} />
               <Route path="/finance/history" element={<FinanceAccountsPage defaultTab="history" />} />
-              <Route path="/afford" element={<Navigate to="/finance/can-i-buy" replace />} />
-              <Route path="/can-i-buy" element={<Navigate to="/finance/can-i-buy" replace />} />
-              <Route path="/can-i-buy-this" element={<Navigate to="/finance/can-i-buy" replace />} />
+              <Route path="/afford" element={<Navigate to="/finance/pools?tab=can-i-buy" replace />} />
+              <Route path="/can-i-buy" element={<Navigate to="/finance/pools?tab=can-i-buy" replace />} />
+              <Route path="/can-i-buy-this" element={<Navigate to="/finance/pools?tab=can-i-buy" replace />} />
 
 
               <Route path="/brain-dump" element={<BrainDump />} />
