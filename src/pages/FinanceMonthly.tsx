@@ -12,7 +12,7 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useFinanceData } from '@/hooks/useFinanceData';
 import { useFinanceAssumptions } from '@/hooks/useFinanceAssumptions';
-import { useFixedExpenses } from '@/hooks/useFixedExpenses';
+import { useFixedExpenses, FREQ_TO_MONTHLY } from '@/hooks/useFixedExpenses';
 import { useWeeklyBoosts } from '@/hooks/useWeeklyBoosts';
 import { useWeekTypes } from '@/hooks/useWeekTypes';
 import { computePolicySnapshot, computeRequiredGoalSavingsMonthly } from '@/lib/policyEngine';
