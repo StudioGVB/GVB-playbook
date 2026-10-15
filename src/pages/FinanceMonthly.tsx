@@ -1038,8 +1038,8 @@ export default function FinanceMonthly() {
                   </button>
                 </div>
 
-                {/* 3 Clear Pacing Pillars */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {/* 4 Clear Pacing Pillars */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                   {/* Pillar 1: Variable Spent So Far */}
                   <div className="rounded-xl bg-slate-50/90 border border-slate-200/60 p-3.5">
                     <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
@@ -1078,7 +1078,7 @@ export default function FinanceMonthly() {
                     <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
                       Projected Month-End Total
                     </p>
-                    <div className="flex items-baseline gap-2 mt-1">
+                    <div className="flex items-baseline gap-2 mt-1 flex-wrap">
                       <span className="text-2xl font-display font-black tabular-nums text-slate-900">
                         {fmt(projectedSpend)}
                       </span>
@@ -1086,14 +1086,41 @@ export default function FinanceMonthly() {
                         / {fmt(monthlyTotalBudget)}
                       </span>
                     </div>
-                    <p className="text-[11px] text-slate-600 mt-1">
-                      {projectedDiff > 1
-                        ? `On pace to finish ${fmt(projectedDiff)} over budget`
-                        : projectedDiff < -1
-                          ? `On pace to finish ${fmt(Math.abs(projectedDiff))} under budget`
-                          : `Right on your ${fmt(monthlyTotalBudget)} monthly budget`}
+                    <p className="text-[11px] text-slate-600 mt-1 font-medium">
+                      {fmt(fixedMonthly)} fixed + {fmt(projectedVariableSpend)} est. variable
                     </p>
                   </div>
+
+                  {/* Pillar 4: Expected Over / Under Budget */}
+                  {(() => {
+                    const overBudget = projectedDiff > 0;
+                    const diffColor = overBudget ? '#DC2626' : '#16A34A';
+                    const diffBg = overBudget ? 'bg-rose-50/70 border-rose-200' : 'bg-emerald-50/70 border-emerald-200';
+                    return (
+                      <div className={cn("rounded-xl border p-3.5", diffBg)}>
+                        <p className="text-[10px] font-bold uppercase tracking-wider" style={{ color: diffColor }}>
+                          {overBudget ? 'Projected Over By' : 'Projected Under By'}
+                        </p>
+                        <div className="flex items-baseline gap-1.5 mt-1">
+                          <span className="text-2xl font-display font-black tabular-nums" style={{ color: diffColor }}>
+                            {fmt(Math.abs(projectedDiff))}
+                          </span>
+                          <span className="text-xs font-bold" style={{ color: diffColor }}>
+                            {overBudget ? 'over' : 'saved'}
+                          </span>
+                        </div>
+                        <p className="text-[11px] font-medium mt-1" style={{ color: diffColor }}>
+                          {overBudget
+                            ? (daysRemaining > 0
+                                ? `Cut ${fmt(projectedDiff / daysRemaining)}/day to stay on budget`
+                                : `Finished ${fmt(projectedDiff)} over budget`)
+                            : (daysRemaining > 0
+                                ? `Saving ${fmt(Math.abs(projectedDiff))} (${fmt(Math.abs(projectedDiff) / daysRemaining)}/d buffer)`
+                                : `Saved ${fmt(Math.abs(projectedDiff))} under budget`)}
+                        </p>
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 {/* Single Unified Bar: Variable Budget Used vs. Calendar Time Elapsed */}
