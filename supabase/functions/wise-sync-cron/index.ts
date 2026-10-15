@@ -374,7 +374,39 @@ serve(async (req) => {
         }
         const rowsToUpsert = Array.from(batchMap.values())
 
-        // 8. Chunked Upserts with Fallback using supabaseAdmin
+        // 8. Chunked Upserts with Fallback using supabaseAdmin (preserving existing categories & user edits)
+        const dbAccountIds = Array.from(new Set(rowsToUpsert.map(r => r.account_id)))
+        const { data: existingDbTxs } = dbAccountIds.length > 0
+          ? await supabaseAdmin
+              .from('finance_transactions')
+              .select('account_id, external_transaction_id, category_id, is_transfer, is_fixed, goal_id')
+              .eq('user_id', userId)
+              .in('account_id', dbAccountIds)
+          : { data: [] }
+
+        const existingMap = new Map<string, any>()
+        for (const ex of existingDbTxs || []) {
+          existingMap.set(`${ex.account_id}:${ex.external_transaction_id}`, ex)
+        }
+
+        for (const row of rowsToUpsert) {
+          const key = `${row.account_id}:${row.external_transaction_id}`
+          const existing = existingMap.get(key)
+          if (existing) {
+            // PRESERVE user category and pool assignments on existing transactions!
+            row.category_id = existing.category_id !== undefined ? existing.category_id : null
+            if (existing.is_transfer !== undefined && existing.is_transfer !== null) {
+              row.is_transfer = existing.is_transfer
+            }
+            if (existing.goal_id !== undefined) {
+              (row as any).goal_id = existing.goal_id
+            }
+            if (existing.is_fixed !== undefined) {
+              (row as any).is_fixed = existing.is_fixed
+            }
+          }
+        }
+
         let importedCount = 0
         if (rowsToUpsert.length > 0) {
           for (let i = 0; i < rowsToUpsert.length; i += 100) {
@@ -401,7 +433,7 @@ serve(async (req) => {
           }
         }
 
-        // 9. Post-sync Cleanup & Deduplication
+        // 9. Post-sync Cleanup & Deduplication (NEVER overwrites assigned categories)
         const { data: userTxs } = await supabaseAdmin
           .from('finance_transactions')
           .select('id, account_id, posted_at, amount, description, merchant, external_transaction_id, is_transfer, category_id')
@@ -429,18 +461,20 @@ serve(async (req) => {
               targetIsTransfer = true
             }
 
-            // Auto-assign Gamma to Gamma Salary category, and Batchbase / Venture to Venture Advisory
-            if (fullText.includes('GAMMA')) {
-              targetCatId = gammaCatId || ventureCatId || targetCatId
-              targetIsTransfer = false
-            } else if ((fullText.includes('VENTURE') || fullText.includes('ADVISORY') || isBatchbase) && ventureCatId) {
-              targetCatId = ventureCatId
-              targetIsTransfer = false
+            // Only auto-assign category if transaction has NO category assigned yet!
+            if (!tx.category_id) {
+              if (fullText.includes('GAMMA')) {
+                targetCatId = gammaCatId || ventureCatId || targetCatId
+                targetIsTransfer = false
+              } else if ((fullText.includes('VENTURE') || fullText.includes('ADVISORY') || isBatchbase) && ventureCatId) {
+                targetCatId = ventureCatId
+                targetIsTransfer = false
+              }
             }
 
             if (Math.abs(tx.amount) === 3000 && (cleanDesc.toUpperCase().includes('GABRIELLA') || cleanDesc.toUpperCase().includes('NOREF'))) {
               targetAmount = 3000.00
-              if (gammaCatId) targetCatId = gammaCatId
+              if (!tx.category_id && gammaCatId) targetCatId = gammaCatId
             }
 
             if (cleanDesc !== tx.description || cleanMerch !== tx.merchant || targetAmount !== tx.amount || targetIsTransfer !== tx.is_transfer || targetCatId !== tx.category_id) {

@@ -184,18 +184,20 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
     try {
       const syncTasks: Promise<any>[] = [];
       if (finance.syncUpTransactions && accounts.some(a => a.provider === 'up')) {
-        syncTasks.push(finance.syncUpTransactions());
+        syncTasks.push(finance.syncUpTransactions({ skipAutoCategorize: true }));
       }
       if (finance.syncWiseTransactions && (accounts.some(a => a.provider === 'wise') || true)) {
-        syncTasks.push(finance.syncWiseTransactions());
+        syncTasks.push(finance.syncWiseTransactions(undefined, { skipAutoCategorize: true }));
       }
       if (finance.syncMonzoTransactions && accounts.some(a => a.provider === 'monzo')) {
-        syncTasks.push(finance.syncMonzoTransactions());
+        syncTasks.push(finance.syncMonzoTransactions(undefined, { skipAutoCategorize: true }));
       }
       if (syncTasks.length === 0) {
         toast.info('No connected bank API accounts found (Wise, Monzo, or Up). Connect an account or import CSV in Accounts.');
       } else {
-        await Promise.all(syncTasks);
+        await Promise.allSettled(syncTasks);
+        await categorizeTransactions();
+        await finance.refetch();
       }
     } catch (err) {
       console.error('Bank sync error:', err);

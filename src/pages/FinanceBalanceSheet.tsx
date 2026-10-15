@@ -126,22 +126,26 @@ export default function FinanceBalanceSheet() {
     };
 
     const isActiveExpense = (expense: FixedExpense) => {
-      if (expense.frequency !== 'monthly') return false;
       if (expense.effective_from && monthIso < expense.effective_from.slice(0, 10)) return false;
       if (expense.effective_to && monthIso > expense.effective_to.slice(0, 10)) return false;
       return true;
     };
 
     const monthlyExpenseAmount = (expense: FixedExpense) =>
+      toMonthly(convert(Number(expense.amount) || 0, expense.currency || baseCurrency), expense.frequency);
+
+    const expenseNominalAmount = (expense: FixedExpense) =>
       convert(Number(expense.amount) || 0, expense.currency || baseCurrency);
 
     const findActiveBillMatch = (tx: any, txAbs: number) => {
       const rawText = `${tx.merchant || ''} ${tx.description || ''}`;
       const candidates = fixedExpenses.filter(expense => {
         if (!isActiveExpense(expense)) return false;
-        const expenseAmount = monthlyExpenseAmount(expense);
-        const diff = Math.abs(expenseAmount - txAbs);
-        return diff <= Math.max(0.5, expenseAmount * 0.03);
+        const nominal = expenseNominalAmount(expense);
+        const monthly = monthlyExpenseAmount(expense);
+        const diffNominal = Math.abs(nominal - txAbs);
+        const diffMonthly = Math.abs(monthly - txAbs);
+        return diffNominal <= Math.max(0.5, nominal * 0.03) || diffMonthly <= Math.max(0.5, monthly * 0.03);
       });
       return candidates.find(expense => billNameMatches(expense, rawText)) || (candidates.length === 1 ? candidates[0] : null);
     };

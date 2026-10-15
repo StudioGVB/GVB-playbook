@@ -849,7 +849,7 @@ export function useFinanceDataState() {
     }
   };
 
-  const syncUpTransactions = async () => {
+  const syncUpTransactions = async (opts?: { skipAutoCategorize?: boolean }) => {
     if (!user) return;
     try {
       const session = await supabase.auth.getSession();
@@ -875,8 +875,9 @@ export function useFinanceDataState() {
 
       toast.success(`Synced ${data.accountsSynced} accounts, ${data.transactionsImported} transactions`);
       
-      // Auto-categorise after sync
-      await categorizeTransactions();
+      if (!opts?.skipAutoCategorize) {
+        await categorizeTransactions();
+      }
       
       await fetchAll();
     } catch (err) {
@@ -950,7 +951,7 @@ export function useFinanceDataState() {
     }
   };
 
-  const syncWiseTransactions = async (token?: string) => {
+  const syncWiseTransactions = async (token?: string, opts?: { skipAutoCategorize?: boolean }) => {
     if (!user) return;
     try {
       const session = await supabase.auth.getSession();
@@ -985,8 +986,9 @@ export function useFinanceDataState() {
 
       toast.success(data.message || `Synced Wise accounts: imported ${data.transactionsImported} transactions`);
       
-      // Auto-categorise after sync
-      await categorizeTransactions();
+      if (!opts?.skipAutoCategorize) {
+        await categorizeTransactions();
+      }
       
       await fetchAll();
     } catch (err) {
@@ -1060,7 +1062,7 @@ export function useFinanceDataState() {
     }
   };
 
-  const syncMonzoTransactions = async (token?: string) => {
+  const syncMonzoTransactions = async (token?: string, opts?: { skipAutoCategorize?: boolean }) => {
     if (!user) return;
     try {
       const session = await supabase.auth.getSession();
@@ -1086,8 +1088,9 @@ export function useFinanceDataState() {
 
       toast.success(`Synced Monzo accounts: imported ${data.transactionsImported} transactions`);
       
-      // Auto-categorise after sync
-      await categorizeTransactions();
+      if (!opts?.skipAutoCategorize) {
+        await categorizeTransactions();
+      }
       
       await fetchAll();
     } catch (err) {
@@ -1126,14 +1129,24 @@ export function useFinanceDataState() {
         toast.info(data.message || 'All transactions categorised');
       }
 
-      // Repair pass: Flag savings transfers as transfers, strip HTML tags, fix £3k deposit sign & link Gamma / Venture correctly
+      // Auto-categorisation & repair pass:
+      // STRICT RULE: Only consider transactions that currently have NO category assigned (category_id is null).
+      // Any previously assigned transaction is 100% UNTOUCHED!
+      const { data: uncatDbTxs } = await supabase
+        .from('finance_transactions')
+        .select('*')
+        .eq('user_id', user.id)
+        .is('category_id', null);
+
       const genericIncomeCat = categories.find(c => c.name.toLowerCase() === 'income');
       const gammaCat = categories.find(c => c.type === 'income' && c.name.toLowerCase().includes('gamma'));
       const ventureCat = categories.find(c => c.type === 'income' && (c.name.toLowerCase().includes('venture') || c.name.toLowerCase().includes('advisory')));
       const rentCat = categories.find(c => c.name.toLowerCase() === 'rent');
-      const wiseAccountIds = new Set(accounts.filter(a => a.provider === 'wise').map(a => a.id));
 
-      for (const t of transactions) {
+      for (const t of (uncatDbTxs || [])) {
+        // Defensive check: if it already has a category, never touch it!
+        if (t.category_id) continue;
+
         const cleanDesc = (t.description || '').replace(/<[^>]*>/g, '').trim();
         const cleanMerch = (t.merchant || '').replace(/<[^>]*>/g, '').trim() || null;
         let targetAmount = t.amount;
@@ -1143,14 +1156,6 @@ export function useFinanceDataState() {
           targetAmount = 3000.00;
         }
 
-        if (cleanDesc !== t.description || cleanMerch !== t.merchant || targetAmount !== t.amount) {
-          await supabase.from('finance_transactions').update({
-            amount: targetAmount,
-            description: cleanDesc,
-            merchant: cleanMerch,
-          }).eq('id', t.id);
-        }
-
         const descUpper = cleanDesc.toUpperCase();
         const merchUpper = (cleanMerch || '').toUpperCase();
         const fullText = `${descUpper} ${merchUpper}`;
@@ -1158,83 +1163,60 @@ export function useFinanceDataState() {
         const isBatchbase = fullText.includes('BATCHBASE') || fullText.includes('BATCH BASE');
         const isGabriella = fullText.includes('GABRIELLA');
         const absAmt = Math.abs(targetAmount);
-        const isWeeklyPaycheck = targetAmount > 0 && (
-          (absAmt >= 60 && absAmt <= 90) ||
-          (absAmt >= 120 && absAmt <= 180) ||
-          Math.abs(absAmt - 72.8) < 0.5 ||
-          Math.abs(absAmt - 140) < 1.0
-        );
         const isVentureIncome = isBatchbase || fullText.includes('VENTURE') || fullText.includes('ADVISORY');
         const isGabriellaOrUp = !isVentureIncome && (isGabriella || fullText.includes('UP ACCOUNT') || fullText.includes('UP BANK'));
 
-        // Flag internal transfers from savings (strictly savings transfer keywords, excluding external batchbase/paychecks)
+        // Flag internal transfers from savings (strictly savings transfer keywords)
         const isSavingsTransfer = !isVentureIncome && !isBatchbase && !isGabriella && (
           fullText.includes('TRANSFER FROM SAVINGS') ||
           fullText.includes('SAVINGS TRANSFER') ||
           fullText.includes('TRANSFER TO SAVINGS')
         );
 
-        if (isSavingsTransfer) {
-          if (!t.is_transfer) {
-            await supabase.from('finance_transactions').update({
-              is_transfer: true,
-            }).eq('id', t.id);
+        if (targetAmount > 0 && !isSavingsTransfer) {
+          let assignedCatId: string | null = null;
+          if (isVentureIncome && ventureCat) {
+            assignedCatId = ventureCat.id;
+          } else if (fullText.includes('GAMMA') && gammaCat) {
+            assignedCatId = gammaCat.id;
+          } else if (isGabriellaOrUp && genericIncomeCat) {
+            assignedCatId = genericIncomeCat.id;
           }
-        } else if (isVentureIncome || isBatchbase || isGabriella || (wiseAccountIds.has(t.account_id) && t.is_transfer && !t.transfer_group_id)) {
-          // Unflag non-transfer Wise items or Gabriella/Batchbase items incorrectly tagged as transfer
-          if (t.is_transfer || t.transfer_status || t.transfer_side) {
+
+          if (assignedCatId) {
             await supabase.from('finance_transactions').update({
+              amount: targetAmount,
+              description: cleanDesc,
+              merchant: cleanMerch,
               is_transfer: false,
               transfer_side: null,
               transfer_status: null,
+              category_id: assignedCatId,
+            }).eq('id', t.id);
+          } else if (cleanDesc !== t.description || cleanMerch !== t.merchant || targetAmount !== t.amount) {
+            await supabase.from('finance_transactions').update({
+              amount: targetAmount,
+              description: cleanDesc,
+              merchant: cleanMerch,
             }).eq('id', t.id);
           }
-        }
-
-        // Income auto-categorization
-        if (targetAmount > 0 && !isSavingsTransfer) {
-          if (isVentureIncome) {
-            if (ventureCat && (!t.category_id || t.is_transfer || t.transfer_status)) {
-              await supabase.from('finance_transactions').update({
-                is_transfer: false,
-                transfer_side: null,
-                transfer_status: null,
-                category_id: t.category_id || ventureCat.id,
-              }).eq('id', t.id);
-            }
-          } else if (isGabriellaOrUp) {
-            // Unsorted Gabriella / Up incoming money -> generic Income bucket until you sort it
-            if (t.is_transfer || t.transfer_status || t.transfer_side || !t.category_id) {
-              await supabase.from('finance_transactions').update({
-                is_transfer: false,
-                transfer_side: null,
-                transfer_status: null,
-                category_id: t.category_id || genericIncomeCat?.id || null,
-              }).eq('id', t.id);
-            }
-          } else if (fullText.includes('GAMMA')) {
-            if (gammaCat && !t.category_id) {
-              await supabase.from('finance_transactions').update({
-                is_transfer: false,
-                category_id: gammaCat.id,
-              }).eq('id', t.id);
-            }
-          } else if (t.is_transfer || (genericIncomeCat && !t.category_id)) {
+        } else if (targetAmount < 0 && (fullText.includes('EVANS') || fullText.includes('RENTAL') || fullText.includes('LANDLORD') || fullText.includes('RENT'))) {
+          if (rentCat) {
             await supabase.from('finance_transactions').update({
-              is_transfer: false,
-              category_id: genericIncomeCat?.id || null,
-            }).eq('id', t.id);
-          }
-        }
-
-        if (targetAmount < 0 && (fullText.includes('EVANS') || fullText.includes('RENTAL') || fullText.includes('LANDLORD') || fullText.includes('RENT'))) {
-          if (!t.is_fixed || (rentCat && !t.category_id)) {
-            await supabase.from('finance_transactions').update({
+              amount: targetAmount,
+              description: cleanDesc,
+              merchant: cleanMerch,
               is_fixed: true,
-              category_id: rentCat?.id || t.category_id,
+              category_id: rentCat.id,
               is_transfer: false,
             }).eq('id', t.id);
           }
+        } else if (cleanDesc !== t.description || cleanMerch !== t.merchant || targetAmount !== t.amount) {
+          await supabase.from('finance_transactions').update({
+            amount: targetAmount,
+            description: cleanDesc,
+            merchant: cleanMerch,
+          }).eq('id', t.id);
         }
       }
 

@@ -5,20 +5,33 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { useFixedExpenses, type FixedExpense } from '@/hooks/useFixedExpenses';
+import {
+  useFixedExpenses,
+  type FixedExpense,
+  toMonthly,
+  toWeekly,
+  formatFrequency,
+  parseFrequencyWeeks,
+  getFrequencyMonthlyMultiplier,
+  FREQ_TO_MONTHLY,
+} from '@/hooks/useFixedExpenses';
 import { useFinanceData } from '@/hooks/useFinanceData';
 import { useAutoLinkFixedBills } from '@/hooks/useAutoLinkFixedBills';
 import { formatCurrency, parseUkDate } from '@/lib/financeUtils';
+import { toast } from 'sonner';
 
-const FREQ_TO_MONTHLY: Record<string, number> = {
-  weekly: 52 / 12,
-  fortnightly: 26 / 12,
-  monthly: 1,
-  quarterly: 1 / 3,
-  yearly: 1 / 12,
-};
-
-const FREQ_OPTIONS = ['weekly', 'fortnightly', 'monthly', 'quarterly', 'yearly'] as const;
+const FREQUENCY_OPTIONS = [
+  { value: 'monthly', label: 'Monthly' },
+  { value: 'weekly', label: 'Weekly (1 week)' },
+  { value: 'fortnightly', label: 'Fortnightly (2 weeks)' },
+  { value: 'every_3_weeks', label: 'Every 3 weeks' },
+  { value: 'every_4_weeks', label: 'Every 4 weeks' },
+  { value: 'every_6_weeks', label: 'Every 6 weeks' },
+  { value: 'every_8_weeks', label: 'Every 8 weeks' },
+  { value: 'custom_weeks', label: 'Custom weeks…' },
+  { value: 'quarterly', label: 'Quarterly' },
+  { value: 'yearly', label: 'Yearly' },
+] as const;
 
 export default function FinanceCostOfLiving() {
   const finance = useFinanceData();
@@ -50,8 +63,7 @@ export default function FinanceCostOfLiving() {
   });
 
   const rows = activeExpenses.map(e => {
-    const mult = FREQ_TO_MONTHLY[e.frequency] || 1;
-    const monthly = finance.convertToBase(e.amount * mult, e.currency || baseCurrency);
+    const monthly = finance.convertToBase(toMonthly(e.amount, e.frequency), e.currency || baseCurrency);
     return { e, monthly };
   }).sort((a, b) => b.monthly - a.monthly);
 
@@ -221,18 +233,57 @@ export default function FinanceCostOfLiving() {
             <DialogHeader><DialogTitle>Add monthly expense</DialogTitle></DialogHeader>
 
             <div className="space-y-3 mt-2">
-              <Input placeholder="Name (e.g. Rent, Phone plan)" value={form.name}
+              <Input placeholder="Name (e.g. Rent, Meds, Phone plan)" value={form.name}
                 onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
               <div className="grid grid-cols-2 gap-2">
-                <Input type="number" inputMode="decimal" placeholder="Amount" value={form.amount}
+                <Input type="number" inputMode="decimal" placeholder="Amount (e.g. 200)" value={form.amount}
                   onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} />
-                <Select value={form.frequency} onValueChange={v => setForm(f => ({ ...f, frequency: v }))}>
+                <Select
+                  value={
+                    FREQUENCY_OPTIONS.some(opt => opt.value === form.frequency)
+                      ? form.frequency
+                      : parseFrequencyWeeks(form.frequency)
+                        ? 'custom_weeks'
+                        : 'monthly'
+                  }
+                  onValueChange={v => {
+                    if (v === 'custom_weeks') {
+                      const curWeeks = parseFrequencyWeeks(form.frequency) || 6;
+                      setForm(f => ({ ...f, frequency: `every_${curWeeks}_weeks` }));
+                    } else {
+                      setForm(f => ({ ...f, frequency: v }));
+                    }
+                  }}
+                >
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {FREQ_OPTIONS.map(f => <SelectItem key={f} value={f}>{f}</SelectItem>)}
+                    {FREQUENCY_OPTIONS.map(opt => (
+                      <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
+
+              {parseFrequencyWeeks(form.frequency) !== null && (
+                <div className="flex items-center justify-between bg-[#FFF5FA] px-3 py-2 rounded-xl border border-[#FF7AD1]/30">
+                  <span className="text-xs font-semibold text-slate-700">Repeats every:</span>
+                  <div className="flex items-center gap-1.5">
+                    <Input
+                      type="number"
+                      min={1}
+                      max={52}
+                      className="w-16 h-8 text-center font-bold bg-white"
+                      value={parseFrequencyWeeks(form.frequency) || 6}
+                      onChange={e => {
+                        const w = parseInt(e.target.value, 10);
+                        if (w > 0) setForm(f => ({ ...f, frequency: `every_${w}_weeks` }));
+                      }}
+                    />
+                    <span className="text-xs text-slate-500 font-medium">weeks</span>
+                  </div>
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-2">
                 <Select value={form.currency} onValueChange={v => setForm(f => ({ ...f, currency: v }))}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
@@ -243,9 +294,31 @@ export default function FinanceCostOfLiving() {
                     <SelectItem value="EUR">EUR</SelectItem>
                   </SelectContent>
                 </Select>
-                <Input type="number" inputMode="numeric" min={1} max={31} placeholder="Due day (1-31)" value={form.due_day}
+                <Input type="number" inputMode="numeric" min={1} max={31} placeholder="Due day (1-31, optional)" value={form.due_day}
                   onChange={e => setForm(f => ({ ...f, due_day: e.target.value }))} />
               </div>
+
+              {form.amount && parseFloat(form.amount) > 0 && (
+                <div className="bg-[#FFF5FA] p-3 rounded-2xl border border-[#FF7AD1]/30 flex items-center justify-between text-xs">
+                  <div>
+                    <span className="font-semibold text-slate-700">Calculated monthly cost:</span>
+                    <p className="text-[10px] text-slate-500 mt-0.5">
+                      {parseFrequencyWeeks(form.frequency)
+                        ? `(${formatCurrency(parseFloat(form.amount) || 0, form.currency || baseCurrency)} every ${parseFrequencyWeeks(form.frequency)} wks × 52 ÷ 12)`
+                        : `(budget baseline)`}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="font-display font-black text-sm text-[#FF2EB8] tabular-nums">
+                      ≈ {formatCurrency(toMonthly(parseFloat(form.amount) || 0, form.frequency), form.currency || baseCurrency)} / mo
+                    </p>
+                    <p className="text-[10px] text-slate-400">
+                      Tx amount: {formatCurrency(parseFloat(form.amount) || 0, form.currency || baseCurrency)}
+                    </p>
+                  </div>
+                </div>
+              )}
+
               <Button className="w-full bg-[#FF2EB8] hover:bg-[#e5299f] text-white font-display font-bold rounded-2xl" onClick={handleAdd}>Add</Button>
             </div>
           </DialogContent>
@@ -306,7 +379,7 @@ export default function FinanceCostOfLiving() {
                     // Add new ones
                     const presets = [
                       { name: 'UK Flat (rent + bills incl.)', amount: 720, frequency: 'monthly', currency: 'GBP', due_day: 1, auto_pay: true, paid_externally: false },
-                      { name: 'Meds', amount: 120, frequency: 'monthly', currency: 'GBP', due_day: null, auto_pay: false, paid_externally: false },
+                      { name: 'Meds', amount: 200, frequency: 'every_6_weeks', currency: 'GBP', due_day: null, auto_pay: false, paid_externally: false },
                       { name: 'Gym', amount: 30, frequency: 'monthly', currency: 'GBP', due_day: 24, auto_pay: false, paid_externally: false },
                       { name: 'cineworld', amount: 18, frequency: 'monthly', currency: 'GBP', due_day: 24, auto_pay: false, paid_externally: false },
                       { name: 'Phone Plan', amount: 9, frequency: 'monthly', currency: 'GBP', due_day: 31, auto_pay: false, paid_externally: false },
@@ -335,47 +408,92 @@ export default function FinanceCostOfLiving() {
             {rows.map(({ e, monthly }) => {
               const isEditing = editingId === e.id;
               if (isEditing) {
+                const currentEditWeeks = parseFrequencyWeeks(editForm.frequency);
                 return (
                   <div key={e.id} className="p-4 space-y-3 bg-[#FFF5FA]/60">
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 flex-wrap sm:flex-nowrap">
                       <Input value={editForm.name} placeholder="Name"
                         onChange={ev => setEditForm(f => ({ ...f, name: ev.target.value }))} />
-                      <Select value={editForm.frequency} onValueChange={v => setEditForm(f => ({ ...f, frequency: v }))}>
-                        <SelectTrigger className="h-9 w-32"><SelectValue /></SelectTrigger>
+                      <Select
+                        value={
+                          FREQUENCY_OPTIONS.some(opt => opt.value === editForm.frequency)
+                            ? editForm.frequency
+                            : currentEditWeeks
+                              ? 'custom_weeks'
+                              : 'monthly'
+                        }
+                        onValueChange={v => {
+                          if (v === 'custom_weeks') {
+                            const cur = parseFrequencyWeeks(editForm.frequency) || 6;
+                            setEditForm(f => ({ ...f, frequency: `every_${cur}_weeks` }));
+                          } else {
+                            setEditForm(f => ({ ...f, frequency: v }));
+                          }
+                        }}
+                      >
+                        <SelectTrigger className="h-9 w-40 shrink-0"><SelectValue /></SelectTrigger>
                         <SelectContent>
-                          {FREQ_OPTIONS.map(f => <SelectItem key={f} value={f}>{f}</SelectItem>)}
+                          {FREQUENCY_OPTIONS.map(opt => (
+                            <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
+                      {currentEditWeeks !== null && (
+                        <div className="flex items-center gap-1.5 shrink-0 bg-white px-2.5 py-1 rounded-xl border border-[#FF7AD1]/30">
+                          <span className="text-xs text-slate-500 font-medium">Every</span>
+                          <Input
+                            type="number"
+                            min={1}
+                            max={52}
+                            className="w-14 h-7 text-center font-bold px-1 text-xs"
+                            value={currentEditWeeks}
+                            onChange={ev => {
+                              const w = parseInt(ev.target.value, 10);
+                              if (w > 0) setEditForm(f => ({ ...f, frequency: `every_${w}_weeks` }));
+                            }}
+                          />
+                          <span className="text-xs text-slate-500 font-medium">weeks</span>
+                        </div>
+                      )}
                     </div>
-                    <div className="flex items-center gap-3 justify-end flex-wrap">
-                      <div className="flex items-center gap-1">
-                        <span className="text-[11px] text-slate-500">Day</span>
-                        <Input type="number" inputMode="numeric" min={1} max={31} className="w-16 text-right"
-                          placeholder="—"
-                          value={editForm.due_day}
-                          onChange={ev => setEditForm(f => ({ ...f, due_day: ev.target.value }))} />
+                    <div className="flex items-center gap-3 justify-between flex-wrap">
+                      <div className="text-xs text-slate-600">
+                        {editForm.amount && parseFloat(editForm.amount) > 0 && (
+                          <span>
+                            Monthly: <strong className="text-[#FF2EB8] font-bold">≈ {formatCurrency(toMonthly(parseFloat(editForm.amount) || 0, editForm.frequency), editForm.currency || baseCurrency)}/mo</strong>
+                          </span>
+                        )}
                       </div>
-                      <div className="flex items-center gap-1">
-                        <Input type="number" inputMode="decimal" className="w-24 text-right"
-                          value={editForm.amount}
-                          onChange={ev => setEditForm(f => ({ ...f, amount: ev.target.value }))} />
-                        <Select value={editForm.currency} onValueChange={v => setEditForm(f => ({ ...f, currency: v }))}>
-                          <SelectTrigger className="h-9 w-20"><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="AUD">AUD</SelectItem>
-                            <SelectItem value="GBP">GBP</SelectItem>
-                            <SelectItem value="USD">USD</SelectItem>
-                            <SelectItem value="EUR">EUR</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="flex gap-1">
-                        <Button size="icon" variant="ghost" className="h-8 w-8" onClick={saveEdit}>
-                          <Check className="w-4 h-4 text-emerald-600" />
-                        </Button>
-                        <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => setEditingId(null)}>
-                          <X className="w-4 h-4" />
-                        </Button>
+                      <div className="flex items-center gap-3 flex-wrap">
+                        <div className="flex items-center gap-1">
+                          <span className="text-[11px] text-slate-500">Day</span>
+                          <Input type="number" inputMode="numeric" min={1} max={31} className="w-16 text-right"
+                            placeholder="—"
+                            value={editForm.due_day}
+                            onChange={ev => setEditForm(f => ({ ...f, due_day: ev.target.value }))} />
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <Input type="number" inputMode="decimal" className="w-24 text-right"
+                            value={editForm.amount}
+                            onChange={ev => setEditForm(f => ({ ...f, amount: ev.target.value }))} />
+                          <Select value={editForm.currency} onValueChange={v => setEditForm(f => ({ ...f, currency: v }))}>
+                            <SelectTrigger className="h-9 w-20"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="AUD">AUD</SelectItem>
+                              <SelectItem value="GBP">GBP</SelectItem>
+                              <SelectItem value="USD">USD</SelectItem>
+                              <SelectItem value="EUR">EUR</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="flex gap-1">
+                          <Button size="icon" variant="ghost" className="h-8 w-8" onClick={saveEdit}>
+                            <Check className="w-4 h-4 text-emerald-600" />
+                          </Button>
+                          <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => setEditingId(null)}>
+                            <X className="w-4 h-4" />
+                          </Button>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -395,7 +513,7 @@ export default function FinanceCostOfLiving() {
                         )}
                       </p>
                       <p className="text-[11px] text-slate-500 capitalize">
-                        {e.frequency}
+                        {formatFrequency(e.frequency)}
                         {e.due_day && <span className="ml-2 text-slate-400">· due day {e.due_day}</span>}
                         <button
                           className="ml-2 underline hover:text-[#FF2EB8]"
@@ -410,7 +528,7 @@ export default function FinanceCostOfLiving() {
                   <div className="flex items-center gap-4">
                     <div className="text-right">
                       <p className="text-base font-display font-black text-slate-900 tabular-nums">{fmt(monthly)}</p>
-                      <p className="text-[11px] text-slate-500 tabular-nums">{formatCurrency(e.amount, e.currency || baseCurrency)} / {e.frequency}</p>
+                      <p className="text-[11px] text-slate-500 tabular-nums">{formatCurrency(e.amount, e.currency || baseCurrency)} / {formatFrequency(e.frequency)}</p>
                     </div>
                     <div className="flex gap-1">
                       <Button size="icon" variant="ghost" className="h-8 w-8 rounded-xl hover:bg-[#FFF5FA]" onClick={() => startEdit(e)}>

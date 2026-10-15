@@ -25,18 +25,20 @@ export default function FinanceTransactionsPage() {
     try {
       const syncTasks: Promise<any>[] = [];
       if (finance.syncUpTransactions && (finance.accounts.some(a => a.provider === 'up') || true)) {
-        syncTasks.push(finance.syncUpTransactions());
+        syncTasks.push(finance.syncUpTransactions({ skipAutoCategorize: true }));
       }
       if (finance.syncWiseTransactions) {
-        syncTasks.push(finance.syncWiseTransactions());
+        syncTasks.push(finance.syncWiseTransactions(undefined, { skipAutoCategorize: true }));
       }
       if (finance.syncMonzoTransactions && finance.accounts.some(a => a.provider === 'monzo')) {
-        syncTasks.push(finance.syncMonzoTransactions());
+        syncTasks.push(finance.syncMonzoTransactions(undefined, { skipAutoCategorize: true }));
       }
 
       if (syncTasks.length > 0) {
         await Promise.allSettled(syncTasks);
       }
+      // Categorise only newly pulled transactions that have no category yet.
+      // All previously assigned categories remain untouched!
       await finance.categorizeTransactions();
       await finance.refetch();
     } catch {

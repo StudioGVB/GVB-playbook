@@ -185,16 +185,20 @@ serve(async (req) => {
         const { data: existingTransactions } = dbAccountIds.length > 0
           ? await supabase
               .from('finance_transactions')
-              .select('account_id, external_transaction_id, transaction_fingerprint')
+              .select('account_id, external_transaction_id, transaction_fingerprint, category_id, is_transfer, goal_id, is_fixed')
               .eq('user_id', userId)
               .in('account_id', dbAccountIds)
           : { data: [] }
 
-        const existingExternalIds = new Set(
-          (existingTransactions || [])
-            .filter((row: any) => row.external_transaction_id)
-            .map((row: any) => `${row.account_id}:${row.external_transaction_id}`)
-        )
+        const existingMap = new Map<string, any>()
+        const existingExternalIds = new Set<string>()
+        for (const row of existingTransactions || []) {
+          if (row.external_transaction_id) {
+            const k = `${row.account_id}:${row.external_transaction_id}`
+            existingExternalIds.add(k)
+            existingMap.set(k, row)
+          }
+        }
         const existingFingerprints = new Set(
           (existingTransactions || [])
             .map((row: any) => row.transaction_fingerprint)
@@ -208,6 +212,15 @@ serve(async (req) => {
         for (const row of txBatch) {
           const externalKey = `${row.account_id}:${row.external_transaction_id}`
           if (existingExternalIds.has(externalKey)) {
+            const existing = existingMap.get(externalKey)
+            if (existing) {
+              row.category_id = existing.category_id !== undefined ? existing.category_id : null
+              if (existing.is_transfer !== undefined && existing.is_transfer !== null) {
+                row.is_transfer = existing.is_transfer
+              }
+              if (existing.goal_id !== undefined) (row as any).goal_id = existing.goal_id
+              if (existing.is_fixed !== undefined) (row as any).is_fixed = existing.is_fixed
+            }
             rowsToUpsert.push(row)
             continue
           }

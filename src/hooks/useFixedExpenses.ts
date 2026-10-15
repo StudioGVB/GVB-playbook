@@ -9,7 +9,7 @@ export interface FixedExpense {
   user_id: string;
   name: string;
   amount: number;
-  frequency: 'weekly' | 'fortnightly' | 'monthly' | 'quarterly' | 'yearly';
+  frequency: string;
   currency: string;
   notes: string | null;
   due_day: number | null;
@@ -21,17 +21,103 @@ export interface FixedExpense {
   updated_at: string;
 }
 
-export const FREQ_TO_MONTHLY: Record<string, number> = {
-  weekly: 52 / 12,
-  fortnightly: 26 / 12,
-  monthly: 1,
-  quarterly: 1 / 3,
-  yearly: 1 / 12,
-};
+export function parseFrequencyWeeks(freq: string): number | null {
+  if (!freq) return null;
+  const match = freq.match(/(?:every[_\s]+)?(\d+)[_\s]*weeks?/i);
+  if (match) {
+    const num = parseInt(match[1], 10);
+    return num > 0 ? num : null;
+  }
+  return null;
+}
+
+export function getFrequencyMonthlyMultiplier(frequency: string): number {
+  if (frequency === 'weekly') return 52 / 12;
+  if (frequency === 'fortnightly') return 26 / 12;
+  if (frequency === 'monthly') return 1;
+  if (frequency === 'quarterly') return 1 / 3;
+  if (frequency === 'yearly') return 1 / 12;
+  const weeks = parseFrequencyWeeks(frequency);
+  if (weeks) {
+    return 52 / (12 * weeks);
+  }
+  return 1;
+}
+
+export function getFrequencyWeeklyMultiplier(frequency: string): number {
+  if (frequency === 'weekly') return 1;
+  if (frequency === 'fortnightly') return 0.5;
+  if (frequency === 'monthly') return 12 / 52;
+  if (frequency === 'quarterly') return 4 / 52;
+  if (frequency === 'yearly') return 1 / 52;
+  const weeks = parseFrequencyWeeks(frequency);
+  if (weeks) {
+    return 1 / weeks;
+  }
+  return 12 / 52;
+}
 
 export function toMonthly(amount: number, frequency: string): number {
-  return amount * (FREQ_TO_MONTHLY[frequency] || 1);
+  return amount * getFrequencyMonthlyMultiplier(frequency);
 }
+
+export function toWeekly(amount: number, frequency: string): number {
+  return amount * getFrequencyWeeklyMultiplier(frequency);
+}
+
+export function formatFrequency(frequency: string): string {
+  if (!frequency) return 'monthly';
+  if (frequency === 'weekly') return 'weekly';
+  if (frequency === 'fortnightly') return 'fortnightly';
+  if (frequency === 'monthly') return 'monthly';
+  if (frequency === 'quarterly') return 'quarterly';
+  if (frequency === 'yearly') return 'yearly';
+  const weeks = parseFrequencyWeeks(frequency);
+  if (weeks) {
+    return `every ${weeks} weeks`;
+  }
+  return frequency.replace(/_/g, ' ');
+}
+
+export const FREQ_TO_MONTHLY: Record<string, number> = new Proxy(
+  {
+    weekly: 52 / 12,
+    fortnightly: 26 / 12,
+    monthly: 1,
+    quarterly: 1 / 3,
+    yearly: 1 / 12,
+  },
+  {
+    get(target, prop: string) {
+      if (typeof prop === 'string') {
+        if (prop in target) return (target as any)[prop];
+        const weeks = parseFrequencyWeeks(prop);
+        if (weeks) return 52 / (12 * weeks);
+      }
+      return 1;
+    },
+  }
+);
+
+export const FREQ_TO_WEEKLY: Record<string, number> = new Proxy(
+  {
+    weekly: 1,
+    fortnightly: 0.5,
+    monthly: 12 / 52,
+    quarterly: 4 / 52,
+    yearly: 1 / 52,
+  },
+  {
+    get(target, prop: string) {
+      if (typeof prop === 'string') {
+        if (prop in target) return (target as any)[prop];
+        const weeks = parseFrequencyWeeks(prop);
+        if (weeks) return 1 / weeks;
+      }
+      return 12 / 52;
+    },
+  }
+);
 
 const DEFAULT_FX: Record<string, number> = { AUD_GBP: 0.52, GBP_AUD: 1.92 };
 
@@ -112,7 +198,7 @@ export function useFixedExpensesState() {
   const activeExpenses = expenses.filter(e => isActiveOn(e, today));
 
   const monthlyTotal = activeExpenses.reduce((sum, e) => {
-    const mult = FREQ_TO_MONTHLY[e.frequency] || 1;
+    const mult = getFrequencyMonthlyMultiplier(e.frequency);
     const inBase = convert(e.amount * mult, e.currency || baseCurrency, baseCurrency, fxRates);
     return sum + inBase;
   }, 0);
@@ -123,7 +209,7 @@ export function useFixedExpensesState() {
   // Compute monthly total active on an arbitrary date (used by runway projections)
   const monthlyTotalOn = (isoDate: string) =>
     expenses.filter(e => isActiveOn(e, isoDate)).reduce((sum, e) => {
-      const mult = FREQ_TO_MONTHLY[e.frequency] || 1;
+      const mult = getFrequencyMonthlyMultiplier(e.frequency);
       return sum + convert(e.amount * mult, e.currency || baseCurrency, baseCurrency, fxRates);
     }, 0);
 
