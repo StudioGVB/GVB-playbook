@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 
 import { useFinanceData } from '@/hooks/useFinanceData';
 import { useFinanceAssumptions } from '@/hooks/useFinanceAssumptions';
-import { useFixedExpenses } from '@/hooks/useFixedExpenses';
+import { useFixedExpenses, toWeekly, FREQ_TO_WEEKLY } from '@/hooks/useFixedExpenses';
 import { useFixedExpensePayments } from '@/hooks/useFixedExpensePayments';
 import { useWeeklyBoosts } from '@/hooks/useWeeklyBoosts';
 import { useWeekTypes } from '@/hooks/useWeekTypes';
@@ -29,13 +29,7 @@ import { cn } from '@/lib/utils';
 import FinancialReportExporterModal from '@/components/finance/FinancialReportExporterModal';
 
 
-const FREQ_TO_WEEKLY: Record<string, number> = {
-  weekly: 1,
-  fortnightly: 1 / 2,
-  monthly: 12 / 52,
-  quarterly: 4 / 52,
-  yearly: 1 / 52,
-};
+
 
 const BRAND_MAP = [
   // Transport
@@ -371,7 +365,7 @@ export default function FinanceBudget() {
   const fixedWeeklyItems = useMemo(() => {
     return fixedExpenses.map(e => ({
       name: e.name,
-      weekly: e.amount * (FREQ_TO_WEEKLY[e.frequency] || 12 / 52),
+      weekly: toWeekly(e.amount, e.frequency),
       frequency: e.frequency,
     }));
   }, [fixedExpenses]);

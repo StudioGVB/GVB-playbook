@@ -3,6 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import { startOfWeek, startOfMonth, startOfQuarter, startOfYear, format, subDays } from 'date-fns';
+import { parseFrequencyWeeks } from '@/hooks/useFixedExpenses';
 
 export interface FixedExpensePayment {
   id: string;
@@ -16,6 +17,15 @@ export interface FixedExpensePayment {
 
 /** Returns the current period start date for a given frequency */
 function getCurrentPeriodStart(frequency: string, now: Date = new Date()): string {
+  const customWeeks = parseFrequencyWeeks(frequency);
+  if (customWeeks) {
+    const ws = startOfWeek(now, { weekStartsOn: 1 });
+    const weekNum = Math.floor((ws.getTime() - new Date(ws.getFullYear(), 0, 1).getTime()) / (7 * 86400000));
+    const periodWeekOffset = ((weekNum % customWeeks) + customWeeks) % customWeeks;
+    const periodStart = subDays(ws, periodWeekOffset * 7);
+    return format(periodStart, 'yyyy-MM-dd');
+  }
+
   switch (frequency) {
     case 'weekly':
       return format(startOfWeek(now, { weekStartsOn: 1 }), 'yyyy-MM-dd');

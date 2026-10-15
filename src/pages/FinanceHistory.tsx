@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Calendar } from '@/components/ui/calendar';
 import { useFinanceData } from '@/hooks/useFinanceData';
 import { useFinanceAssumptions } from '@/hooks/useFinanceAssumptions';
-import { useFixedExpenses } from '@/hooks/useFixedExpenses';
+import { useFixedExpenses, toWeekly } from '@/hooks/useFixedExpenses';
 import { computePolicySnapshot } from '@/lib/policyEngine';
 import { useWeekTypes } from '@/hooks/useWeekTypes';
 import { supabase } from '@/integrations/supabase/client';
@@ -18,13 +18,7 @@ import { CalendarIcon, ChevronDown, ChevronUp, X } from 'lucide-react';
 import { DateRange } from 'react-day-picker';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 
-const FREQ_TO_WEEKLY: Record<string, number> = {
-  weekly: 1,
-  fortnightly: 1 / 2,
-  monthly: 12 / 52,
-  quarterly: 4 / 52,
-  yearly: 1 / 52,
-};
+
 
 export default function FinanceHistory() {
   const finance = useFinanceData();
@@ -69,7 +63,7 @@ export default function FinanceHistory() {
   ), [finance.categories]);
 
   const fixedWeeklyCost = useMemo(() => {
-    return fixedExpenses.reduce((sum, e) => sum + e.amount * (FREQ_TO_WEEKLY[e.frequency] || 12 / 52), 0);
+    return fixedExpenses.reduce((sum, e) => sum + toWeekly(e.amount, e.frequency), 0);
   }, [fixedExpenses]);
 
   const wtMap = useMemo(() => weekTypeMap(), [weekTypeMap]);

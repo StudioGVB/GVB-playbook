@@ -4,17 +4,9 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { Badge } from '@/components/ui/badge';
 import { Repeat, ChevronDown, Lock, Sparkles } from 'lucide-react';
 import { formatCurrency, baseAmt, parseUkDate } from '@/lib/financeUtils';
-import type { FixedExpense } from '@/hooks/useFixedExpenses';
+import { type FixedExpense, FREQ_TO_MONTHLY, formatFrequency } from '@/hooks/useFixedExpenses';
 import type { FinanceTransaction, FinanceCategory } from '@/hooks/useFinanceData';
 import { subMonths } from 'date-fns';
-
-const FREQ_TO_MONTHLY: Record<string, number> = {
-  weekly: 52 / 12,
-  fortnightly: 26 / 12,
-  monthly: 1,
-  quarterly: 1 / 3,
-  yearly: 1 / 12,
-};
 
 interface DetectedSubscription {
   merchant: string;
@@ -244,7 +236,7 @@ export function RecurringCommitments({
                         <div className="min-w-0">
                           <p className="font-medium truncate">{e.name}</p>
                           <p className="text-[10px] text-muted-foreground">
-                            {formatCurrency(e.amount, e.currency || baseCurrency)} · {e.frequency}
+                            {formatCurrency(e.amount, e.currency || baseCurrency)} · {formatFrequency(e.frequency)}
                             {e.due_day ? ` · due ${e.due_day}${suffix(e.due_day)}` : ''}
                           </p>
                         </div>
@@ -268,7 +260,7 @@ export function RecurringCommitments({
                         {e.name} · starts {e.effective_from}
                       </span>
                       <span className="tabular-nums">
-                        {formatCurrency(e.amount, e.currency || baseCurrency)}/{e.frequency.replace('ly', '')}
+                        {formatCurrency(e.amount, e.currency || baseCurrency)} / {formatFrequency(e.frequency)}
                       </span>
                     </div>
                   ))}

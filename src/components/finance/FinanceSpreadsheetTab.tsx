@@ -10,7 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { formatCurrency, parseUkDate } from '@/lib/financeUtils';
 import { useFinanceData } from '@/hooks/useFinanceData';
-import { useFixedExpenses } from '@/hooks/useFixedExpenses';
+import { useFixedExpenses, toWeekly } from '@/hooks/useFixedExpenses';
 import { calcTakeHome, StudentLoanPlan, STUDENT_LOAN_LABELS } from '@/lib/ukTakeHome';
 import { toast } from 'sonner';
 
@@ -225,11 +225,7 @@ export default function FinanceSpreadsheetTab() {
     // 2. REAL SURVIVAL EXPENSES (Fixed Expenses)
     if (fixedExpenses.length > 0) {
       fixedExpenses.forEach(fe => {
-        let weekly = fe.amount;
-        if (fe.frequency === 'monthly') weekly = (fe.amount * 12) / 52;
-        else if (fe.frequency === 'fortnightly') weekly = fe.amount / 2;
-        else if (fe.frequency === 'yearly') weekly = fe.amount / 52;
-        else if (fe.frequency === 'quarterly') weekly = (fe.amount * 4) / 52;
+        const weekly = toWeekly(fe.amount, fe.frequency);
 
         seeded.push({
           id: `surv_${fe.id}`,
