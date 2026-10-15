@@ -449,11 +449,12 @@ export function computePolicySnapshot(
     .reduce((sum, acc) => sum + convertToBase(acc.balance, acc.currency), 0);
   const availableSavings = Math.max(totalLiquidCash - emergencyFloor, 0);
   // assigned_amount already reflects deductions made by handlePoolAssign,
-  // so we just sum them directly — no need to subtract transactions again.
-  const totalGoalAllocations = goals.reduce(
-    (s, g) => s + convertToBase(g.assigned_amount || 0, g.currency),
-    0,
-  );
+  // so we just sum non-emergency goal pots directly — emergency reserve is tracked via emergencyFloor.
+  const isEmergencyGoal = (g: FinanceGoal) =>
+    (g as any).is_emergency === true || g.name.toLowerCase().includes('emergency');
+  const totalGoalAllocations = goals
+    .filter(g => !isEmergencyGoal(g))
+    .reduce((s, g) => s + convertToBase(g.assigned_amount || 0, g.currency), 0);
 
   // Target savings
   const targetSavings = assumptions.target_savings ?? 0;
@@ -601,7 +602,7 @@ export function computePolicySnapshot(
     : totalLiquidCash;
 
   // Runway: piecewise — travel weeks burn fixed-only (essentials/fun paused),
-  // then full burn after. Runway represents ALL available cash (minus goal
+  // then full burn after. Runway represents ALL available cash (minus non-emergency goal
   // earmarks); the emergency fund IS the runway, not a hard reservation.
   const runwayCash = Math.max(0, totalLiquidCash - totalGoalAllocations);
   let runwayWeeks: number;
@@ -617,8 +618,22 @@ export function computePolicySnapshot(
     const budgetedWeeklyBurn = Math.max(fullWeeklyBurn, 1);
     runwayWeeks = runwayCash / budgetedWeeklyBurn;
   }
-  // Legacy: "with emergency" now equals runway (kept for compat)
-  const runwayWithEmergencyWeeks = runwayWeeks;
+
+  // Emergency / survival runway: how long runwayCash lasts if discretionary fun spend is paused
+  // (burning only fixed bills + essential variable costs, matching the Emergency Fund survival rate)
+  const survivalWeeklyBurn = weeklyFixedCosts + (essentialVariable / 4.33);
+  let runwayWithEmergencyWeeks: number;
+  if (travelWeeksRemaining > 0 && survivalWeeklyBurn > 0) {
+    const travelPhaseSpend = travelWeeksRemaining * fixedOnlyBurn;
+    if (runwayCash <= travelPhaseSpend) {
+      runwayWithEmergencyWeeks = fixedOnlyBurn > 0 ? runwayCash / fixedOnlyBurn : 0;
+    } else {
+      const remainder = runwayCash - travelPhaseSpend;
+      runwayWithEmergencyWeeks = travelWeeksRemaining + (remainder / survivalWeeklyBurn);
+    }
+  } else {
+    runwayWithEmergencyWeeks = survivalWeeklyBurn > 0 ? runwayCash / survivalWeeklyBurn : runwayWeeks;
+  }
 
 
   return {
