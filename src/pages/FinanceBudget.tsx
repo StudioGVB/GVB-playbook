@@ -771,49 +771,6 @@ export default function FinanceBudget() {
         </div>
       </div>
 
-      {/* === HOW THIS IS CALCULATED === */}
-      {isCurrentWeek && (() => {
-        const s = snapshot.split;
-        const essentialsMonthly = essentialWeeklyBudget * 4.33;
-        const manualIncome = assumptions?.expected_monthly_income && assumptions.expected_monthly_income > 0;
-        const row = (label: string, val: string, sub?: string, cls = 'text-slate-900') => (
-          <div className="flex items-start justify-between gap-4 py-2">
-            <div><p className="text-sm font-semibold text-slate-800">{label}</p>{sub && <p className="text-[11px] text-slate-500">{sub}</p>}</div>
-            <p className={cn('text-sm font-bold tabular-nums shrink-0', cls)}>{val}</p>
-          </div>
-        );
-        return (
-          <Collapsible defaultOpen>
-            <div className="bg-white rounded-2xl border border-pink-200/60 p-4 sm:p-5">
-              <CollapsibleTrigger className="w-full flex items-center justify-between text-left">
-                <span className="text-xs font-bold uppercase tracking-[0.15em] text-[#FF2EB8]">How this is calculated</span>
-                <ChevronDown className="w-4 h-4 text-slate-400" />
-              </CollapsibleTrigger>
-              <CollapsibleContent className="mt-3 divide-y divide-slate-100">
-                {(() => { const ai = computeActualSpendingIncome(finance.transactions, finance.categories, new Date()); return (<>
-                  {row('Monthly income (actual deposits)', `+${fmt(s.monthlyIncome)}`, ai.isLate ? `⚠️ Pay not landed yet — using last month (${format(ai.cycleStart, 'MMM yyyy')}) as a guide` : `${format(ai.cycleStart, 'd MMM')} → ${ai.nextPayday ? format(ai.nextPayday, 'd MMM') : '—'}`, 'text-emerald-600')}
-                  {ai.streams.map((st, i) => (
-                    <div key={i} className="flex justify-between pl-4 py-1 text-[11px] text-slate-500">
-                      <span>{st.name} ({st.count} {st.count === 1 ? 'payment' : 'payments'})</span>
-                      <span className="tabular-nums">{fmt(st.amount)}</span>
-                    </div>
-                  ))}
-                </>); })()}
-                {row('Fixed bills', `−${fmt(s.mandatoryAmount)}`, 'All fixed expenses (including externally-paid)', 'text-rose-600')}
-                {row('Essentials', `−${fmt(essentialsMonthly)}`, 'Higher of your estimate or normal-week average', 'text-rose-600')}
-                {row('Goal savings', `−${fmt(s.goalSavingsAmount)}`, 'Pools with deadlines: remaining ÷ weeks left', 'text-rose-600')}
-                {row('Fun money (monthly)', `=${fmt(s.funAmount)}`, `÷ 4.33 = ${fmt(snapshot.baseWeeklyFun)}/wk base weekly allowance`)}
-                {row(
-                  'Weekly budget',
-                  fmt(totalWeeklyBudget),
-                  `${fmt(essentialWeeklyBudget)} essentials + ${fmt(snapshot.baseWeeklyFun)} base fun${boostAmount ? ` + ${fmt(boostAmount)} rolled over from last week (same monthly fun total)` : ''}${snapshot.carryForwardDebt ? ` − ${fmt(snapshot.carryForwardDebt)} carried debt` : ''}`
-                )}
-              </CollapsibleContent>
-            </div>
-          </Collapsible>
-        );
-      })()}
-
       {/* === KPI STRIP (3 colorful bento tiles) === */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
         <div className="bg-white rounded-2xl border-2 border-[#FF7AD1]/40 p-4 sm:p-5 shadow-[4px_4px_0px_0px_rgba(255,46,184,0.15)]">
@@ -1096,6 +1053,48 @@ export default function FinanceBudget() {
           </div>
         </CardContent>
       </Card>
+
+      {/* === HOW THIS IS CALCULATED === */}
+      {isCurrentWeek && (() => {
+        const s = snapshot.split;
+        const essentialsMonthly = essentialWeeklyBudget * 4.33;
+        const row = (label: string, val: string, sub?: string, cls = 'text-slate-900') => (
+          <div className="flex items-start justify-between gap-4 py-2">
+            <div><p className="text-sm font-semibold text-slate-800">{label}</p>{sub && <p className="text-[11px] text-slate-500">{sub}</p>}</div>
+            <p className={cn('text-sm font-bold tabular-nums shrink-0', cls)}>{val}</p>
+          </div>
+        );
+        return (
+          <Collapsible>
+            <div className="bg-white rounded-2xl border border-pink-200/60 p-4 sm:p-5">
+              <CollapsibleTrigger className="w-full flex items-center justify-between text-left">
+                <span className="text-xs font-bold uppercase tracking-[0.15em] text-[#FF2EB8]">How this is calculated</span>
+                <ChevronDown className="w-4 h-4 text-slate-400" />
+              </CollapsibleTrigger>
+              <CollapsibleContent className="mt-3 divide-y divide-slate-100">
+                {(() => { const ai = computeActualSpendingIncome(finance.transactions, finance.categories, new Date()); return (<>
+                  {row('Monthly income (actual deposits)', `+${fmt(s.monthlyIncome)}`, ai.isLate ? `⚠️ Pay not landed yet — using last month (${format(ai.cycleStart, 'MMM yyyy')}) as a guide` : `${format(ai.cycleStart, 'd MMM')} → ${ai.nextPayday ? format(ai.nextPayday, 'd MMM') : '—'}`, 'text-emerald-600')}
+                  {ai.streams.map((st, i) => (
+                    <div key={i} className="flex justify-between pl-4 py-1 text-[11px] text-slate-500">
+                      <span>{st.name} ({st.count} {st.count === 1 ? 'payment' : 'payments'})</span>
+                      <span className="tabular-nums">{fmt(st.amount)}</span>
+                    </div>
+                  ))}
+                </>); })()}
+                {row('Fixed bills', `−${fmt(s.mandatoryAmount)}`, 'All fixed expenses (including externally-paid)', 'text-rose-600')}
+                {row('Essentials', `−${fmt(essentialsMonthly)}`, 'Higher of your estimate or normal-week average', 'text-rose-600')}
+                {row('Goal savings', `−${fmt(s.goalSavingsAmount)}`, 'Pools with deadlines: remaining ÷ weeks left', 'text-rose-600')}
+                {row('Fun money (monthly)', `=${fmt(s.funAmount)}`, `÷ 4.33 = ${fmt(snapshot.baseWeeklyFun)}/wk base weekly allowance`)}
+                {row(
+                  'Weekly budget',
+                  fmt(totalWeeklyBudget),
+                  `${fmt(essentialWeeklyBudget)} essentials + ${fmt(snapshot.baseWeeklyFun)} base fun${boostAmount ? ` + ${fmt(boostAmount)} rolled over from last week (same monthly fun total)` : ''}${snapshot.carryForwardDebt ? ` − ${fmt(snapshot.carryForwardDebt)} carried debt` : ''}`
+                )}
+              </CollapsibleContent>
+            </div>
+          </Collapsible>
+        );
+      })()}
 
       {/* === WEEKLY SPENDING === */}
       <Card className="border-border/60">
