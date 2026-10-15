@@ -21,7 +21,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Plus, ShoppingCart, Target, Wallet, Lock, ArrowRightLeft, Trash2, Palette, Plane, Car, Home, GraduationCap, Heart, Gift, Laptop, Baby, PiggyBank, Briefcase, UtensilsCrossed, Dumbbell, Music, Gamepad2, BookOpen, Sparkles, Pencil, AlertCircle, RotateCcw, AlertTriangle, ChevronRight, HelpCircle, CheckCircle2, Milestone, ArrowUpRight, Check, Shield, type LucideIcon } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import PriorMonthAllocator from '@/components/finance/PriorMonthAllocator';
+import MonthlyPotPlanner from '@/components/finance/MonthlyPotPlanner';
 import FinanceBalanceSheet from '@/pages/FinanceBalanceSheet';
 import WeeklyPoolSavingsCard from '@/components/finance/WeeklyPoolSavingsCard';
 import { format, startOfMonth, endOfMonth, parseISO } from 'date-fns';
@@ -29,6 +29,7 @@ import { detectPaycheck, calculatePaycheckWaterfall, isPaycheckProcessed, markPa
 import { baseAmt } from '@/lib/financeUtils';
 import { evaluatePoolFeasibility } from '@/lib/feasibilityEngine';
 import { computeEmergencyLadder } from '@/lib/emergencyLadderEngine';
+import EmergencyLadderModal from '@/components/finance/EmergencyLadderModal';
 import FeasibilityAlert from '@/components/finance/FeasibilityAlert';
 import OverspendCoverPanel from '@/components/finance/OverspendCoverPanel';
 import FeasibilityBreakdownDialog from '@/components/finance/FeasibilityBreakdownDialog';
@@ -888,7 +889,7 @@ export default function FinancePoolsPage() {
             value="allocate"
             className="px-5 sm:px-6 py-2.5 rounded-xl font-display font-semibold text-sm text-[#FF2EB8] data-[state=active]:bg-[#FF2EB8] data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-[#FF2EB8]/25 transition-all"
           >
-            Allocate Leftover
+            Monthly Pot Planning
           </TabsTrigger>
           <TabsTrigger
             value="can-i-buy"
@@ -1021,6 +1022,43 @@ export default function FinancePoolsPage() {
         </div>
       </div>
 
+      {/* Smart Emergency Level-Up Opportunity Banner */}
+      {ladderState.canAffordNextMonthNow && ladderState.nextMonth && !ladderBannerDismissed && (
+        <div className="rounded-2xl border-2 border-emerald-300 bg-gradient-to-r from-emerald-50 via-teal-50/70 to-emerald-50 p-4 shadow-sm flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-bold shrink-0">
+              <Sparkles className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h4 className="font-bold text-slate-900 text-sm">Emergency Fund Level-Up Opportunity</h4>
+                <Badge className="bg-emerald-100 text-emerald-800 border-emerald-300 text-[10px] font-bold">Headroom Ready</Badge>
+              </div>
+              <p className="text-xs text-slate-600 mt-0.5">
+                You have enough liquid cashflow headroom to step your emergency cushion from <strong>{ladderState.activeMonths}</strong> to <strong>{ladderState.nextMonth} months</strong> (+{fmt(ladderState.additionalCostForNextMonth)}) without putting any active savings pots into deficit.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setLadderBannerDismissed(true)}
+              className="text-xs text-slate-500 hover:text-slate-800 h-8"
+            >
+              Dismiss
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleLevelUpEmergencyMonth}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs h-8 gap-1.5 shadow-xs"
+            >
+              <ArrowUpRight className="w-3.5 h-3.5" /> Level Up to {ladderState.nextMonth} Months
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Pools Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {/* Emergency Fund */}
@@ -1068,6 +1106,15 @@ export default function FinancePoolsPage() {
                         <h3 className="text-base font-bold text-slate-900">Emergency Fund</h3>
                         <Badge variant="outline" className="text-[10px] text-muted-foreground border-slate-200 bg-white/60">Auto-calculated</Badge>
                       </div>
+                      <button
+                        type="button"
+                        onClick={() => setLadderDialogOpen(true)}
+                        className="mt-0.5 inline-flex items-center gap-1 text-[10px] font-bold text-emerald-800 hover:text-emerald-950 bg-emerald-100/70 hover:bg-emerald-200/70 border border-emerald-300/80 px-2 py-0.5 rounded-md transition-all cursor-pointer"
+                        title="Click to view 6-month staged expansion roadmap"
+                      >
+                        <Milestone className="w-3 h-3 text-emerald-700" />
+                        Stage {ladderState.activeMonths} of {ladderState.targetMonths} Mo Ladder
+                      </button>
                     </div>
                   </div>
                   {isShort ? (
@@ -1115,6 +1162,56 @@ export default function FinancePoolsPage() {
                 <p className="text-[11px] text-slate-500 mt-4 pt-3 border-t border-slate-200/60 font-medium">
                   {monthsCovered.toFixed(1)}mo covered • ({bufferMonths}mo target × {fmt(actualMonthlySurvival)}/mo × 1.2 buffer)
                 </p>
+
+                {/* Staged Expansion Next-Step Advisor */}
+                {ladderState.nextMonth && (
+                  <div className="mt-2.5 pt-2.5 border-t border-slate-200/60">
+                    {ladderState.canAffordNextMonthNow ? (
+                      <div className="p-2.5 rounded-xl bg-emerald-100/80 border border-emerald-300 text-xs flex items-center justify-between gap-2 shadow-2xs">
+                        <div className="space-y-0.5">
+                          <span className="font-extrabold text-emerald-950 flex items-center gap-1 text-[11px]">
+                            <Sparkles className="w-3.5 h-3.5 text-emerald-700" />
+                            Month {ladderState.nextMonth} Ready (+{fmt(ladderState.additionalCostForNextMonth)})
+                          </span>
+                          <p className="text-[10px] text-emerald-800 font-medium leading-tight">
+                            Sufficient cash available without starving your active pots.
+                          </p>
+                        </div>
+                        <Button
+                          size="sm"
+                          onClick={handleLevelUpEmergencyMonth}
+                          className="h-7 px-2.5 text-[11px] font-bold bg-emerald-700 hover:bg-emerald-800 text-white shrink-0 shadow-2xs"
+                        >
+                          Level Up
+                        </Button>
+                      </div>
+                    ) : (
+                      <div
+                        onClick={() => setLadderDialogOpen(true)}
+                        className="p-2.5 rounded-xl bg-amber-50/90 border border-amber-200/80 text-xs cursor-pointer hover:bg-amber-100/80 transition-all flex items-start justify-between gap-2 group"
+                      >
+                        <div className="space-y-0.5">
+                          <span className="font-bold text-amber-950 flex items-center gap-1 text-[11px]">
+                            <Lock className="w-3.5 h-3.5 text-amber-700" />
+                            Month {ladderState.nextMonth} Staged (+{fmt(ladderState.additionalCostForNextMonth)})
+                          </span>
+                          <p className="text-[10px] text-amber-900 leading-tight">
+                            {ladderState.isBlockedByActivePots ? (
+                              <>
+                                Protecting <strong>{ladderState.activeCompetingPots.length} active pots</strong>
+                                {ladderState.projectedUnlockPotName ? ` (${ladderState.projectedUnlockPotName})` : ''}.
+                                Unlocks once completed {ladderState.projectedUnlockDate ? `(~${ladderState.projectedUnlockDate})` : ''}.
+                              </>
+                            ) : (
+                              <>Waiting for cashflow headroom before advancing.</>
+                            )}
+                          </p>
+                        </div>
+                        <ChevronRight className="w-4 h-4 text-amber-700 shrink-0 mt-0.5 group-hover:translate-x-0.5 transition-transform" />
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Actions */}
                 <div className="flex gap-2 pt-2 mt-2 w-full">
@@ -1458,12 +1555,22 @@ export default function FinancePoolsPage() {
 
         <TabsContent value="allocate" className="space-y-6">
           <OverspendCoverPanel finance={finance} trips={trips} baseCurrency={baseCurrency} />
-          <PriorMonthAllocator
+          <MonthlyPotPlanner
             transactions={finance.transactions}
             categories={finance.categories}
             goals={finance.goals}
             convertToBase={finance.convertToBase}
             updateGoal={finance.updateGoal}
+            addGoal={finance.addGoal}
+            baseCurrency={baseCurrency}
+            assumptions={assumptions}
+            fixedMonthlyTotal={fixedMonthlyTotal}
+            essentialVariable={essentialVariable}
+            emergencyFloor={emergencyFloor}
+            currentEmergencyFunded={currentEmergencyFunded}
+            onUpdateExpectedIncome={async (val) => {
+              await updateAssumptions({ expected_monthly_income: val });
+            }}
           />
         </TabsContent>
 
@@ -1830,6 +1937,29 @@ export default function FinancePoolsPage() {
         categories={finance.categories}
         accounts={finance.accounts}
         onUpdateTransaction={finance.updateTransaction}
+      />
+
+      {/* Emergency Fund Growth Ladder Modal */}
+      <EmergencyLadderModal
+        open={ladderDialogOpen}
+        onOpenChange={setLadderDialogOpen}
+        ladderState={ladderState}
+        currency={baseCurrency}
+        onLevelUp={handleLevelUpEmergencyMonth}
+        onUpdateTargetMonths={async (months: number) => {
+          localStorage.setItem('gvb_target_buffer_months', String(months));
+          try {
+            await (finance as any).updateSettings?.({
+              fx_rates: {
+                ...((finance.settings?.fx_rates as any) || {}),
+                target_buffer_months: months,
+              },
+            });
+          } catch (e) {
+            console.error('Failed to sync target_buffer_months', e);
+          }
+          toast.success(`Target goal updated to ${months} months!`);
+        }}
       />
     </div>
   );

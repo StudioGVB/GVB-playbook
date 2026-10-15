@@ -7,7 +7,7 @@ import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { CheckCircle2, XCircle, Loader2, Shield, Pencil, Trash2, EyeOff, Palette, Plus, Receipt, Lock, Eye, Globe, RefreshCw } from 'lucide-react';
+import { CheckCircle2, XCircle, Loader2, Shield, Pencil, Trash2, EyeOff, Palette, Plus, Receipt, Lock, Eye, Globe, RefreshCw, Target, TrendingUp, Sparkles, AlertCircle, ArrowUpRight, Milestone, Check } from 'lucide-react';
 import DeleteConfirmDialog from '@/components/DeleteConfirmDialog';
 import type { useFinanceData } from '@/hooks/useFinanceData';
 import { useFixedExpenses } from '@/hooks/useFixedExpenses';
@@ -15,6 +15,7 @@ import { formatCurrency } from '@/lib/financeUtils';
 import { useFinanceAssumptions } from '@/hooks/useFinanceAssumptions';
 import { TIMEZONE_PRESETS } from '@/lib/timezoneEngine';
 import { supabase } from '@/integrations/supabase/client';
+import { computeEmergencyLadder } from '@/lib/emergencyLadderEngine';
 
 type Props = { finance: ReturnType<typeof useFinanceData> };
 
@@ -88,7 +89,10 @@ export default function FinanceSettingsPanel({ finance }: Props) {
   const [audGbp, setAudGbp] = useState(String((settings?.fx_rates as any)?.AUD_GBP ?? '0.52'));
   const [gbpAud, setGbpAud] = useState(String((settings?.fx_rates as any)?.GBP_AUD ?? '1.92'));
   const [baseCurrency, setBaseCurrency] = useState(settings?.base_currency || 'GBP');
-  const [emergencyMonths, setEmergencyMonths] = useState('3');
+  const [emergencyMonths, setEmergencyMonths] = useState('2');
+  const [targetMonths, setTargetMonths] = useState(() => {
+    return String((settings?.fx_rates as any)?.target_buffer_months || localStorage.getItem('gvb_target_buffer_months') || '6');
+  });
   const [newCatName, setNewCatName] = useState('');
   const [newCatType, setNewCatType] = useState('variable');
   const [newCatColor, setNewCatColor] = useState('#3B82F6');
@@ -127,6 +131,25 @@ export default function FinanceSettingsPanel({ finance }: Props) {
 
   const fmtCurrency = (n: number) => formatCurrency(n, settings?.base_currency || 'AUD');
 
+  const activeMonthsNum = parseInt(emergencyMonths) || (assumptions?.buffer_months ?? 2);
+  const targetMonthsNum = parseInt(targetMonths) || 6;
+  const essentialVariable = (assumptions as any)?.estimated_essential_variable ?? 0;
+  const monthlySurvivalCost = fixedMonthlyTotal + essentialVariable;
+  const totalLiquidCash = accounts
+    .filter(a => !(a as any).exclude_from_totals)
+    .reduce((sum, a) => sum + finance.convertToBase(a.balance, a.currency), 0);
+
+  const ladderState = useMemo(() => {
+    return computeEmergencyLadder({
+      activeMonths: activeMonthsNum,
+      targetMonths: targetMonthsNum,
+      monthlySurvival: monthlySurvivalCost,
+      totalLiquidCash,
+      goals: finance.goals,
+      convertToBase: finance.convertToBase,
+    });
+  }, [activeMonthsNum, targetMonthsNum, monthlySurvivalCost, totalLiquidCash, finance.goals, finance.convertToBase]);
+
   const upAccount = accounts.find(a => a.provider === 'up');
   const isUpConnected = !!upAccount || upStatus?.connected === true;
 
@@ -149,12 +172,16 @@ export default function FinanceSettingsPanel({ finance }: Props) {
       if (tz) {
         setLivingTimezone(tz);
       }
+      const savedTarget = (settings.fx_rates as any)?.target_buffer_months || localStorage.getItem('gvb_target_buffer_months');
+      if (savedTarget) {
+        setTargetMonths(String(savedTarget));
+      }
     }
   }, [settings]);
 
   useEffect(() => {
     if (assumptions) {
-      setEmergencyMonths(String(assumptions.buffer_months || 3));
+      setEmergencyMonths(String(assumptions.buffer_months || 2));
     }
   }, [assumptions]);
 
@@ -173,8 +200,28 @@ export default function FinanceSettingsPanel({ finance }: Props) {
 
   const handleSaveEmergencyMonths = async () => {
     if (!updateAssumptions) return;
+    const active = parseInt(emergencyMonths) || 2;
+    const target = parseInt(targetMonths) || 6;
+    localStorage.setItem('gvb_target_buffer_months', String(target));
+    if (updateSettings && settings) {
+      updateSettings({
+        fx_rates: {
+          ...((settings.fx_rates as any) || {}),
+          target_buffer_months: target,
+        },
+      });
+    }
     await updateAssumptions({
-      buffer_months: parseInt(emergencyMonths) || 3,
+      buffer_months: active,
+    });
+  };
+
+  const handleLevelUpOneMonth = async () => {
+    if (!updateAssumptions) return;
+    const nextVal = (parseInt(emergencyMonths) || (assumptions?.buffer_months ?? 2)) + 1;
+    setEmergencyMonths(String(nextVal));
+    await updateAssumptions({
+      buffer_months: nextVal,
     });
   };
 
@@ -711,30 +758,201 @@ export default function FinanceSettingsPanel({ finance }: Props) {
         </CardContent>
       </Card>
 
-      {/* Emergency Fund Target */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Emergency Fund Target</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label>Emergency Target (Months of Survival Cost)</Label>
-            <div className="flex items-center gap-4">
-              <Input
-                type="number"
-                min="1"
-                max="36"
-                value={emergencyMonths}
-                onChange={e => setEmergencyMonths(e.target.value)}
-                className="w-32"
-              />
-              <span className="text-sm text-muted-foreground font-semibold">months</span>
+      {/* Emergency Fund Target & Expansion Ladder */}
+      <Card className="border-2 border-emerald-100/80 shadow-xs">
+        <CardHeader className="pb-3 bg-gradient-to-r from-emerald-50/50 via-teal-50/30 to-transparent border-b border-emerald-100/50">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-emerald-100 flex items-center justify-center text-emerald-700">
+                <Shield className="w-4 h-4" />
+              </div>
+              <div>
+                <CardTitle className="text-base font-bold text-slate-900">
+                  Emergency Fund Target & Growth Ladder
+                </CardTitle>
+                <p className="text-xs text-muted-foreground">
+                  Build up to 6+ months in stages so short-term saving pots stay achievable today.
+                </p>
+              </div>
             </div>
-            <p className="text-xs text-muted-foreground">
-              Determines how many months of fixed survival costs are reserved for your emergency fund before other liquid cash is allocated to goal pools.
-            </p>
+            <Badge variant="outline" className="bg-emerald-50 text-emerald-800 border-emerald-200 font-bold px-2.5 py-1 text-xs">
+              Stage {ladderState.activeMonths} of {ladderState.targetMonths} Months
+            </Badge>
           </div>
-          <Button onClick={handleSaveEmergencyMonths} size="sm">Save Target Months</Button>
+        </CardHeader>
+        <CardContent className="space-y-6 pt-5">
+          {/* Dual Target Inputs: Active Floor vs Ultimate Goal */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="bg-slate-50/80 border border-slate-200/80 rounded-2xl p-4 space-y-2">
+              <div className="flex items-center justify-between">
+                <Label className="font-bold text-slate-800 text-xs uppercase tracking-wider flex items-center gap-1.5">
+                  <Shield className="w-3.5 h-3.5 text-blue-600" />
+                  Active Safety Floor (Today)
+                </Label>
+                <Badge variant="secondary" className="bg-blue-100 text-blue-800 text-[10px] font-semibold">
+                  Active Floor
+                </Badge>
+              </div>
+              <div className="flex items-center gap-2 pt-1">
+                <Input
+                  type="number"
+                  min="1"
+                  max="12"
+                  value={emergencyMonths}
+                  onChange={e => setEmergencyMonths(e.target.value)}
+                  className="w-24 font-bold text-base bg-white"
+                />
+                <span className="text-sm text-slate-600 font-semibold">months ({fmtCurrency(ladderState.currentFloor)})</span>
+              </div>
+              <p className="text-[11px] text-slate-500 leading-relaxed">
+                Actively reserves liquid cash before goal pots receive funds. Keeping this at {emergencyMonths} months prevents holiday and trip pots from turning red.
+              </p>
+            </div>
+
+            <div className="bg-slate-50/80 border border-slate-200/80 rounded-2xl p-4 space-y-2">
+              <div className="flex items-center justify-between">
+                <Label className="font-bold text-slate-800 text-xs uppercase tracking-wider flex items-center gap-1.5">
+                  <Target className="w-3.5 h-3.5 text-emerald-600" />
+                  North Star Target Goal
+                </Label>
+                <Badge variant="secondary" className="bg-emerald-100 text-emerald-800 text-[10px] font-semibold">
+                  Ultimate Goal
+                </Badge>
+              </div>
+              <div className="flex items-center gap-2 pt-1">
+                <Input
+                  type="number"
+                  min={Math.max(1, parseInt(emergencyMonths) || 1)}
+                  max="24"
+                  value={targetMonths}
+                  onChange={e => setTargetMonths(e.target.value)}
+                  className="w-24 font-bold text-base bg-white"
+                />
+                <span className="text-sm text-slate-600 font-semibold">months ({fmtCurrency(ladderState.ultimateFloor)})</span>
+              </div>
+              <p className="text-[11px] text-slate-500 leading-relaxed">
+                Your ultimate security cushion. Once short-term pots finish, freed cashflow will step you up to this milestone.
+              </p>
+            </div>
+          </div>
+
+          {/* Visual Milestone Ladder */}
+          <div className="space-y-2.5 bg-slate-50/60 rounded-2xl p-4 border border-slate-200/60">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                <Milestone className="w-3.5 h-3.5 text-slate-500" />
+                Emergency Fund Expansion Milestones
+              </span>
+              <span className="text-xs font-bold text-emerald-700">
+                {ladderState.progressPercent.toFixed(0)}% towards {ladderState.targetMonths}-month goal
+              </span>
+            </div>
+
+            {/* Stepper bar */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2 pt-1">
+              {ladderState.milestones.map((m) => {
+                const isAchieved = m.status === 'achieved';
+                const isActive = m.status === 'active_floor';
+                const isNext = m.status === 'next_milestone';
+                const isTarget = m.status === 'ultimate_target';
+
+                let borderStyle = 'border-slate-200 bg-white text-slate-400';
+                if (isAchieved) borderStyle = 'border-emerald-200 bg-emerald-50 text-emerald-800';
+                if (isActive) borderStyle = 'border-blue-400 bg-blue-50 text-blue-900 shadow-xs ring-1 ring-blue-300';
+                if (isNext) borderStyle = 'border-amber-300 bg-amber-50 text-amber-900 ring-1 ring-amber-200';
+                if (isTarget && !isNext && !isActive) borderStyle = 'border-purple-200 bg-purple-50/60 text-purple-900';
+
+                return (
+                  <div
+                    key={m.month}
+                    className={`rounded-xl border p-2 flex flex-col justify-between text-left transition-all ${borderStyle}`}
+                  >
+                    <div className="flex items-center justify-between text-[10px] font-bold">
+                      <span>{m.month} Mo</span>
+                      {isAchieved && <Check className="w-3 h-3 text-emerald-600" />}
+                      {isActive && <Shield className="w-3 h-3 text-blue-600" />}
+                      {isNext && <Sparkles className="w-3 h-3 text-amber-600" />}
+                    </div>
+                    <div className="mt-1 text-xs font-extrabold font-display">
+                      {fmtCurrency(m.amount)}
+                    </div>
+                    <div className="text-[9px] uppercase font-semibold tracking-tight mt-0.5 opacity-80">
+                      {isAchieved && 'Achieved'}
+                      {isActive && 'Active Floor'}
+                      {isNext && 'Next Step'}
+                      {isTarget && !isActive && !isNext && 'Goal'}
+                      {!isAchieved && !isActive && !isNext && !isTarget && 'Upcoming'}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Next Milestone Advisor Card */}
+          {ladderState.nextMonth && (
+            <div className={`rounded-2xl border p-4 transition-all ${
+              ladderState.canAffordNextMonthNow
+                ? 'bg-emerald-50/70 border-emerald-200'
+                : 'bg-amber-50/70 border-amber-200'
+            }`}>
+              <div className="flex items-start justify-between gap-3 flex-wrap">
+                <div className="space-y-1 max-w-xl">
+                  <div className="flex items-center gap-2">
+                    {ladderState.canAffordNextMonthNow ? (
+                      <Sparkles className="w-4 h-4 text-emerald-600" />
+                    ) : (
+                      <Lock className="w-4 h-4 text-amber-600" />
+                    )}
+                    <h4 className="text-sm font-bold text-slate-900">
+                      Next Step: Month {ladderState.nextMonth} ({fmtCurrency(ladderState.additionalCostForNextMonth)} needed)
+                    </h4>
+                  </div>
+                  {ladderState.isBlockedByActivePots ? (
+                    <p className="text-xs text-slate-600 leading-relaxed">
+                      You currently have <strong>{ladderState.activeCompetingPots.length} active savings pot{ladderState.activeCompetingPots.length > 1 ? 's' : ''}</strong>
+                      {ladderState.activeCompetingPots.length > 0 && ` (${ladderState.activeCompetingPots.map(p => p.name).slice(0, 3).join(', ')})`} requiring ~<strong>{fmtCurrency(ladderState.totalWeeklyCommittedToPots)}/wk</strong>.
+                      Stepping to {ladderState.nextMonth} months is safely scheduled for once these pots finish
+                      {ladderState.projectedUnlockDate ? ` (projected ~${ladderState.projectedUnlockDate})` : ''} so you don't compromise your holiday budget today.
+                    </p>
+                  ) : ladderState.canAffordNextMonthNow ? (
+                    <p className="text-xs text-emerald-800 leading-relaxed font-medium">
+                      You have sufficient unallocated liquid cash ({fmtCurrency(ladderState.unallocatedCash)}) to advance your emergency floor to {ladderState.nextMonth} months right now without putting any of your goals in deficit!
+                    </p>
+                  ) : (
+                    <p className="text-xs text-slate-600 leading-relaxed">
+                      Funding Month {ladderState.nextMonth} requires {fmtCurrency(ladderState.shortfallForNextMonth)} more cushion. Once your ongoing pots complete, surplus cash will fund this step.
+                    </p>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <Button
+                    size="sm"
+                    variant={ladderState.canAffordNextMonthNow ? "default" : "outline"}
+                    onClick={handleLevelUpOneMonth}
+                    className={`font-bold text-xs gap-1.5 ${
+                      ladderState.canAffordNextMonthNow
+                        ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                        : 'border-amber-300 bg-white hover:bg-amber-50 text-amber-900'
+                    }`}
+                  >
+                    <ArrowUpRight className="w-3.5 h-3.5" />
+                    Level Up to {ladderState.nextMonth} Mo
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="flex items-center justify-between pt-2">
+            <p className="text-[11px] text-muted-foreground">
+              Survival cost basis: {fmtCurrency(monthlySurvivalCost)}/mo × 1.2 safety multiplier
+            </p>
+            <Button onClick={handleSaveEmergencyMonths} size="sm" className="font-bold">
+              Save Targets & Ladder
+            </Button>
+          </div>
         </CardContent>
       </Card>
 

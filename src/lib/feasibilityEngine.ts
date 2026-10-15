@@ -9,6 +9,7 @@ export interface IncomeStreamEstimate {
   totalLast3Months: number;
   activeMonthsCount: number;
   estimatedMonthlyAmount: number;
+  transactions?: FinanceTransaction[];
 }
 
 export interface CompetingGoalDetail {
@@ -70,40 +71,65 @@ export function calculateStreamIncomeEstimates(
     monthlyTarget?: number | null;
     months: Set<string>;
     earliest: Date | null;
+    transactions: FinanceTransaction[];
   }
 
   const streamMap: Record<string, StreamCollector> = {};
 
+  // Find primary Gamma category (prefer 'Gamma Salary', then any category containing 'gamma')
+  const gammaCats = incomeCategories.filter(c => c.name.toLowerCase().includes('gamma'));
+  const primaryGammaCat = gammaCats.find(c => c.name.toLowerCase().includes('salary')) || gammaCats[0];
+  const primaryGammaId = primaryGammaCat ? primaryGammaCat.id : '__gamma_salary';
+
   // 1. Initialize streams from all active income categories
   for (const cat of incomeCategories) {
     const isIncomeCat = cat.name.trim().toLowerCase() === 'income';
-    const streamName = isIncomeCat ? 'Gamma' : cat.name.trim();
+    const isGammaCat = cat.name.toLowerCase().includes('gamma');
+
+    // Unify all Gamma categories into a single 'Gamma Salary' stream so it is never double-counted
+    if (isGammaCat) {
+      if (!streamMap[primaryGammaId]) {
+        streamMap[primaryGammaId] = {
+          id: primaryGammaId,
+          name: 'Gamma Salary',
+          color: '#DB2777',
+          total: 0,
+          count: 0,
+          monthlyTarget: primaryGammaCat?.monthly_target || 2896.67,
+          months: new Set(),
+          earliest: null,
+          transactions: [],
+        };
+      }
+      continue;
+    }
+
+    const streamName = isIncomeCat ? 'Other Income' : cat.name.trim();
     streamMap[cat.id] = {
       id: cat.id,
       name: streamName,
-      color: cat.color || (isIncomeCat ? '#DB2777' : undefined),
+      color: cat.color || (isIncomeCat ? '#10B981' : undefined),
       total: 0,
       count: 0,
       monthlyTarget: cat.monthly_target,
       months: new Set(),
       earliest: null,
+      transactions: [],
     };
   }
 
   // Ensure baseline collector keys for known streams if not already in categories
-  const hasGammaCat = Object.values(streamMap).some(s =>
-    s.name.toLowerCase().includes('gamma') || s.name.toLowerCase().includes('salary')
-  );
-  if (!hasGammaCat) {
-    streamMap['__gamma'] = {
-      id: '__gamma',
-      name: 'Gamma',
+  if (!streamMap[primaryGammaId]) {
+    streamMap[primaryGammaId] = {
+      id: primaryGammaId,
+      name: 'Gamma Salary',
       color: '#DB2777',
       total: 0,
       count: 0,
       monthlyTarget: 2896.67,
       months: new Set(),
       earliest: null,
+      transactions: [],
     };
   }
 
@@ -120,6 +146,7 @@ export function calculateStreamIncomeEstimates(
       monthlyTarget: (70 * 52) / 12,
       months: new Set(),
       earliest: null,
+      transactions: [],
     };
   }
 
@@ -131,16 +158,22 @@ export function calculateStreamIncomeEstimates(
     count: 0,
     months: new Set(),
     earliest: null,
+    transactions: [],
   };
 
   // Helper to match transaction to an income category or stream
   const findIncomeStreamId = (tx: FinanceTransaction): string => {
-    if (tx.category_id && streamMap[tx.category_id]) return tx.category_id;
+    // If categorized under any gamma category or primaryGammaId, map to primaryGammaId
+    if (tx.category_id) {
+      if (gammaCats.some(c => c.id === tx.category_id) || tx.category_id === primaryGammaId) {
+        return primaryGammaId;
+      }
+      if (streamMap[tx.category_id]) return tx.category_id;
+    }
     const text = `${tx.merchant || ''} ${tx.description || ''} ${(tx.raw as any)?.message || ''}`.toLowerCase();
 
     if (text.includes('gamma')) {
-      const g = Object.values(streamMap).find(s => s.name.toLowerCase().includes('gamma') || s.name.toLowerCase().includes('salary'));
-      if (g) return g.id;
+      return primaryGammaId;
     }
     const isGabriellaIncome = text.includes('gabriella') && tx.amount > 0 && !tx.transfer_group_id;
     if (text.includes('batchbase') || text.includes('batch base') || text.includes('venture') || text.includes('advisory') || isGabriellaIncome) {
@@ -185,6 +218,7 @@ export function calculateStreamIncomeEstimates(
     s.total += bAmt;
     s.count += 1;
     s.months.add(format(txDate, 'yyyy-MM'));
+    s.transactions.push(tx);
   }
 
   // 3. For each stream: calculate average from the last 3 months (Divided by 3)
@@ -227,6 +261,7 @@ export function calculateStreamIncomeEstimates(
       totalLast3Months: Math.round(data.total * 100) / 100,
       activeMonthsCount: data.total > 0 ? divisor : 0,
       estimatedMonthlyAmount: Math.round(estimatedMonthlyAmount * 100) / 100,
+      transactions: [...data.transactions].sort((a, b) => new Date(b.posted_at).getTime() - new Date(a.posted_at).getTime()),
     });
   }
 
@@ -470,8 +505,23 @@ export function calculateSpendingIncomeEstimates(
     monthTotals: Record<string, number>;
   }> = {};
 
-  // Initialize map for all known income categories
+  const gammaCats = incomeCategories.filter(c => c.name.toLowerCase().includes('gamma'));
+  const primaryGammaCat = gammaCats.find(c => c.name.toLowerCase().includes('salary')) || gammaCats[0];
+  const primaryGammaId = primaryGammaCat ? primaryGammaCat.id : '__gamma_salary';
+
+  // Initialize map for all known income categories (unifying Gamma)
   for (const cat of incomeCategories) {
+    if (cat.name.toLowerCase().includes('gamma')) {
+      if (!streamMap[primaryGammaId]) {
+        streamMap[primaryGammaId] = {
+          name: 'Gamma Salary',
+          color: '#DB2777',
+          total: 0,
+          monthTotals: {},
+        };
+      }
+      continue;
+    }
     streamMap[cat.id] = {
       name: cat.name,
       color: cat.color || undefined,
@@ -482,12 +532,16 @@ export function calculateSpendingIncomeEstimates(
 
   // Helper to match transaction to an income category or stream
   const findIncomeStream = (tx: FinanceTransaction): string | null => {
-    if (tx.category_id && streamMap[tx.category_id]) return tx.category_id;
+    if (tx.category_id) {
+      if (gammaCats.some(c => c.id === tx.category_id) || tx.category_id === primaryGammaId) {
+        return primaryGammaId;
+      }
+      if (streamMap[tx.category_id]) return tx.category_id;
+    }
     const text = `${tx.merchant || ''} ${tx.description || ''} ${(tx.raw as any)?.message || ''}`.toLowerCase();
 
     if (text.includes('gamma')) {
-      const g = incomeCategories.find(c => c.name.toLowerCase().includes('gamma'));
-      if (g) return g.id;
+      return primaryGammaId;
     }
     const isGabriellaIncome = text.includes('gabriella') && tx.amount > 0 && !tx.transfer_group_id;
     if (text.includes('batchbase') || text.includes('batch base') || text.includes('venture') || text.includes('advisory') || isGabriellaIncome) {

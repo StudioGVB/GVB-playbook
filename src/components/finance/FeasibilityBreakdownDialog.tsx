@@ -28,10 +28,22 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import { format } from 'date-fns';
-import { formatCurrency } from '@/lib/financeUtils';
+import { formatCurrency, baseAmt } from '@/lib/financeUtils';
 import { FeasibilityAssessment } from '@/lib/feasibilityEngine';
-import { FinanceGoal } from '@/hooks/useFinanceData';
+import { FinanceGoal, FinanceTransaction, FinanceCategory, FinanceAccount } from '@/hooks/useFinanceData';
 import { toast } from 'sonner';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 interface FeasibilityBreakdownDialogProps {
   open: boolean;
@@ -48,6 +60,10 @@ interface FeasibilityBreakdownDialogProps {
   onApplyRecommendedTarget?: (goalId: string, target: number) => void;
   onUpdateExpectedIncome?: (amount: number) => Promise<void> | void;
   onResetExpectedIncome?: () => Promise<void> | void;
+  transactions?: FinanceTransaction[];
+  categories?: FinanceCategory[];
+  accounts?: FinanceAccount[];
+  onUpdateTransaction?: (id: string, updates: Partial<FinanceTransaction>) => Promise<any> | void;
 }
 
 export default function FeasibilityBreakdownDialog({
@@ -65,12 +81,32 @@ export default function FeasibilityBreakdownDialog({
   onApplyRecommendedTarget,
   onUpdateExpectedIncome,
   onResetExpectedIncome,
+  transactions = [],
+  categories = [],
+  accounts = [],
+  onUpdateTransaction,
 }: FeasibilityBreakdownDialogProps) {
   if (!goal || !assessment) return null;
 
   const [isEditingIncome, setIsEditingIncome] = useState(false);
   const [customIncomeInput, setCustomIncomeInput] = useState('');
   const [isSavingIncome, setIsSavingIncome] = useState(false);
+  const [inspectingStreamId, setInspectingStreamId] = useState<string | null>(null);
+  const hoverTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
+
+  const incomeCategories = (categories || []).filter(c => c.type === 'income' && !c.is_archived);
+  const otherCategories = (categories || []).filter(c => c.type !== 'income' && !c.is_archived);
+
+  const handleMouseEnterStream = (id: string) => {
+    if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+    setInspectingStreamId(id);
+  };
+
+  const handleMouseLeaveStream = () => {
+    hoverTimeoutRef.current = setTimeout(() => {
+      setInspectingStreamId(null);
+    }, 250);
+  };
 
   const fmt = (val: number) => formatCurrency(val, currency);
 
@@ -245,7 +281,7 @@ export default function FeasibilityBreakdownDialog({
                       <p className="text-[10px] text-slate-400">
                         {hasManualIncomeOverride
                           ? 'Manual override active • Click Reset to use 3-month transaction average'
-                          : 'Average of last 3 months per stream (90-day total ÷ 3, or ÷ months paid if newer)'}
+                          : 'Average of last 3 months per stream • Hover or click any stream below to inspect & categorise transactions'}
                       </p>
                     </div>
                   </div>
@@ -303,25 +339,179 @@ export default function FeasibilityBreakdownDialog({
                   )}
                 </div>
 
-                {/* Sub-streams chip list */}
+                {/* Sub-streams chip list with interactive transaction inspection & re-categorization */}
                 {assessment.streamEstimates && assessment.streamEstimates.length > 0 && (
                   <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
-                    {assessment.streamEstimates.map(s => (
-                      <span
-                        key={s.categoryId}
-                        className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md bg-slate-100/90 text-slate-700 font-medium border border-slate-200/60"
-                        title={s.totalLast3Months > 0 ? `90-day total: ${fmt(s.totalLast3Months)} ÷ ${s.activeMonthsCount || 3} = ${fmt(s.estimatedMonthlyAmount)}/mo` : `${s.name}: ${fmt(s.estimatedMonthlyAmount)}/mo`}
-                      >
-                        <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: s.color || '#10B981' }} />
-                        <span>{s.name}:</span>
-                        <strong className="font-bold text-slate-900">+{fmt(s.estimatedMonthlyAmount)}/mo</strong>
-                        {s.totalLast3Months > 0 && (
-                          <span className="text-[9px] text-slate-400 font-normal">
-                            ({fmt(s.totalLast3Months)} ÷ {s.activeMonthsCount || 3})
-                          </span>
-                        )}
-                      </span>
-                    ))}
+                    {assessment.streamEstimates.map(s => {
+                      const streamTxs = s.transactions || [];
+                      const isOpen = inspectingStreamId === s.categoryId;
+
+                      return (
+                        <Popover
+                          key={s.categoryId}
+                          open={isOpen}
+                          onOpenChange={(open) => {
+                            if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+                            setInspectingStreamId(open ? s.categoryId : null);
+                          }}
+                        >
+                          <PopoverTrigger asChild>
+                            <button
+                              type="button"
+                              onMouseEnter={() => handleMouseEnterStream(s.categoryId)}
+                              onMouseLeave={handleMouseLeaveStream}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+                                setInspectingStreamId(isOpen ? null : s.categoryId);
+                              }}
+                              className={`inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md font-medium border transition-all cursor-pointer text-left ${
+                                isOpen
+                                  ? 'bg-slate-200 border-slate-300 shadow-sm text-slate-900 ring-2 ring-emerald-500/20'
+                                  : 'bg-slate-100/90 hover:bg-slate-200/80 text-slate-700 border-slate-200/60 hover:border-slate-300'
+                              }`}
+                              title="Hover or click to view incoming transactions & re-categorise"
+                            >
+                              <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: s.color || '#10B981' }} />
+                              <span>{s.name}:</span>
+                              <strong className="font-bold text-slate-900">+{fmt(s.estimatedMonthlyAmount)}/mo</strong>
+                              {s.totalLast3Months > 0 && (
+                                <span className="text-[9px] text-slate-400 font-normal">
+                                  ({fmt(s.totalLast3Months)} ÷ {s.activeMonthsCount || 3})
+                                </span>
+                              )}
+                            </button>
+                          </PopoverTrigger>
+                          <PopoverContent
+                            className="w-80 sm:w-96 p-3 shadow-2xl rounded-2xl border border-slate-200 bg-white z-[90]"
+                            align="start"
+                            side="bottom"
+                            sideOffset={6}
+                            onMouseEnter={() => {
+                              if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+                              setInspectingStreamId(s.categoryId);
+                            }}
+                            onMouseLeave={handleMouseLeaveStream}
+                          >
+                            <div className="space-y-2.5">
+                              {/* Popover Header */}
+                              <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: s.color || '#10B981' }} />
+                                  <div>
+                                    <h5 className="font-bold text-slate-900 text-xs">{s.name}</h5>
+                                    <p className="text-[10px] text-slate-400">
+                                      {streamTxs.length} transaction{streamTxs.length === 1 ? '' : 's'} in last 90 days
+                                    </p>
+                                  </div>
+                                </div>
+                                <div className="text-right">
+                                  <div className="text-xs font-bold text-emerald-600 font-display tabular-nums">
+                                    +{fmt(s.estimatedMonthlyAmount)}/mo
+                                  </div>
+                                  <div className="text-[9px] text-slate-400 tabular-nums">
+                                    90-day sum: {fmt(s.totalLast3Months)}
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Transaction list */}
+                              {streamTxs.length === 0 ? (
+                                <div className="py-4 text-center text-xs text-slate-400 italic">
+                                  No direct transactions found in the 90-day window (estimated from fallback target / rate).
+                                </div>
+                              ) : (
+                                <div className="max-h-64 overflow-y-auto space-y-2.5 pr-1 divide-y divide-slate-100">
+                                  {streamTxs.map(tx => {
+                                    const accName = accounts?.find(a => a.id === tx.account_id)?.account_name;
+                                    const txAmt = baseAmt(tx);
+                                    return (
+                                      <div key={tx.id} className="pt-2 first:pt-0 space-y-1.5">
+                                        <div className="flex items-start justify-between gap-2">
+                                          <div className="min-w-0 flex-1">
+                                            <div className="flex items-center gap-1.5 flex-wrap">
+                                              <span className="text-[10px] text-slate-400 font-mono">
+                                                {format(new Date(tx.posted_at), 'dd MMM yyyy')}
+                                              </span>
+                                              {accName && (
+                                                <span className="text-[9px] px-1 py-0 rounded bg-slate-100 text-slate-500 font-medium">
+                                                  {accName}
+                                                </span>
+                                              )}
+                                            </div>
+                                            <p className="text-xs font-semibold text-slate-800 truncate" title={tx.merchant || tx.description}>
+                                              {tx.merchant || tx.description}
+                                            </p>
+                                          </div>
+                                          <span className="font-display font-bold text-emerald-600 text-xs shrink-0 tabular-nums">
+                                            +{fmt(txAmt)}
+                                          </span>
+                                        </div>
+
+                                        {/* Category selector */}
+                                        <div className="flex items-center gap-1.5 pt-0.5">
+                                          <span className="text-[10px] text-slate-400 shrink-0 font-medium">Categorise:</span>
+                                          <Select
+                                            value={tx.category_id || '__uncategorised'}
+                                            onValueChange={async (newCatId) => {
+                                              const targetCatId = newCatId === '__uncategorised' ? null : newCatId;
+                                              if (onUpdateTransaction) {
+                                                await onUpdateTransaction(tx.id, { category_id: targetCatId } as any);
+                                                const catName = categories?.find(c => c.id === targetCatId)?.name || 'Uncategorised';
+                                                toast.success(`Transaction moved to "${catName}"`);
+                                              }
+                                            }}
+                                          >
+                                            <SelectTrigger className="h-6 text-[11px] py-0 px-2 bg-slate-50 border-slate-200">
+                                              <SelectValue placeholder="Category..." />
+                                            </SelectTrigger>
+                                            <SelectContent className="max-h-60 z-[100]">
+                                              <SelectItem value="__uncategorised" className="text-xs text-slate-400">
+                                                Uncategorised
+                                              </SelectItem>
+                                              {incomeCategories.length > 0 && (
+                                                <>
+                                                  <div className="px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-slate-400">
+                                                    Income Streams
+                                                  </div>
+                                                  {incomeCategories.map(c => (
+                                                    <SelectItem key={c.id} value={c.id} className="text-xs">
+                                                      <span className="inline-flex items-center gap-1.5">
+                                                        <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: c.color || '#10B981' }} />
+                                                        {c.name}
+                                                      </span>
+                                                    </SelectItem>
+                                                  ))}
+                                                </>
+                                              )}
+                                              {otherCategories.length > 0 && (
+                                                <>
+                                                  <div className="px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-slate-400">
+                                                    Other Categories / Transfers
+                                                  </div>
+                                                  {otherCategories.map(c => (
+                                                    <SelectItem key={c.id} value={c.id} className="text-xs">
+                                                      <span className="inline-flex items-center gap-1.5">
+                                                        <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: c.color || '#64748B' }} />
+                                                        {c.name}
+                                                      </span>
+                                                    </SelectItem>
+                                                  ))}
+                                                </>
+                                              )}
+                                            </SelectContent>
+                                          </Select>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          </PopoverContent>
+                        </Popover>
+                      );
+                    })}
                   </div>
                 )}
               </div>
