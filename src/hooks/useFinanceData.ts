@@ -59,6 +59,7 @@ export interface FinanceTransaction {
   reimbursement_status?: 'pending' | 'reimbursed' | null;
   reimbursed_at?: string | null;
   reimbursement_payout_id?: string | null;
+  raw?: any;
 }
 
 export interface FinanceGoal {

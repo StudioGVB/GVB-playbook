@@ -33,14 +33,15 @@ export function detectPaycheck(
 ): DetectedPaycheck | null {
   const catMap = new Map(categories.map(c => [c.id, c]));
 
-  // Calculate search window: 35 days back from refDate to cover month-end paychecks
-  const windowStart = new Date(refDate.getFullYear(), refDate.getMonth() - 1, 20);
-  const windowEnd = new Date(refDate.getFullYear(), refDate.getMonth() + 1, 5);
+  // Only detect paychecks that actually landed within the last 7 days
+  const windowStart = new Date(refDate.getTime() - 7 * 24 * 60 * 60 * 1000);
+  windowStart.setHours(0, 0, 0, 0);
+  const windowEnd = new Date(refDate.getTime() + 2 * 24 * 60 * 60 * 1000);
 
   const candidates = transactions.filter(tx => {
     const amt = baseAmt(tx);
-    if (amt <= 0) return false;
-    if (tx.is_reimbursable) return false;
+    if (amt < 500) return false;
+    if (tx.is_reimbursable || tx.is_refund) return false;
 
     const d = parseUkDate(tx.posted_at);
     if (d < windowStart || d > windowEnd) return false;
@@ -49,18 +50,17 @@ export function detectPaycheck(
     const cat = catMap.get(tx.category_id || '');
     const isIncomeCat = cat?.type === 'income';
 
-    const isMatchKeyword =
+    const isSalaryKeyword =
       rawText.includes('gamma') ||
+      rawText.includes('batchbase') ||
+      rawText.includes('venture advisory') ||
       rawText.includes('payroll') ||
-      rawText.includes('salary') ||
-      rawText.includes('monzo') ||
-      rawText.includes('salary transfer') ||
-      rawText.includes('income transfer');
+      rawText.includes('salary');
 
-    if (isMatchKeyword) return true;
-    if (isIncomeCat && amt >= 500) return true;
-    // Any large incoming deposit >= £1,000 (including transfers from Monzo into Wise)
-    if (amt >= 1000) return true;
+    if (isSalaryKeyword && amt >= 500) return true;
+    if (isIncomeCat && !tx.is_transfer && amt >= 800) return true;
+    // Large incoming salary-sized deposit >= £1,500
+    if (!tx.is_transfer && amt >= 1500) return true;
 
     return false;
   });
