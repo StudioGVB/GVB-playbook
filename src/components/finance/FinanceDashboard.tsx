@@ -16,6 +16,7 @@ import { useWeekTypes } from '@/hooks/useWeekTypes';
 import { useFinanceTrips } from '@/hooks/useFinanceTrips';
 import { computePolicySnapshot } from '@/lib/policyEngine';
 import { formatCurrency, baseAmt, parseUkDate } from '@/lib/financeUtils';
+import { calcTakeHome, type StudentLoanPlan } from '@/lib/ukTakeHome';
 import { MultiSegmentDonut } from '@/components/finance/MultiSegmentDonut';
 import { MondayWeeklyReviewCard } from '@/components/finance/MondayWeeklyReviewCard';
 import {
@@ -276,6 +277,64 @@ export function FinanceDashboard() {
   const unassignedCash = Math.max(0, totalCash - nonEmergencyGoalsTotal);
   const currentEmergencyFunded = Math.min(emergencyFloor, Math.max(emergencyGoalAssigned, unassignedCash));
   const emergencyPct = emergencyFloor > 0 ? Math.min(100, (currentEmergencyFunded / emergencyFloor) * 100) : 100;
+
+  // 5. Predicted Annual Take-Home (Gamma £37k PAYE Net + 3-Month Side Hustle Pace)
+  const gammaGrossAnnual = assumptions?.gross_annual_salary && assumptions.gross_annual_salary > 0
+    ? assumptions.gross_annual_salary
+    : 37000;
+  const gammaTakeHome = calcTakeHome({
+    grossAnnual: gammaGrossAnnual,
+    pensionPercent: assumptions?.pension_percent || 0,
+    studentLoanPlan: (assumptions?.student_loan_plan as StudentLoanPlan) || null,
+  });
+  const gammaNetAnnual = gammaTakeHome.netAnnual;
+
+  const threeMonthsAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+  threeMonthsAgo.setHours(0, 0, 0, 0);
+
+  const sideHustle3MoTotal = finance.transactions
+    .filter(tx => {
+      if (tx.amount <= 0) return false;
+      if (tx.is_reimbursable || tx.is_refund) return false;
+      const d = parseUkDate(tx.posted_at);
+      if (d < threeMonthsAgo || d > now) return false;
+
+      const text = `${tx.merchant || ''} ${tx.description || ''} ${(tx as any).raw?.message || ''}`.toLowerCase();
+      // Exclude Gamma salary deposits (already accounted for via £37k PAYE model)
+      if (text.includes('gamma') || text.includes('payroll') || text.includes('salary')) return false;
+
+      const cat = catMap.get(tx.category_id || '');
+      const catName = (cat?.name || '').toLowerCase();
+      if (catName.includes('gamma') || catName.includes('salary')) return false;
+
+      // Known side-hustle matchers (Batchbase, Venture Advisory, Etsy, Back Pocket Games)
+      const isSideHustleText =
+        text.includes('batchbase') ||
+        text.includes('batch base') ||
+        text.includes('venture') ||
+        text.includes('advisory') ||
+        text.includes('etsy') ||
+        text.includes('back pocket') ||
+        text.includes('bpg');
+      if (isSideHustleText) return true;
+
+      // Explicitly categorized as non-Gamma income and not an internal transfer
+      if (cat?.type === 'income' && !tx.is_transfer && tx.transfer_status !== 'confirmed' && tx.transfer_status !== 'auto_confirmed') {
+        // Exclude generic unsorted self-transfers unless tagged to a specific side-hustle category
+        if (text.includes('gabriella') && (catName === 'income' || catName === 'other')) return false;
+        return true;
+      }
+
+      return false;
+    })
+    .reduce((sum, tx) => sum + baseAmt(tx), 0);
+
+  const sideHustleMonthlyAvg = sideHustle3MoTotal / 3;
+  const sideHustleAnnual = sideHustleMonthlyAvg * 12;
+  const predictedAnnualNet = gammaNetAnnual + sideHustleAnnual;
+  const predictedMonthlyNet = predictedAnnualNet / 12;
+  const gammaSharePct = predictedAnnualNet > 0 ? (gammaNetAnnual / predictedAnnualNet) * 100 : 100;
+  const sideHustleSharePct = Math.max(0, 100 - gammaSharePct);
 
   // Bar chart scaling
   const dailyTargetLine = totalWeeklyBudget / 7;
@@ -603,6 +662,77 @@ export function FinanceDashboard() {
               {fmt(currentEmergencyFunded)} / {fmt(emergencyFloor)}
             </span>
           </div>
+        </div>
+      </div>
+
+      {/* ═══ ROW 3: PREDICTED ANNUAL TAKE-HOME WIDGET ═══ */}
+      <div
+        onClick={() => navigate('/finance/income')}
+        className="rounded-2xl border border-slate-200/90 bg-white p-4 sm:p-5 cursor-pointer transition-all hover:border-slate-300"
+      >
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                Predicted Annual Take-Home (After Tax)
+              </span>
+              <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+                ~{fmt(predictedMonthlyNet)}/mo net
+              </span>
+            </div>
+            <div className="flex items-baseline gap-2.5 mt-1">
+              <p className="text-2xl sm:text-3xl font-black tabular-nums tracking-tight text-slate-900">
+                {fmt(predictedAnnualNet)}
+                <span className="text-xs font-bold text-slate-400 ml-1">/yr</span>
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-xs">
+            <div className="flex items-center gap-2 rounded-xl bg-slate-50 border border-slate-200/70 px-3 py-1.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-violet-600 shrink-0" />
+              <div>
+                <span className="text-[10px] font-bold text-slate-400 block leading-none">
+                  Gamma ({fmt(gammaGrossAnnual)} gross)
+                </span>
+                <span className="font-black tabular-nums text-slate-900 text-xs">
+                  {fmt(gammaNetAnnual)}/yr net
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 rounded-xl bg-pink-50/60 border border-[#FF7AD1]/35 px-3 py-1.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-[#FF2EB8] shrink-0" />
+              <div>
+                <span className="text-[10px] font-bold text-slate-400 block leading-none">
+                  Side Hustles (3m avg: {fmt(sideHustleMonthlyAvg)}/mo)
+                </span>
+                <span className="font-black tabular-nums text-[#FF2EB8] text-xs">
+                  +{fmt(sideHustleAnnual)}/yr
+                </span>
+              </div>
+            </div>
+
+            <span className="text-xs font-bold text-[#FF2EB8] inline-flex items-center gap-0.5 ml-auto sm:ml-1">
+              Income <ChevronRight className="w-3.5 h-3.5" />
+            </span>
+          </div>
+        </div>
+
+        {/* Proportional split bar */}
+        <div className="mt-3.5 h-2 w-full rounded-full bg-slate-100 overflow-hidden flex">
+          <div
+            className="h-full bg-violet-600 transition-all"
+            style={{ width: `${gammaSharePct}%` }}
+            title={`Gamma Net Salary: ${fmt(gammaNetAnnual)}/yr`}
+          />
+          {sideHustleSharePct > 0 && (
+            <div
+              className="h-full bg-[#FF2EB8] transition-all"
+              style={{ width: `${sideHustleSharePct}%` }}
+              title={`Side Hustles (Annualized): ${fmt(sideHustleAnnual)}/yr`}
+            />
+          )}
         </div>
       </div>
     </div>
