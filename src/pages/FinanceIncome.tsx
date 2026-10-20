@@ -333,6 +333,59 @@ export default function FinanceIncome() {
   const topBucket = [...BUCKETS].sort((a, b) => (bucketed[b.key]?.total || 0) - (bucketed[a.key]?.total || 0))[0];
   const topShare = grandTotal > 0 && topBucket ? ((bucketed[topBucket.key]?.total || 0) / grandTotal) * 100 : 0;
 
+  // --- Expected Monthly Income (Actual Landed + Remaining Certain Weekly VA Payments) ---
+  const vaProjection = useMemo(() => {
+    const vaBucket = BUCKETS.find(b => {
+      const l = b.label.trim().toLowerCase();
+      return l.includes('venture') || l.includes('batchbase') || l === 'va';
+    });
+    const vaData = vaBucket ? (bucketed[vaBucket.key] || { total: 0, count: 0, txs: [] }) : { total: 0, count: 0, txs: [] };
+
+    // Estimate typical single weekly VA payment from recent VA deposits (fallback ~£72.80)
+    const allVaTxs = transactions.filter(tx => {
+      if (tx.amount <= 0 || tx.is_reimbursable) return false;
+      if (vaBucket && tx.category_id === vaBucket.categoryId) return true;
+      const hay = `${tx.merchant || ''} ${tx.description || ''}`.toLowerCase();
+      return hay.includes('batchbase') || hay.includes('batch base') || hay.includes('venture') || hay.includes('advisory');
+    });
+
+    const singlePaymentCandidates = allVaTxs
+      .map(tx => baseAmt(tx))
+      .filter(amt => amt >= 45 && amt <= 110);
+
+    const typicalVaWeekly = singlePaymentCandidates.length > 0
+      ? singlePaymentCandidates.slice(0, 6).reduce((s, a) => s + a, 0) / Math.min(6, singlePaymentCandidates.length)
+      : 72.80;
+
+    // Count how many weekly payment equivalents have already landed this month
+    // (e.g. if a double £140 payment landed, that covers 2 weeks)
+    const effectiveWeeksLanded = vaData.txs.reduce((acc, tx) => {
+      const amt = baseAmt(tx);
+      if (amt >= typicalVaWeekly * 1.6) return acc + Math.round(amt / typicalVaWeekly);
+      return acc + 1;
+    }, 0);
+
+    // Total weekly VA payments in the month (4 weeks standard, or more if already exceeded)
+    const totalExpectedWeeks = Math.max(4, effectiveWeeksLanded);
+    const isPastMonth = monthOffset < 0;
+    const remainingWeeks = isPastMonth ? 0 : Math.max(0, totalExpectedWeeks - effectiveWeeksLanded);
+    const remainingVaAmount = remainingWeeks * typicalVaWeekly;
+    const fullMonthVaExpected = vaData.total + remainingVaAmount;
+    const expectedMonthlyTotal = grandTotalWithReimbursements + remainingVaAmount;
+
+    return {
+      vaBucketLabel: vaBucket?.label || 'Venture Advisory (VA)',
+      vaLandedTotal: vaData.total,
+      vaLandedCount: effectiveWeeksLanded,
+      totalExpectedWeeks,
+      remainingWeeks,
+      typicalVaWeekly,
+      remainingVaAmount,
+      fullMonthVaExpected,
+      expectedMonthlyTotal,
+    };
+  }, [BUCKETS, bucketed, transactions, monthOffset, grandTotalWithReimbursements]);
+
   // --- Work Travel Reimbursements Logic ---
   const allReimbursements = useMemo(() => (
     transactions.filter(tx => tx.is_reimbursable && tx.amount < 0)
@@ -1136,6 +1189,126 @@ export default function FinanceIncome() {
                   <p>
                     <strong className="font-bold text-[#FF2EB8]">Income Position Summary:</strong> As a 23yo working full-time, your income is <strong className="text-slate-900">{percentDiff >= 0 ? `+${percentDiff.toFixed(0)}% above average` : `${Math.abs(percentDiff).toFixed(0)}% below average`}</strong> compared to the {selectedBenchmark.label} peer benchmark ({formatCurrency(selectedBenchmark.monthlyNet, baseCurrency)}/mo net), placing your financial position at <strong className="text-slate-900">{percentileLabel}</strong>.
                   </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Expected Monthly Income Widget (Landed Income + Certain VA Payments) */}
+            <div className="bg-white rounded-[2rem] p-6 sm:p-7 border-2 border-sky-200/90 shadow-sm space-y-5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-11 h-11 rounded-2xl bg-sky-50 border border-sky-200 flex items-center justify-center text-sky-600 shrink-0">
+                    <Clock className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="font-display font-black text-lg sm:text-xl text-slate-900">
+                        Expected Monthly Income · {monthLabel}
+                      </h3>
+                      <Badge variant="outline" className="bg-amber-50 border-amber-200 text-amber-800 font-display font-bold px-2.5 py-0.5 rounded-full text-[10px]">
+                        Preview Only · Not counted until in account
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Your actual landed income so far plus remaining weekly {vaProjection.vaBucketLabel} payments for {monthLabel}.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="text-left sm:text-right shrink-0">
+                  <span className="text-[10px] font-display font-bold uppercase tracking-wider text-slate-400 block">
+                    Expected Full Month
+                  </span>
+                  <span className="text-2xl sm:text-3xl font-display font-black text-slate-900 tabular-nums">
+                    {formatCurrency(vaProjection.expectedMonthlyTotal, baseCurrency)}
+                  </span>
+                </div>
+              </div>
+
+              {/* 3 Breakdown Tiles */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+                {/* 1. Landed in Account So Far */}
+                <div className="rounded-2xl bg-emerald-50/60 border border-emerald-200/80 p-4 flex flex-col justify-between">
+                  <div className="flex items-center justify-between text-emerald-800 text-[11px] font-display font-bold uppercase tracking-wider mb-1">
+                    <span>In Account So Far</span>
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                  </div>
+                  <p className="text-2xl font-display font-black text-slate-900 tabular-nums">
+                    {formatCurrency(grandTotalWithReimbursements, baseCurrency)}
+                  </p>
+                  <p className="text-[11px] text-emerald-800/80 font-medium mt-1">
+                    Incl. {formatCurrency(vaProjection.vaLandedTotal, baseCurrency)} VA landed ({vaProjection.vaLandedCount}/{vaProjection.totalExpectedWeeks} wks)
+                  </p>
+                </div>
+
+                {/* 2. Remaining Certain VA Payments */}
+                <div className="rounded-2xl bg-sky-50/70 border border-sky-200/80 p-4 flex flex-col justify-between">
+                  <div className="flex items-center justify-between text-sky-800 text-[11px] font-display font-bold uppercase tracking-wider mb-1">
+                    <span>Remaining VA (Certain)</span>
+                    <Clock className="w-4 h-4 text-sky-600" />
+                  </div>
+                  <p className="text-2xl font-display font-black text-sky-700 tabular-nums">
+                    +{formatCurrency(vaProjection.remainingVaAmount, baseCurrency)}
+                  </p>
+                  <p className="text-[11px] text-sky-800/80 font-medium mt-1">
+                    {vaProjection.remainingWeeks > 0
+                      ? `${vaProjection.remainingWeeks} weekly payment${vaProjection.remainingWeeks === 1 ? '' : 's'} left (~${formatCurrency(vaProjection.typicalVaWeekly, baseCurrency)}/wk)`
+                      : 'All expected weekly VA payments have landed ✓'}
+                  </p>
+                </div>
+
+                {/* 3. Full Month Expected Total */}
+                <div className="rounded-2xl bg-[#FFF5FA] border border-[#FF7AD1]/40 p-4 flex flex-col justify-between">
+                  <div className="flex items-center justify-between text-[#FF2EB8] text-[11px] font-display font-bold uppercase tracking-wider mb-1">
+                    <span>Expected Month Total</span>
+                    <Sparkles className="w-4 h-4 text-[#FF2EB8]" />
+                  </div>
+                  <p className="text-2xl font-display font-black text-slate-900 tabular-nums">
+                    {formatCurrency(vaProjection.expectedMonthlyTotal, baseCurrency)}
+                  </p>
+                  <p className="text-[11px] text-slate-500 font-medium mt-1">
+                    Total VA for month: {formatCurrency(vaProjection.fullMonthVaExpected, baseCurrency)} ({vaProjection.totalExpectedWeeks} wks)
+                  </p>
+                </div>
+              </div>
+
+              {/* Visual Progress Bar: Landed vs Upcoming VA */}
+              <div className="space-y-1.5">
+                <div className="h-3 w-full rounded-full bg-slate-100 overflow-hidden flex">
+                  <div
+                    className="h-full bg-emerald-500 transition-all"
+                    style={{
+                      width: `${
+                        vaProjection.expectedMonthlyTotal > 0
+                          ? (grandTotalWithReimbursements / vaProjection.expectedMonthlyTotal) * 100
+                          : 100
+                      }%`,
+                    }}
+                    title={`Landed in Account: ${formatCurrency(grandTotalWithReimbursements, baseCurrency)}`}
+                  />
+                  {vaProjection.remainingVaAmount > 0 && (
+                    <div
+                      className="h-full bg-sky-400 transition-all"
+                      style={{
+                        width: `${
+                          vaProjection.expectedMonthlyTotal > 0
+                            ? (vaProjection.remainingVaAmount / vaProjection.expectedMonthlyTotal) * 100
+                            : 0
+                        }%`,
+                      }}
+                      title={`Remaining Certain VA Payments: +${formatCurrency(vaProjection.remainingVaAmount, baseCurrency)}`}
+                    />
+                  )}
+                </div>
+                <div className="flex items-center justify-between text-[11px] font-semibold text-slate-500">
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+                    Counted Now (In Account): {formatCurrency(grandTotalWithReimbursements, baseCurrency)}
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-sky-400" />
+                    Upcoming VA (Counted once deposited): +{formatCurrency(vaProjection.remainingVaAmount, baseCurrency)}
+                  </span>
                 </div>
               </div>
             </div>
