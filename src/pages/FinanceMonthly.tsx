@@ -742,11 +742,11 @@ export default function FinanceMonthly() {
   }
 
   return (
-    <div className="space-y-6 w-full font-body -mx-4 sm:-mx-6 -mt-6 px-4 sm:px-6 pt-6 pb-24 min-h-screen bg-[#FFF5FA]">
+    <div className="space-y-6 w-full font-body pb-12">
       {/* Header with month selector */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-3xl sm:text-4xl font-display font-bold text-slate-900 tracking-tight">Monthly Overview</h1>
+          <h1 className="text-2xl sm:text-4xl font-display font-bold text-slate-900 tracking-tight">Monthly Overview</h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
             {isCurrentMonth
               ? `Day ${daysElapsed} of ${daysInMonth} (${daysRemaining} days remaining in ${monthLabel})`

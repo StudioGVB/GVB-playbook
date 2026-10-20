@@ -356,24 +356,24 @@ export function FinanceDashboard() {
       />
 
       {/* ═══ ROW 1: 4 COMPACT SINGLE-NUMBER WIDGETS ═══ */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         {/* 1. Safe to Spend This Week */}
         <div
           onClick={() => navigate('/finance/budget')}
-          className="rounded-2xl border-2 border-[#FF7AD1]/45 bg-white p-5 cursor-pointer transition-all hover:border-[#FF2EB8]"
+          className="rounded-2xl border-2 border-[#FF7AD1]/45 bg-white p-3.5 sm:p-5 cursor-pointer transition-all hover:border-[#FF2EB8] min-w-0"
         >
-          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block truncate">
             Safe to Spend
           </span>
           <p
-            className={`text-3xl font-black tabular-nums tracking-tight mt-1 ${
+            className={`text-2xl sm:text-3xl font-black tabular-nums tracking-tight mt-1 truncate ${
               combinedSafeToSpend >= 0 ? 'text-slate-900' : 'text-rose-600'
             }`}
           >
             {fmt(combinedSafeToSpend)}
           </p>
           <div className="mt-2">
-            <span className="inline-flex items-center rounded-full bg-[#FF2EB8]/10 px-2 py-0.5 text-[11px] font-bold text-[#FF2EB8]">
+            <span className="inline-flex items-center rounded-full bg-[#FF2EB8]/10 px-2 py-0.5 text-[10px] sm:text-[11px] font-bold text-[#FF2EB8] whitespace-nowrap">
               {fmt(combinedDailyPace)}/day · {daysLeftInWeek}d left
             </span>
           </div>
@@ -382,17 +382,17 @@ export function FinanceDashboard() {
         {/* 2. Month Spend & Expected Under/Over */}
         <div
           onClick={() => navigate('/finance/monthly')}
-          className="rounded-2xl border border-slate-200/90 bg-white p-5 cursor-pointer transition-all hover:border-slate-300"
+          className="rounded-2xl border border-slate-200/90 bg-white p-3.5 sm:p-5 cursor-pointer transition-all hover:border-slate-300 min-w-0"
         >
-          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block truncate">
             {format(now, 'MMMM')} Spend
           </span>
-          <p className="text-3xl font-black tabular-nums tracking-tight text-slate-900 mt-1">
+          <p className="text-2xl sm:text-3xl font-black tabular-nums tracking-tight text-slate-900 mt-1 truncate">
             {fmt(totalSpentMonth)}
           </p>
           <div className="mt-2">
             <span
-              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-bold ${
+              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] sm:text-[11px] font-bold whitespace-nowrap ${
                 projectedDiff <= 0
                   ? 'bg-emerald-50 text-emerald-700'
                   : 'bg-rose-50 text-rose-700'
@@ -400,11 +400,11 @@ export function FinanceDashboard() {
             >
               {projectedDiff <= 0 ? (
                 <>
-                  <TrendingDown className="w-3 h-3" /> Under by {fmt(Math.abs(projectedDiff))}
+                  <TrendingDown className="w-3 h-3 shrink-0" /> Under by {fmt(Math.abs(projectedDiff))}
                 </>
               ) : (
                 <>
-                  <TrendingUp className="w-3 h-3" /> Over by {fmt(projectedDiff)}
+                  <TrendingUp className="w-3 h-3 shrink-0" /> Over by {fmt(projectedDiff)}
                 </>
               )}
             </span>
@@ -414,16 +414,16 @@ export function FinanceDashboard() {
         {/* 3. Financial Runway */}
         <div
           onClick={() => navigate('/finance/budget')}
-          className="rounded-2xl border border-slate-200/90 bg-white p-5 cursor-pointer transition-all hover:border-slate-300"
+          className="rounded-2xl border border-slate-200/90 bg-white p-3.5 sm:p-5 cursor-pointer transition-all hover:border-slate-300 min-w-0"
         >
-          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block truncate">
             Runway
           </span>
-          <p className="text-3xl font-black tabular-nums tracking-tight text-slate-900 mt-1">
+          <p className="text-2xl sm:text-3xl font-black tabular-nums tracking-tight text-slate-900 mt-1 truncate">
             {runwayMonths}mo {runwayRemainderWeeks}w
           </p>
           <div className="mt-2">
-            <span className="inline-flex items-center rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-bold text-violet-700">
+            <span className="inline-flex items-center rounded-full bg-violet-50 px-2 py-0.5 text-[10px] sm:text-[11px] font-bold text-violet-700 whitespace-nowrap">
               Until {runwayEndDate}
             </span>
           </div>
@@ -432,16 +432,16 @@ export function FinanceDashboard() {
         {/* 4. Total Liquid Cash */}
         <div
           onClick={() => navigate('/finance/pools')}
-          className="rounded-2xl border border-slate-200/90 bg-white p-5 cursor-pointer transition-all hover:border-slate-300"
+          className="rounded-2xl border border-slate-200/90 bg-white p-3.5 sm:p-5 cursor-pointer transition-all hover:border-slate-300 min-w-0"
         >
-          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block truncate">
             Liquid Cash
           </span>
-          <p className="text-3xl font-black tabular-nums tracking-tight text-slate-900 mt-1">
+          <p className="text-2xl sm:text-3xl font-black tabular-nums tracking-tight text-slate-900 mt-1 truncate">
             {fmt(totalCash)}
           </p>
           <div className="mt-2">
-            <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-700">
+            <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[10px] sm:text-[11px] font-bold text-slate-700 whitespace-nowrap">
               {fmt(nonEmergencyGoalsTotal)} in pots
             </span>
           </div>
@@ -449,7 +449,7 @@ export function FinanceDashboard() {
       </div>
 
       {/* ═══ ROW 2: 2 CLEAN VISUAL CHART WIDGETS ═══ */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4">
         {/* CHART WIDGET 1: THIS WEEK'S DAILY SPEND (MON-SUN BAR CHART) */}
         <div
           onClick={() => navigate('/finance/budget')}

@@ -265,11 +265,43 @@ export default function Layout() {
       </aside>
 
       {/* Main content */}
-      <main className={cn("flex-1 overflow-auto", isMobile && "pt-14 pb-20")}>
+      <main className={cn(
+        "flex-1 min-w-0 w-full overflow-x-hidden",
+        isFinanceRoute && "bg-[#FFF5FA]",
+        isMobile && "pt-14 pb-24"
+      )}>
+        {isMobile && isFinanceRoute && (
+          <div className="bg-white/90 backdrop-blur-md border-b border-slate-200/70 px-3 py-2 flex items-center gap-1.5 overflow-x-auto touch-scroll no-scrollbar">
+            {[
+              { to: '/finance/monthly', label: 'Monthly' },
+              { to: '/finance/budget', label: 'Budget' },
+              { to: '/finance/pools', label: 'Pools' },
+              { to: '/finance/income', label: 'Income' },
+              { to: '/finance/transactions', label: 'Transactions' },
+              { to: '/finance/accounts', label: 'Accounts' },
+            ].map(item => {
+              const active = location.pathname.startsWith(item.to);
+              return (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  className={cn(
+                    "shrink-0 whitespace-nowrap rounded-lg px-2.5 py-1 text-xs font-display font-semibold transition-all",
+                    active
+                      ? "bg-[#FF2EB8] text-white shadow-2xs"
+                      : "text-slate-600 hover:bg-slate-100"
+                  )}
+                >
+                  {item.label}
+                </NavLink>
+              );
+            })}
+          </div>
+        )}
         <div className={cn(
-          "container py-8",
+          "mx-auto w-full",
           (isFinanceRoute || isTravelRoute) ? "max-w-7xl" : "max-w-4xl",
-          isMobile ? "px-3.5 py-4" : "px-4"
+          isMobile ? "px-3.5 py-4" : "px-6 py-8"
         )}>
           <Outlet />
         </div>

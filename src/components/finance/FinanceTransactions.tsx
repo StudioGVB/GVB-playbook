@@ -674,7 +674,7 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
           <button
             key={key}
             onClick={() => setTransferFilter(key)}
-            className={`px-3 py-1 rounded-full text-xs font-medium transition-colors border ${
+            className={`shrink-0 whitespace-nowrap px-3 py-1 rounded-full text-xs font-medium transition-colors border ${
               transferFilter === key
                 ? 'bg-primary text-primary-foreground border-primary'
                 : 'bg-card text-muted-foreground border-border hover:border-primary/40'

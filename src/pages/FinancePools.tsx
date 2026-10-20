@@ -847,24 +847,24 @@ export default function FinancePoolsPage() {
 
   if (finance.loading || assumptionsLoading) {
     return (
-      <div className="space-y-6 w-full font-body -mx-4 sm:-mx-6 -my-6 px-4 sm:px-6 py-6 min-h-screen bg-[#FFF5FA]">
-        <h1 className="text-3xl sm:text-4xl font-display font-bold text-slate-900 tracking-tight">Money Pools</h1>
+      <div className="space-y-6 w-full font-body">
+        <h1 className="text-2xl sm:text-4xl font-display font-bold text-slate-900 tracking-tight">Money Pools</h1>
         <div className="text-muted-foreground animate-pulse">Loading...</div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6 w-full font-body -mx-4 sm:-mx-6 -my-6 px-4 sm:px-6 py-6 min-h-screen bg-[#FFF5FA]">
-      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2">
+    <div className="space-y-6 w-full font-body">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
         <div>
-          <h1 className="text-3xl sm:text-4xl font-display font-bold text-slate-900 tracking-tight">Money Pools</h1>
-          <p className="text-muted-foreground text-sm">Every dollar has a job — allocate your cash into pools</p>
+          <h1 className="text-2xl sm:text-4xl font-display font-bold text-slate-900 tracking-tight">Money Pools</h1>
+          <p className="text-muted-foreground text-xs sm:text-sm">Every dollar has a job — allocate your cash into pools</p>
         </div>
         <Button
           variant="outline"
           size="sm"
-          className="gap-1.5 h-9"
+          className="gap-1.5 h-8 sm:h-9 text-xs"
           onClick={() => setMoveOpen(true)}
         >
           <ArrowRightLeft className="w-3.5 h-3.5" /> Move Funds
@@ -872,32 +872,34 @@ export default function FinancePoolsPage() {
       </div>
 
       <Tabs defaultValue={initialTab} className="space-y-5">
-        <TabsList className="bg-white/90 backdrop-blur-md p-1 rounded-xl w-fit h-auto shadow-xs border border-slate-200/80 gap-1 flex-wrap">
-          <TabsTrigger
-            value="pools"
-            className="px-3.5 py-1.5 rounded-lg font-display font-semibold text-xs text-slate-600 hover:text-slate-900 hover:bg-slate-100/70 data-[state=active]:bg-[#FF2EB8] data-[state=active]:text-white data-[state=active]:shadow-xs transition-all"
-          >
-            Money Pools
-          </TabsTrigger>
-          <TabsTrigger
-            value="balance-sheet"
-            className="px-3.5 py-1.5 rounded-lg font-display font-semibold text-xs text-slate-600 hover:text-slate-900 hover:bg-slate-100/70 data-[state=active]:bg-[#FF2EB8] data-[state=active]:text-white data-[state=active]:shadow-xs transition-all"
-          >
-            Balance Sheet & Net Worth
-          </TabsTrigger>
-          <TabsTrigger
-            value="allocate"
-            className="px-3.5 py-1.5 rounded-lg font-display font-semibold text-xs text-slate-600 hover:text-slate-900 hover:bg-slate-100/70 data-[state=active]:bg-[#FF2EB8] data-[state=active]:text-white data-[state=active]:shadow-xs transition-all"
-          >
-            Allocate Leftover
-          </TabsTrigger>
-          <TabsTrigger
-            value="can-i-buy"
-            className="px-3.5 py-1.5 rounded-lg font-display font-semibold text-xs text-slate-600 hover:text-slate-900 hover:bg-slate-100/70 data-[state=active]:bg-[#FF2EB8] data-[state=active]:text-white data-[state=active]:shadow-xs transition-all"
-          >
-            Can I Buy This?
-          </TabsTrigger>
-        </TabsList>
+        <div className="overflow-x-auto touch-scroll max-w-full">
+          <TabsList className="bg-white/90 backdrop-blur-md p-1 rounded-xl inline-flex min-w-max h-auto shadow-xs border border-slate-200/80 gap-1">
+            <TabsTrigger
+              value="pools"
+              className="px-3 py-1.5 rounded-lg font-display font-semibold text-xs text-slate-600 hover:text-slate-900 hover:bg-slate-100/70 data-[state=active]:bg-[#FF2EB8] data-[state=active]:text-white data-[state=active]:shadow-xs transition-all whitespace-nowrap"
+            >
+              Money Pools
+            </TabsTrigger>
+            <TabsTrigger
+              value="balance-sheet"
+              className="px-3 py-1.5 rounded-lg font-display font-semibold text-xs text-slate-600 hover:text-slate-900 hover:bg-slate-100/70 data-[state=active]:bg-[#FF2EB8] data-[state=active]:text-white data-[state=active]:shadow-xs transition-all whitespace-nowrap"
+            >
+              Balance Sheet & Net Worth
+            </TabsTrigger>
+            <TabsTrigger
+              value="allocate"
+              className="px-3 py-1.5 rounded-lg font-display font-semibold text-xs text-slate-600 hover:text-slate-900 hover:bg-slate-100/70 data-[state=active]:bg-[#FF2EB8] data-[state=active]:text-white data-[state=active]:shadow-xs transition-all whitespace-nowrap"
+            >
+              Allocate Leftover
+            </TabsTrigger>
+            <TabsTrigger
+              value="can-i-buy"
+              className="px-3 py-1.5 rounded-lg font-display font-semibold text-xs text-slate-600 hover:text-slate-900 hover:bg-slate-100/70 data-[state=active]:bg-[#FF2EB8] data-[state=active]:text-white data-[state=active]:shadow-xs transition-all whitespace-nowrap"
+            >
+              Can I Buy This?
+            </TabsTrigger>
+          </TabsList>
+        </div>
 
         <TabsContent value="pools" className="space-y-6">
           {/* Paycheck Landed Auto-Allocation Banner */}

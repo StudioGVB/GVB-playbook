@@ -630,7 +630,7 @@ export default function FinanceBudget() {
           : `Spending pace is ${fmt(combinedDailyPace)}/day — within budget`);
 
   return (
-    <div className="space-y-8 font-body -mx-4 sm:-mx-6 -my-6 px-4 sm:px-6 py-6 min-h-screen bg-[#FFF5FA]">
+    <div className="space-y-6 sm:space-y-8 w-full font-body">
       {/* Utility bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex items-center gap-3">

@@ -444,12 +444,12 @@ export default function FinanceIncome() {
   };
 
   return (
-    <div className="min-h-screen -mx-4 sm:-mx-6 -my-6 px-4 sm:px-6 py-6 bg-[#FFF5FA] font-body">
+    <div className="w-full font-body">
       <div className="max-w-6xl mx-auto space-y-6">
         {/* Header & Sub-Page Tabs */}
         <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
           <div>
-            <h1 className="text-3xl sm:text-4xl font-display font-bold text-slate-900 tracking-tight">
+            <h1 className="text-2xl sm:text-4xl font-display font-bold text-slate-900 tracking-tight">
               Income &amp; Reimbursements
             </h1>
             <p className="text-slate-500 mt-1">Track earned cash and double-check out-of-pocket work travel claims.</p>

@@ -294,12 +294,12 @@ export default function Meals() {
   }
 
   return (
-    <div className="min-h-screen -mx-4 sm:-mx-6 -my-6 px-4 sm:px-6 py-6 bg-background font-body">
+    <div className="w-full font-body">
       <div className="max-w-6xl mx-auto space-y-6">
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
           <div>
-            <h1 className="text-3xl sm:text-4xl font-display font-bold text-foreground tracking-tight">Meal Flipbook</h1>
+            <h1 className="text-2xl sm:text-4xl font-display font-bold text-foreground tracking-tight">Meal Flipbook</h1>
             <p className="text-muted-foreground mt-1">Mix a base, a meat, and a side. See what dinner costs.</p>
           </div>
           <div className="flex items-center gap-2">

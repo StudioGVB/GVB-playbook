@@ -257,12 +257,12 @@ export default function FinanceBalanceSheet() {
     : (finance.assumptions?.estimated_essential_variable || 400);
 
   return (
-    <div className="min-h-screen -mx-4 sm:-mx-6 -my-6 px-4 sm:px-6 py-6 bg-[#FFF5FA] font-body">
+    <div className="w-full font-body">
       <div className="max-w-6xl mx-auto space-y-6">
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
           <div>
-            <h1 className="text-3xl sm:text-4xl font-display font-bold text-slate-900 tracking-tight">
+            <h1 className="text-2xl sm:text-4xl font-display font-bold text-slate-900 tracking-tight">
               Balance Sheet
             </h1>
             <p className="text-slate-500 mt-1">In vs out — the monthly candy count.</p>
