@@ -6,6 +6,7 @@ import {
   TrendingDown,
   ChevronRight,
   Loader2,
+  RefreshCw,
 } from 'lucide-react';
 import { useFinanceData } from '@/hooks/useFinanceData';
 import { useFinanceAssumptions } from '@/hooks/useFinanceAssumptions';
@@ -47,7 +48,25 @@ export function FinanceDashboard() {
   const [wiseStatus, setWiseStatus] = useState<{ connected: boolean; error?: string } | null>(null);
   const [monzoStatus, setMonzoStatus] = useState<{ connected: boolean; error?: string } | null>(null);
   const [loadingStatus, setLoadingStatus] = useState(true);
+  const [syncingBanks, setSyncingBanks] = useState(false);
   const [showMondayPreview, setShowMondayPreview] = useState(false);
+
+  const handleSyncBanks = async () => {
+    setSyncingBanks(true);
+    try {
+      const tasks: Promise<any>[] = [];
+      if (finance.syncUpTransactions) tasks.push(finance.syncUpTransactions({ skipAutoCategorize: true }));
+      if (finance.syncWiseTransactions) tasks.push(finance.syncWiseTransactions(undefined, { skipAutoCategorize: true }));
+      if (finance.syncMonzoTransactions && finance.accounts.some(a => a.provider === 'monzo')) {
+        tasks.push(finance.syncMonzoTransactions(undefined, { skipAutoCategorize: true }));
+      }
+      await Promise.allSettled(tasks);
+      await finance.categorizeTransactions();
+      await finance.refetch();
+    } finally {
+      setSyncingBanks(false);
+    }
+  };
 
   useEffect(() => {
     async function checkStatuses() {
@@ -302,6 +321,16 @@ export function FinanceDashboard() {
                 <span>{b.label}</span>
               </div>
             ))}
+            <button
+              type="button"
+              onClick={handleSyncBanks}
+              disabled={syncingBanks}
+              className="ml-1 pl-2 border-l border-slate-200 inline-flex items-center gap-1 text-[10px] font-bold text-[#FF2EB8] hover:opacity-80 disabled:opacity-50 cursor-pointer"
+              title="Sync latest transactions from Up, Wise & Monzo"
+            >
+              <RefreshCw className={`w-3 h-3 ${syncingBanks ? 'animate-spin' : ''}`} />
+              <span>{syncingBanks ? 'Syncing' : 'Sync'}</span>
+            </button>
           </div>
 
           {now.getDay() !== 1 && (

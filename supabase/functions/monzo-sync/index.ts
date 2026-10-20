@@ -259,9 +259,12 @@ serve(async (req) => {
         merchant,
         amount: rawAmount,
         currency: tx.currency || 'GBP',
+        category_id: null as string | null,
         is_transfer: isSalary,
-        transfer_side: isSalary ? 'in' : undefined,
-        transfer_status: isSalary ? 'auto_confirmed' : undefined,
+        transfer_side: isSalary ? 'in' : null,
+        transfer_status: isSalary ? 'auto_confirmed' : null,
+        goal_id: null as string | null,
+        is_fixed: false,
         transaction_fingerprint: fingerprint,
         raw: {
           category: tx.category || null,
@@ -279,6 +282,8 @@ serve(async (req) => {
           .select('account_id, external_transaction_id, transaction_fingerprint, category_id, is_transfer, goal_id, is_fixed')
           .eq('user_id', userId)
           .in('account_id', dbAccountIds)
+          .order('posted_at', { ascending: false })
+          .limit(5000)
       : { data: [], error: null }
 
     if (existingTxError) {
@@ -309,12 +314,12 @@ serve(async (req) => {
       if (existingExternalIds.has(externalKey)) {
         const existing = existingMap.get(externalKey)
         if (existing) {
-          (row as any).category_id = existing.category_id !== undefined ? existing.category_id : null
+          row.category_id = existing.category_id ?? null
           if (existing.is_transfer !== undefined && existing.is_transfer !== null) {
             row.is_transfer = existing.is_transfer
           }
-          if (existing.goal_id !== undefined) (row as any).goal_id = existing.goal_id
-          if (existing.is_fixed !== undefined) (row as any).is_fixed = existing.is_fixed
+          row.goal_id = existing.goal_id ?? null
+          row.is_fixed = existing.is_fixed ?? false
         }
         rowsToUpsert.push(row)
       } else if (existingFingerprints.has(row.transaction_fingerprint)) {
@@ -323,21 +328,33 @@ serve(async (req) => {
         // Skip duplicate in current batch
       } else {
         dedupedNewTransactions.set(row.transaction_fingerprint, row)
-        rowsToUpsert.push(row)
+        rowsToUpsert.unshift(row)
       }
     }
 
     let transactionsImported = 0
     if (rowsToUpsert.length > 0) {
-      const { data: upsertedTx, error: txError } = await supabase
-        .from('finance_transactions')
-        .upsert(rowsToUpsert, { onConflict: 'account_id,external_transaction_id', ignoreDuplicates: false })
-        .select('id')
+      for (let i = 0; i < rowsToUpsert.length; i += 100) {
+        const chunk = rowsToUpsert.slice(i, i + 100)
+        const { data: upsertedTx, error: txError } = await supabase
+          .from('finance_transactions')
+          .upsert(chunk, { onConflict: 'account_id,external_transaction_id', ignoreDuplicates: false })
+          .select('id')
 
-      if (txError) {
-        console.error('Monzo transactions upsert failed:', txError.message)
-      } else {
-        transactionsImported = upsertedTx?.length || 0
+        if (txError) {
+          console.error('Monzo transactions chunk upsert failed, falling back to single-row:', txError.message)
+          for (const row of chunk) {
+            const { data: singleTx, error: singleErr } = await supabase
+              .from('finance_transactions')
+              .upsert([row], { onConflict: 'account_id,external_transaction_id', ignoreDuplicates: false })
+              .select('id')
+            if (!singleErr && singleTx) {
+              transactionsImported += singleTx.length
+            }
+          }
+        } else {
+          transactionsImported += upsertedTx?.length || 0
+        }
       }
     }
 

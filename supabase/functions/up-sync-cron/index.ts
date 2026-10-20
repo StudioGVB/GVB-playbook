@@ -165,10 +165,12 @@ serve(async (req) => {
             merchant: rawText || null,
             amount: rawAmount,
             currency: tx.attributes.amount?.currencyCode || 'AUD',
-            category_id: isVentureIncome ? ventureCatId : undefined,
+            category_id: isVentureIncome ? ventureCatId : null,
             is_transfer: !isVentureIncome && hasTransferRelation,
-            transfer_side: undefined,
-            transfer_status: undefined,
+            transfer_side: null as string | null,
+            transfer_status: null as string | null,
+            goal_id: null as string | null,
+            is_fixed: false,
             transaction_fingerprint: fingerprint,
             raw: {
               category: tx.relationships?.category?.data?.id || null,
@@ -188,6 +190,8 @@ serve(async (req) => {
               .select('account_id, external_transaction_id, transaction_fingerprint, category_id, is_transfer, goal_id, is_fixed')
               .eq('user_id', userId)
               .in('account_id', dbAccountIds)
+              .order('posted_at', { ascending: false })
+              .limit(5000)
           : { data: [] }
 
         const existingMap = new Map<string, any>()
@@ -214,12 +218,12 @@ serve(async (req) => {
           if (existingExternalIds.has(externalKey)) {
             const existing = existingMap.get(externalKey)
             if (existing) {
-              row.category_id = existing.category_id !== undefined ? existing.category_id : null
+              row.category_id = existing.category_id ?? null
               if (existing.is_transfer !== undefined && existing.is_transfer !== null) {
                 row.is_transfer = existing.is_transfer
               }
-              if (existing.goal_id !== undefined) (row as any).goal_id = existing.goal_id
-              if (existing.is_fixed !== undefined) (row as any).is_fixed = existing.is_fixed
+              row.goal_id = existing.goal_id ?? null
+              row.is_fixed = existing.is_fixed ?? false
             }
             rowsToUpsert.push(row)
             continue
@@ -242,18 +246,28 @@ serve(async (req) => {
           duplicateCount++
         }
 
-        rowsToUpsert.push(...dedupedNewTransactions.values())
+        // Put NEW transactions first so they are always imported first!
+        rowsToUpsert.unshift(...dedupedNewTransactions.values())
 
         let importedCount = 0
         if (rowsToUpsert.length > 0) {
-          for (let i = 0; i < rowsToUpsert.length; i += 200) {
-            const chunk = rowsToUpsert.slice(i, i + 200)
+          for (let i = 0; i < rowsToUpsert.length; i += 100) {
+            const chunk = rowsToUpsert.slice(i, i + 100)
             const { error: txError, data: txData } = await supabase
               .from('finance_transactions')
               .upsert(chunk, { onConflict: 'account_id,external_transaction_id', ignoreDuplicates: false })
               .select('id')
             if (txError) {
-              console.error(`Tx upsert failed for ${userId}:`, txError.message)
+              console.error(`Tx chunk upsert failed for ${userId}, falling back to single-row:`, txError.message)
+              for (const row of chunk) {
+                const { data: singleTx, error: singleErr } = await supabase
+                  .from('finance_transactions')
+                  .upsert([row], { onConflict: 'account_id,external_transaction_id', ignoreDuplicates: false })
+                  .select('id')
+                if (!singleErr && singleTx) {
+                  importedCount += singleTx.length
+                }
+              }
             } else {
               importedCount += txData?.length || 0
             }

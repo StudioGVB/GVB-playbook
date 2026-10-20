@@ -245,7 +245,7 @@ export function useFinanceDataState() {
       const [accRes, catRes, txRes, goalRes, planRes, setRes, logRes, tagRes] = await Promise.all([
         supabase.from('finance_accounts').select('*').order('created_at'),
         supabase.from('finance_categories').select('*').order('name'),
-        supabase.from('finance_transactions').select('*').order('posted_at', { ascending: false }),
+        supabase.from('finance_transactions').select('*').order('posted_at', { ascending: false }).limit(5000),
         supabase.from('finance_goals').select('*').order('priority'),
         supabase.from('finance_goal_plans').select('*').order('created_at', { ascending: false }),
         supabase.from('finance_settings').select('*').eq('user_id', user.id).maybeSingle(),
@@ -520,6 +520,32 @@ export function useFinanceDataState() {
   }, [user]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  const autoSyncRef = useRef(false);
+  useEffect(() => {
+    if (!user || autoSyncRef.current) return;
+    autoSyncRef.current = true;
+    (async () => {
+      try {
+        const session = await supabase.auth.getSession();
+        const token = session.data.session?.access_token;
+        if (!token) return;
+        const headers = {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        };
+        const wiseToken = localStorage.getItem('gvb_wise_api_token') || undefined;
+        await Promise.allSettled([
+          fetch(`${SUPABASE_URL}/functions/v1/up-sync`, { method: 'POST', headers, body: JSON.stringify({}) }),
+          fetch(`${SUPABASE_URL}/functions/v1/wise-sync`, { method: 'POST', headers, body: JSON.stringify({ token: wiseToken }) }),
+        ]);
+        await fetch(`${SUPABASE_URL}/functions/v1/finance-categorize`, { method: 'POST', headers, body: JSON.stringify({}) });
+        await fetchAll();
+      } catch (err) {
+        console.warn('[auto-sync] Background bank sync skipped:', err);
+      }
+    })();
+  }, [user, fetchAll]);
 
   // -- Mutations --
   const addAccount = async (acc: { account_name: string; currency: string; provider?: string; balance?: number }) => {
