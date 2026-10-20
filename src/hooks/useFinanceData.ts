@@ -521,6 +521,29 @@ export function useFinanceDataState() {
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
+  const prepareUpTransactionsForSync = useCallback(async () => {
+    if (!user) return;
+    try {
+      const { data: upAccs } = await supabase
+        .from('finance_accounts')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('provider', 'up');
+      const upAccIds = (upAccs || []).map(a => a.id);
+      if (upAccIds.length > 0) {
+        await supabase
+          .from('finance_transactions')
+          .update({ external_transaction_id: null } as any)
+          .eq('user_id', user.id)
+          .in('account_id', upAccIds)
+          .not('transaction_fingerprint', 'is', null)
+          .not('external_transaction_id', 'is', null);
+      }
+    } catch (err) {
+      console.warn('[up-sync-prep] Failed to prepare Up transactions:', err);
+    }
+  }, [user]);
+
   const autoSyncRef = useRef(false);
   useEffect(() => {
     if (!user || autoSyncRef.current) return;
@@ -534,18 +557,20 @@ export function useFinanceDataState() {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
         };
+        await prepareUpTransactionsForSync();
         const wiseToken = localStorage.getItem('gvb_wise_api_token') || undefined;
         await Promise.allSettled([
           fetch(`${SUPABASE_URL}/functions/v1/up-sync`, { method: 'POST', headers, body: JSON.stringify({}) }),
           fetch(`${SUPABASE_URL}/functions/v1/wise-sync`, { method: 'POST', headers, body: JSON.stringify({ token: wiseToken }) }),
         ]);
+        await prepareUpTransactionsForSync();
         await fetch(`${SUPABASE_URL}/functions/v1/finance-categorize`, { method: 'POST', headers, body: JSON.stringify({}) });
         await fetchAll();
       } catch (err) {
         console.warn('[auto-sync] Background bank sync skipped:', err);
       }
     })();
-  }, [user, fetchAll]);
+  }, [user, fetchAll, prepareUpTransactionsForSync]);
 
   // -- Mutations --
   const addAccount = async (acc: { account_name: string; currency: string; provider?: string; balance?: number }) => {
@@ -884,6 +909,8 @@ export function useFinanceDataState() {
         return;
       }
 
+      await prepareUpTransactionsForSync();
+
       const response = await fetch(`${SUPABASE_URL}/functions/v1/up-sync`, {
         method: 'POST',
         headers: {
@@ -898,6 +925,8 @@ export function useFinanceDataState() {
         toast.error(data.error || 'Sync failed');
         return;
       }
+
+      await prepareUpTransactionsForSync();
 
       toast.success(`Synced ${data.accountsSynced} accounts, ${data.transactionsImported} transactions`);
       
