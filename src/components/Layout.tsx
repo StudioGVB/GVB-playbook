@@ -267,37 +267,9 @@ export default function Layout() {
       {/* Main content */}
       <main className={cn(
         "flex-1 min-w-0 w-full overflow-x-hidden",
-        isFinanceRoute && "bg-[#FFF5FA]",
+        (isFinanceRoute || location.pathname === '/') && "bg-[#FFF5FA]",
         isMobile && "pt-14 pb-24"
       )}>
-        {isMobile && isFinanceRoute && (
-          <div className="bg-white/90 backdrop-blur-md border-b border-slate-200/70 px-3 py-2 flex items-center gap-1.5 overflow-x-auto touch-scroll no-scrollbar">
-            {[
-              { to: '/finance/monthly', label: 'Monthly' },
-              { to: '/finance/budget', label: 'Budget' },
-              { to: '/finance/pools', label: 'Pools' },
-              { to: '/finance/income', label: 'Income' },
-              { to: '/finance/transactions', label: 'Transactions' },
-              { to: '/finance/accounts', label: 'Accounts' },
-            ].map(item => {
-              const active = location.pathname.startsWith(item.to);
-              return (
-                <NavLink
-                  key={item.to}
-                  to={item.to}
-                  className={cn(
-                    "shrink-0 whitespace-nowrap rounded-lg px-2.5 py-1 text-xs font-display font-semibold transition-all",
-                    active
-                      ? "bg-[#FF2EB8] text-white shadow-2xs"
-                      : "text-slate-600 hover:bg-slate-100"
-                  )}
-                >
-                  {item.label}
-                </NavLink>
-              );
-            })}
-          </div>
-        )}
         <div className={cn(
           "mx-auto w-full",
           (isFinanceRoute || isTravelRoute) ? "max-w-7xl" : "max-w-4xl",
@@ -307,29 +279,29 @@ export default function Layout() {
         </div>
       </main>
 
-      {/* Mobile Bottom Navigation Bar */}
+      {/* Mobile Bottom Navigation Bar — Finance Pages Only */}
       {isMobile && (
-        <nav className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200/80 px-1.5 py-1 flex items-center justify-around shadow-lg pb-[max(0.35rem,env(safe-area-inset-bottom))]">
+        <nav className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200/80 px-2 pt-1.5 flex items-stretch justify-around gap-1 shadow-lg pb-[max(0.5rem,env(safe-area-inset-bottom))]">
           {[
-            { to: '/', icon: Home, label: 'Home' },
-            { to: '/tasks', icon: CheckSquare, label: 'Tasks' },
-            { to: '/finance/monthly', icon: TrendingUp, label: 'Finance' },
-            { to: '/travel', icon: Plane, label: 'Travel' },
-            { to: '/projects', icon: FolderKanban, label: 'Projects' },
-          ].map(({ to, icon: Icon, label }) => {
-            const rootSection = to === '/' ? '/' : `/${to.split('/')[1]}`;
-            const isActive = to === '/' ? location.pathname === '/' : location.pathname.startsWith(rootSection);
+            { to: '/', icon: Home, label: 'Home', exact: true },
+            { to: '/finance/budget', icon: Wallet, label: 'Daily', exact: false },
+            { to: '/finance/monthly', icon: CalendarDays, label: 'Monthly', exact: false },
+            { to: '/finance/transactions', icon: Receipt, label: 'Transactions', exact: false },
+          ].map(({ to, icon: Icon, label, exact }) => {
+            const isActive = exact ? location.pathname === '/' : location.pathname.startsWith(to);
             return (
               <NavLink
                 key={to}
                 to={to}
                 className={cn(
-                  "flex flex-col items-center justify-center py-1 px-2 rounded-xl transition-all min-w-[56px] min-h-[44px]",
-                  isActive ? "text-[#FF2EB8] font-bold" : "text-slate-500 hover:text-slate-800"
+                  "flex-1 flex flex-col items-center justify-center py-2 px-1 rounded-2xl transition-all min-h-[54px] active:scale-95",
+                  isActive
+                    ? "bg-[#FF2EB8]/10 text-[#FF2EB8] font-bold"
+                    : "text-slate-500 hover:text-slate-900"
                 )}
               >
-                <Icon className={cn("w-5 h-5 transition-transform", isActive && "scale-110")} />
-                <span className="text-[10px] mt-0.5 tracking-tight font-display">{label}</span>
+                <Icon className={cn("w-5 h-5 transition-transform", isActive && "scale-110 stroke-[2.5]")} />
+                <span className="text-xs mt-1 tracking-tight font-display font-semibold">{label}</span>
               </NavLink>
             );
           })}
