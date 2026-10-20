@@ -593,8 +593,8 @@ export default function FinanceBudget() {
   const weekNetDifference = totalWeeklyBudget - totalWeeklySpent;
 
   const pulseSegments = [
-    { label: 'Essentials spent', value: Math.min(essentialSpentThisWeek, essentialWeeklyBudget), color: '#8B5CF6' },
-    { label: 'Fun spent', value: Math.min(effectiveFunSpent, snapshot.weeklyFunBudget), color: 'hsl(142, 71%, 45%)' },
+    { label: 'Essentials spent', value: Math.min(essentialSpentThisWeek, essentialWeeklyBudget), color: '#0ea5e9' },
+    { label: 'Fun spent', value: Math.min(effectiveFunSpent, snapshot.weeklyFunBudget), color: '#FF2EB8' },
   ];
   const pulseUsed = pulseSegments.reduce((s, x) => s + x.value, 0);
   const pulseRemaining = Math.max(0, totalWeeklyBudget - pulseUsed);
@@ -1004,23 +1004,23 @@ export default function FinanceBudget() {
                       <div className="w-full rounded-t bg-muted/40" style={{ height: '8%' }} />
                     ) : (
                       <>
-                        {/* Fun (green) on top */}
+                        {/* Fun (pink) on top */}
                         {day.fun > 0 && (
                           <div
                             className="w-full rounded-t transition-all group-hover:brightness-110"
                             style={{
                               height: `${Math.max(funHeight, 4)}%`,
-                              backgroundColor: 'hsl(142, 71%, 45%)',
+                              backgroundColor: '#FF2EB8',
                             }}
                           />
                         )}
-                        {/* Essential (pink) on bottom */}
+                        {/* Essential (blue) on bottom */}
                         {day.essential > 0 && (
                           <div
                             className={`w-full transition-all group-hover:brightness-110 ${day.fun <= 0 ? 'rounded-t' : ''}`}
                             style={{
                               height: `${Math.max(essentialHeight, 4)}%`,
-                              backgroundColor: '#8B5CF6',
+                              backgroundColor: '#0ea5e9',
                             }}
                           />
                         )}
@@ -1039,11 +1039,11 @@ export default function FinanceBudget() {
           </div>
           <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
             <div className="flex items-center gap-1">
-              <div className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: '#8B5CF6' }} />
+              <div className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: '#0ea5e9' }} />
               <span>Essentials</span>
             </div>
             <div className="flex items-center gap-1">
-              <div className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: 'hsl(142, 71%, 45%)' }} />
+              <div className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: '#FF2EB8' }} />
               <span>Fun</span>
             </div>
             <div className="ml-auto flex items-center gap-1.5">

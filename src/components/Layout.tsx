@@ -266,7 +266,7 @@ export default function Layout() {
 
       {/* Main content */}
       <main className={cn(
-        "flex-1 min-w-0 w-full overflow-x-hidden",
+        "flex-1 min-w-0 overflow-y-auto overflow-x-clip",
         (isFinanceRoute || location.pathname === '/') && "bg-[#FFF5FA]",
         isMobile && "pt-14 pb-24"
       )}>
