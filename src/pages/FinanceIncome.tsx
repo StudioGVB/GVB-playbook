@@ -341,32 +341,31 @@ export default function FinanceIncome() {
     });
     const vaData = vaBucket ? (bucketed[vaBucket.key] || { total: 0, count: 0, txs: [] }) : { total: 0, count: 0, txs: [] };
 
-    // Estimate typical single weekly VA payment from recent VA deposits (fallback ~£72.80)
-    const allVaTxs = transactions.filter(tx => {
-      if (tx.amount <= 0 || tx.is_reimbursable) return false;
-      if (vaBucket && tx.category_id === vaBucket.categoryId) return true;
-      const hay = `${tx.merchant || ''} ${tx.description || ''}`.toLowerCase();
-      return hay.includes('batchbase') || hay.includes('batch base') || hay.includes('venture') || hay.includes('advisory');
-    });
-
-    const singlePaymentCandidates = allVaTxs
-      .map(tx => baseAmt(tx))
-      .filter(amt => amt >= 45 && amt <= 110);
-
-    const typicalVaWeekly = singlePaymentCandidates.length > 0
-      ? singlePaymentCandidates.slice(0, 6).reduce((s, a) => s + a, 0) / Math.min(6, singlePaymentCandidates.length)
-      : 72.80;
-
     // Count how many weekly payment equivalents have already landed this month
-    // (e.g. if a double £140 payment landed, that covers 2 weeks)
+    // (e.g. if a double £140+ payment landed, that covers 2 Thursdays)
     const effectiveWeeksLanded = vaData.txs.reduce((acc, tx) => {
       const amt = baseAmt(tx);
-      if (amt >= typicalVaWeekly * 1.6) return acc + Math.round(amt / typicalVaWeekly);
+      if (amt >= 120) return acc + Math.round(amt / 72.8);
       return acc + 1;
     }, 0);
 
-    // Total weekly VA payments in the month (4 weeks standard, or more if already exceeded)
-    const totalExpectedWeeks = Math.max(4, effectiveWeeksLanded);
+    // Use this month's actual weekly VA payment rate if landed (e.g. £218.40 / 3 = £72.80), otherwise fallback to £72.80
+    const typicalVaWeekly = effectiveWeeksLanded > 0
+      ? vaData.total / effectiveWeeksLanded
+      : 72.80;
+
+    // Count actual Thursdays (day 4) in the selected month
+    let thursdaysInMonth = 0;
+    const cursor = new Date(monthStart.getFullYear(), monthStart.getMonth(), 1);
+    const lastDay = monthEnd.getDate();
+    for (let d = 1; d <= lastDay; d++) {
+      cursor.setDate(d);
+      if (cursor.getDay() === 4) {
+        thursdaysInMonth += 1;
+      }
+    }
+
+    const totalExpectedWeeks = Math.max(thursdaysInMonth, effectiveWeeksLanded);
     const isPastMonth = monthOffset < 0;
     const remainingWeeks = isPastMonth ? 0 : Math.max(0, totalExpectedWeeks - effectiveWeeksLanded);
     const remainingVaAmount = remainingWeeks * typicalVaWeekly;
@@ -384,7 +383,7 @@ export default function FinanceIncome() {
       fullMonthVaExpected,
       expectedMonthlyTotal,
     };
-  }, [BUCKETS, bucketed, transactions, monthOffset, grandTotalWithReimbursements]);
+  }, [BUCKETS, bucketed, monthStart, monthEnd, monthOffset, grandTotalWithReimbursements]);
 
   // --- Work Travel Reimbursements Logic ---
   const allReimbursements = useMemo(() => (
@@ -1237,7 +1236,7 @@ export default function FinanceIncome() {
                     {formatCurrency(grandTotalWithReimbursements, baseCurrency)}
                   </p>
                   <p className="text-[11px] text-emerald-800/80 font-medium mt-1">
-                    Incl. {formatCurrency(vaProjection.vaLandedTotal, baseCurrency)} VA landed ({vaProjection.vaLandedCount}/{vaProjection.totalExpectedWeeks} wks)
+                    Incl. {formatCurrency(vaProjection.vaLandedTotal, baseCurrency)} VA landed ({vaProjection.vaLandedCount}/{vaProjection.totalExpectedWeeks} Thursdays)
                   </p>
                 </div>
 
@@ -1252,8 +1251,8 @@ export default function FinanceIncome() {
                   </p>
                   <p className="text-[11px] text-sky-800/80 font-medium mt-1">
                     {vaProjection.remainingWeeks > 0
-                      ? `${vaProjection.remainingWeeks} weekly payment${vaProjection.remainingWeeks === 1 ? '' : 's'} left (~${formatCurrency(vaProjection.typicalVaWeekly, baseCurrency)}/wk)`
-                      : 'All expected weekly VA payments have landed ✓'}
+                      ? `${vaProjection.remainingWeeks} Thursday payment${vaProjection.remainingWeeks === 1 ? '' : 's'} left (~${formatCurrency(vaProjection.typicalVaWeekly, baseCurrency)}/wk)`
+                      : 'All expected Thursday VA payments have landed ✓'}
                   </p>
                 </div>
 
@@ -1267,7 +1266,7 @@ export default function FinanceIncome() {
                     {formatCurrency(vaProjection.expectedMonthlyTotal, baseCurrency)}
                   </p>
                   <p className="text-[11px] text-slate-500 font-medium mt-1">
-                    Total VA for month: {formatCurrency(vaProjection.fullMonthVaExpected, baseCurrency)} ({vaProjection.totalExpectedWeeks} wks)
+                    Total VA for month: {formatCurrency(vaProjection.fullMonthVaExpected, baseCurrency)} ({vaProjection.totalExpectedWeeks} Thursdays)
                   </p>
                 </div>
               </div>
