@@ -198,7 +198,7 @@ export default function FinanceCostOfLiving() {
           const daysLeft = Math.max(1, Math.ceil((dl.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
           const weeksLeft = Math.max(1, daysLeft / 7);
           weeklyPace = Math.min(remainingBase, remainingBase / weeksLeft);
-          monthlyPace = weeklyPace * 4.33;
+          monthlyPace = Math.min(remainingBase, weeklyPace * 4.33);
         } else if (g.percent_allocation && g.percent_allocation > 0 && effectiveIncome > 0) {
           monthlyPace = Math.min(remainingBase, (g.percent_allocation / 100) * effectiveIncome);
           weeklyPace = monthlyPace / 4.33;

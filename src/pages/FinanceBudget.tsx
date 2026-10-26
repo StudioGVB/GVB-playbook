@@ -9,7 +9,7 @@ import { useFixedExpensePayments } from '@/hooks/useFixedExpensePayments';
 import { useWeeklyBoosts } from '@/hooks/useWeeklyBoosts';
 import { useWeekTypes } from '@/hooks/useWeekTypes';
 import { useFinanceTrips } from '@/hooks/useFinanceTrips';
-import { computePolicySnapshot, computeActualSpendingIncome } from '@/lib/policyEngine';
+import { computePolicySnapshot, computeActualSpendingIncome, computeWeekVariableSpend } from '@/lib/policyEngine';
 import { parseCoverMeta, planOverspendCover, planUnderspendRepay, type CoverMeta, type CoverStep } from '@/lib/overspendCover';
 import { formatCurrency, baseAmt, parseUkDate } from '@/lib/financeUtils';
 import { subDays, startOfDay, startOfWeek, endOfWeek, differenceInDays, format, addWeeks, subWeeks, isSameWeek, addDays } from 'date-fns';
@@ -221,27 +221,29 @@ export default function FinanceBudget() {
       return;
     }
 
-    const prevWeekEnd = endOfWeek(prevWeekStart, { weekStartsOn: 1 });
-    let prevEssentialSpent = 0;
-    let prevFunSpent = 0;
-    for (const tx of finance.transactions) {
-      if (tx.amount >= 0 || tx.is_transfer || tx.is_fixed || (tx as any).fixed_expense_id || tx.is_reimbursable) continue;
-      if ((tx as any).goal_id) continue;
-      const d = parseUkDate(tx.posted_at);
-      if (d < prevWeekStart || d > prevWeekEnd) continue;
-      const cat = catMap.get(tx.category_id || '');
-      if (cat?.exclude_from_reports || cat?.type === 'fixed' || cat?.type === 'income' || cat?.type === 'transfer') continue;
-      const amt = Math.abs(baseAmt(tx));
-      if (essentialCatIds.has(tx.category_id || '')) {
-        prevEssentialSpent += amt;
-      } else {
-        prevFunSpent += amt;
-      }
-    }
+    const prevWeekSpend = computeWeekVariableSpend(finance.transactions, finance.categories, prevWeekStart, trips);
+    const prevEssentialSpent = prevWeekSpend.essentialSpent;
+    const prevFunSpent = prevWeekSpend.funSpent;
+    const prevWeekBoost = boosts
+      .filter(b => b.week_start === prevWeekKey)
+      .reduce((sum, b) => sum + b.amount, 0);
+    const prevWeekSnapshot = computePolicySnapshot(
+      assumptions,
+      finance.accounts,
+      finance.transactions,
+      finance.categories,
+      finance.goals,
+      finance.convertToBase,
+      fixedExpensesMonthly,
+      prevWeekBoost,
+      typeof wtMap === 'function' ? wtMap() : wtMap,
+      trips,
+      fixedExpensesMonthlyAll,
+      prevWeekStart,
+    );
 
-    // Strictly match live weekly budget: dynamic Fun Money from cashflow model + Essentials (no legacy hardcoded overrides)
-    const prevWeekAllowance = snapshot.baseWeeklyFun;
-    const totalBudget = snapshot.weeklyEssentialBudget + prevWeekAllowance;
+    // Strictly match last week's budget: last week's Essentials + Base Fun + last week's Boosts
+    const totalBudget = prevWeekSnapshot.weeklyEssentialBudget + prevWeekSnapshot.baseWeeklyFun + prevWeekBoost;
     const totalSpent = prevEssentialSpent + prevFunSpent;
     const netDifference = totalBudget - totalSpent;
 
@@ -378,15 +380,19 @@ export default function FinanceBudget() {
     finance.categories.filter(c => c.is_essential && c.type === 'variable').map(c => c.id)
   ), [finance.categories]);
 
-  // Categorize transactions from last 28 days
-  const { essentials, funCategories, allVariableCategories, essentialSpentThisWeek, funSpentThisWeek, thisWeekByCategory, thisWeekTxns } = useMemo(() => {
-    const cutoff = startOfDay(subDays(now, 28));
+  // Categorize transactions from last 28 days + unified weekly variable spend
+  const { essentials, funCategories, allVariableCategories, essentialSpentThisWeek, funSpentThisWeek, thisWeekByCategory, thisWeekTxns, dailySpendingStacked } = useMemo(() => {
+    const cutoff = startOfDay(subDays(weekEnd, 28));
     const { transactions } = finance;
 
+    const weekSummary = computeWeekVariableSpend(transactions, finance.categories, weekStart, trips);
+
     const spendTxns = transactions.filter(tx => {
-      if (tx.amount >= 0 || tx.is_transfer) return false;
-      if ((tx as any).goal_id) return false;
-      if (parseUkDate(tx.posted_at) < cutoff) return false;
+      if (tx.amount >= 0 || tx.is_transfer || tx.is_reimbursable) return false;
+      if (tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') return false;
+      if ((tx as any).goal_id || (tx as any).is_travel_spend || (tx as any).trip_id) return false;
+      const d = parseUkDate(tx.posted_at);
+      if (d < cutoff || d > weekEnd) return false;
       const cat = catMap.get(tx.category_id || '');
       if (cat?.exclude_from_reports) return false;
       if (cat?.type === 'fixed' || cat?.type === 'income' || cat?.type === 'transfer') return false;
@@ -413,6 +419,20 @@ export default function FinanceBudget() {
       }
     }
 
+    // Ensure every category with spend this week is represented
+    for (const [catId, spentAmt] of weekSummary.byCategory.entries()) {
+      if (!grouped.has(catId) && spentAmt > 0) {
+        const cat = catMap.get(catId);
+        grouped.set(catId, {
+          name: cat?.name || 'Uncategorised',
+          color: cat?.color || null,
+          total: spentAmt,
+          isEssential: essentialCatIds.has(catId),
+          catId,
+        });
+      }
+    }
+
     const items = Array.from(grouped.values()).map(g => ({
       ...g,
       weeklyAvg: g.total / 4,
@@ -421,30 +441,11 @@ export default function FinanceBudget() {
     const essentials = items.filter(i => i.isEssential).sort((a, b) => b.weeklyAvg - a.weeklyAvg);
     const funCategories = items.filter(i => !i.isEssential).sort((a, b) => b.weeklyAvg - a.weeklyAvg);
 
-    const thisWeekTxns = transactions.filter(tx => {
-      if (tx.amount >= 0 || tx.is_transfer || tx.is_reimbursable) return false;
-      if ((tx as any).goal_id) return false;
-      const d = parseUkDate(tx.posted_at);
-      if (d < weekStart || d > weekEnd) return false;
-      const cat = catMap.get(tx.category_id || '');
-      if (cat?.exclude_from_reports) return false;
-      if (cat?.type === 'fixed' || cat?.type === 'income' || cat?.type === 'transfer') return false;
-      if (tx.is_fixed || (tx as any).fixed_expense_id) return false;
-      return true;
-    });
-
-    let essentialSpentThisWeek = 0;
-    let funSpentThisWeek = 0;
-    const thisWeekByCategory = new Map<string, number>();
-    for (const tx of thisWeekTxns) {
-      const catId = tx.category_id || '__uncategorised';
-      thisWeekByCategory.set(catId, (thisWeekByCategory.get(catId) || 0) + Math.abs(baseAmt(tx)));
-      if (essentialCatIds.has(catId)) {
-        essentialSpentThisWeek += Math.abs(baseAmt(tx));
-      } else {
-        funSpentThisWeek += Math.abs(baseAmt(tx));
-      }
-    }
+    const thisWeekByCategory = weekSummary.byCategory;
+    const essentialSpentThisWeek = weekSummary.essentialSpent;
+    const funSpentThisWeek = weekSummary.funSpent;
+    const thisWeekTxns = weekSummary.txns;
+    const dailySpendingStacked = weekSummary.daily;
 
     const allVariableCategories = [...essentials, ...funCategories].sort((a, b) => {
       const aSpent = thisWeekByCategory.get(a.catId) || 0;
@@ -452,8 +453,17 @@ export default function FinanceBudget() {
       return bSpent - aSpent;
     });
 
-    return { essentials, funCategories, allVariableCategories, essentialSpentThisWeek, funSpentThisWeek, thisWeekByCategory, thisWeekTxns };
-  }, [finance.transactions, finance.categories, weekStart]);
+    return {
+      essentials,
+      funCategories,
+      allVariableCategories,
+      essentialSpentThisWeek,
+      funSpentThisWeek,
+      thisWeekByCategory,
+      thisWeekTxns,
+      dailySpendingStacked,
+    };
+  }, [finance.transactions, finance.categories, weekStart, weekEnd, trips, catMap, essentialCatIds]);
 
   const [selectedCategory, setSelectedCategory] = useState<any | null>(null);
   const [selectedDayIndex, setSelectedDayIndex] = useState<number | null>(null);
@@ -466,15 +476,10 @@ export default function FinanceBudget() {
   const selectedDayTxns = useMemo(() => {
     if (!selectedDayDate) return [];
     const targetStr = format(selectedDayDate, 'yyyy-MM-dd');
-    return finance.transactions.filter(tx => {
-      if (tx.is_reimbursable || tx.is_transfer || tx.amount >= 0) return false;
-      if ((tx as any).goal_id) return false;
-      const cat = catMap.get(tx.category_id || '');
-      if (cat?.exclude_from_reports || cat?.type === 'income' || cat?.type === 'transfer' || cat?.type === 'fixed') return false;
-      const txUkDateStr = format(parseUkDate(tx.posted_at), 'yyyy-MM-dd');
-      return txUkDateStr === targetStr;
-    }).sort((a, b) => parseUkDate(b.posted_at).getTime() - parseUkDate(a.posted_at).getTime());
-  }, [selectedDayDate, finance.transactions, catMap]);
+    return thisWeekTxns
+      .filter(tx => format(parseUkDate(tx.posted_at), 'yyyy-MM-dd') === targetStr)
+      .sort((a, b) => parseUkDate(b.posted_at).getTime() - parseUkDate(a.posted_at).getTime());
+  }, [selectedDayDate, thisWeekTxns]);
 
   const selectedDayTotal = useMemo(() => {
     return selectedDayTxns.reduce((sum, tx) => sum + Math.abs(baseAmt(tx)), 0);
@@ -493,29 +498,6 @@ export default function FinanceBudget() {
       .map(([name, total]) => ({ name, total }))
       .sort((a, b) => b.total - a.total);
   }, [selectedCategory, thisWeekTxns]);
-
-  // Daily spending timeline — split essential vs fun
-  const dailySpendingStacked = useMemo(() => {
-    const days = Array.from({ length: 7 }, () => ({ essential: 0, fun: 0 }));
-    for (const tx of finance.transactions) {
-      if (tx.amount >= 0 || tx.is_transfer || tx.is_fixed || (tx as any).fixed_expense_id || tx.is_reimbursable) continue;
-      if ((tx as any).goal_id) continue;
-      const d = parseUkDate(tx.posted_at);
-      if (d < weekStart || d > weekEnd) continue;
-      const cat = catMap.get(tx.category_id || '');
-      if (cat?.exclude_from_reports || cat?.type === 'fixed' || cat?.type === 'income' || cat?.type === 'transfer') continue;
-      const dayIdx = differenceInDays(d, weekStart);
-      if (dayIdx >= 0 && dayIdx < 7) {
-        const amt = Math.abs(baseAmt(tx));
-        if (essentialCatIds.has(tx.category_id || '')) {
-          days[dayIdx].essential += amt;
-        } else {
-          days[dayIdx].fun += amt;
-        }
-      }
-    }
-    return days;
-  }, [finance.transactions, finance.convertToBase, weekStart, weekEnd, catMap, essentialCatIds]);
 
   // Upcoming bills
   const upcomingBills = useMemo(() => {
@@ -1055,7 +1037,7 @@ export default function FinanceBudget() {
       </Card>
 
       {/* === HOW THIS IS CALCULATED === */}
-      {isCurrentWeek && (() => {
+      {(() => {
         const s = snapshot.split;
         const essentialsMonthly = essentialWeeklyBudget * 4.33;
         const row = (label: string, val: string, sub?: string, cls = 'text-slate-900') => (
@@ -1072,7 +1054,7 @@ export default function FinanceBudget() {
                 <ChevronDown className="w-4 h-4 text-slate-400" />
               </CollapsibleTrigger>
               <CollapsibleContent className="mt-3 divide-y divide-slate-100">
-                {(() => { const ai = computeActualSpendingIncome(finance.transactions, finance.categories, new Date()); return (<>
+                {(() => { const ai = computeActualSpendingIncome(finance.transactions, finance.categories, referenceDateForEngine); return (<>
                   {row('Monthly income (actual deposits)', `+${fmt(s.monthlyIncome)}`, ai.isLate ? `⚠️ Pay not landed yet — using last month (${format(ai.cycleStart, 'MMM yyyy')}) as a guide` : `${format(ai.cycleStart, 'd MMM')} → ${ai.nextPayday ? format(ai.nextPayday, 'd MMM') : '—'}`, 'text-emerald-600')}
                   {ai.streams.map((st, i) => (
                     <div key={i} className="flex justify-between pl-4 py-1 text-[11px] text-slate-500">
@@ -1083,12 +1065,12 @@ export default function FinanceBudget() {
                 </>); })()}
                 {row('Fixed bills', `−${fmt(s.mandatoryAmount)}`, 'All fixed expenses (including externally-paid)', 'text-rose-600')}
                 {row('Essentials', `−${fmt(essentialsMonthly)}`, 'Higher of your estimate or normal-week average', 'text-rose-600')}
-                {row('Goal savings', `−${fmt(s.goalSavingsAmount)}`, 'Pools with deadlines: remaining ÷ weeks left', 'text-rose-600')}
+                {row('Goal savings', `−${fmt(s.goalSavingsAmount)}`, 'Pools with deadlines: remaining ÷ weeks left (capped at remaining balance)', 'text-rose-600')}
                 {row('Fun money (monthly)', `=${fmt(s.funAmount)}`, `÷ 4.33 = ${fmt(snapshot.baseWeeklyFun)}/wk base weekly allowance`)}
                 {row(
                   'Weekly budget',
                   fmt(totalWeeklyBudget),
-                  `${fmt(essentialWeeklyBudget)} essentials + ${fmt(snapshot.baseWeeklyFun)} base fun${boostAmount ? ` + ${fmt(boostAmount)} rolled over from last week (same monthly fun total)` : ''}${snapshot.carryForwardDebt ? ` − ${fmt(snapshot.carryForwardDebt)} carried debt` : ''}`
+                  `${fmt(essentialWeeklyBudget)} essentials + ${fmt(snapshot.baseWeeklyFun)} base fun${boostAmount ? ` + ${fmt(boostAmount)} boost` : ''}${snapshot.carryForwardDebt ? ` − ${fmt(snapshot.carryForwardDebt)} carried debt` : ''}`
                 )}
               </CollapsibleContent>
             </div>

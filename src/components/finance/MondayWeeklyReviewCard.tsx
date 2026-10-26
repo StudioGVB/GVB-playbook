@@ -3,11 +3,11 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { PartyPopper, AlertTriangle, Sparkles, X, Calendar, ChevronRight, Eye } from 'lucide-react';
-import { parseUkDate, formatCurrency, baseAmt } from '@/lib/financeUtils';
+import { formatCurrency } from '@/lib/financeUtils';
 import type { useFinanceData } from '@/hooks/useFinanceData';
 import type { FinanceAssumptions } from '@/hooks/useFinanceAssumptions';
 import type { FinanceTrip } from '@/hooks/useFinanceTrips';
-import type { PolicySnapshot } from '@/lib/policyEngine';
+import { computeWeekVariableSpend, type PolicySnapshot } from '@/lib/policyEngine';
 import { startOfWeek, subWeeks, format } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
 
@@ -37,61 +37,30 @@ export function MondayWeeklyReviewCard({ finance, assumptions, trips = [], force
 
   // Dates for last week (Monday to Sunday)
   const lastWeekStart = subWeeks(currentWeekStart, 1);
-  const lastWeekEnd = currentWeekStart;
   const lastWeekSunday = new Date(currentWeekStart.getTime() - 1000 * 60 * 60 * 24);
   const dateRangeLabel = `${format(lastWeekStart, 'MMM d')} – ${format(lastWeekSunday, 'MMM d, yyyy')}`;
 
-  // Calculate last week's spending
+  // Calculate last week's spending using the unified weekly spend helper
   const lastWeekStats = useMemo(() => {
-    let funSpent = 0;
-    let essentialSpent = 0;
-
-    for (const tx of finance?.transactions || []) {
-      if (tx.is_transfer || tx.is_reimbursable || tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') continue;
-      if (tx.goal_id) continue;
-      if ((tx as any).is_travel_spend || (tx as any).trip_id) continue;
-
-      const cat = (finance?.categories || []).find(c => c.id === tx.category_id);
-      if (cat?.exclude_from_reports || cat?.type === 'transfer') continue;
-
-      const txDate = parseUkDate(tx.posted_at);
-      if (txDate < lastWeekStart || txDate >= lastWeekEnd) continue;
-
-      // Check if refund
-      if ((tx as any).is_refund && tx.amount > 0) {
-        if (cat?.is_essential) {
-          essentialSpent -= Math.abs(baseAmt(tx));
-        } else {
-          funSpent -= Math.abs(baseAmt(tx));
-        }
-        continue;
-      }
-
-      if (tx.amount >= 0) continue;
-      if (tx.is_fixed || cat?.type === 'fixed' || cat?.type === 'income') continue;
-
-      const amt = Math.abs(baseAmt(tx));
-      if (cat?.is_essential) {
-        essentialSpent += amt;
-      } else {
-        funSpent += amt;
-      }
-    }
+    const summary = computeWeekVariableSpend(
+      finance?.transactions || [],
+      finance?.categories || [],
+      lastWeekStart,
+      trips,
+    );
+    const funSpent = summary.funSpent;
+    const essentialSpent = summary.essentialSpent;
 
     const weeklyFunBudget = snapshot?.baseWeeklyFun ?? assumptions?.weekly_fun_budget ?? 100;
     const weeklyEssentialBudget = snapshot?.weeklyEssentialBudget ?? ((assumptions?.estimated_essential_variable ?? 300) / 4.33);
-    
-    // Fun spend comparison (discretionary)
-    const funDiff = weeklyFunBudget - funSpent;
-    const isFunOver = funDiff < 0;
-    const funOverAmount = Math.abs(funDiff);
-    const funUnderAmount = Math.max(0, funDiff);
 
-    // Total variable spend comparison
-    const totalSpent = funSpent + essentialSpent;
+    // Total variable spend comparison (matches Weekly Budget & Spending History)
+    const totalSpent = summary.totalSpent;
     const totalBudget = weeklyFunBudget + weeklyEssentialBudget;
     const totalDiff = totalBudget - totalSpent;
     const isTotalOver = totalDiff < 0;
+    const totalOverAmount = Math.abs(totalDiff);
+    const totalUnderAmount = Math.max(0, totalDiff);
 
     return {
       funSpent,
@@ -100,13 +69,12 @@ export function MondayWeeklyReviewCard({ finance, assumptions, trips = [], force
       weeklyFunBudget,
       weeklyEssentialBudget,
       totalBudget,
-      isFunOver,
-      funOverAmount,
-      funUnderAmount,
       isTotalOver,
+      totalOverAmount,
+      totalUnderAmount,
       totalDiff,
     };
-  }, [finance?.transactions, finance?.categories, lastWeekStart, lastWeekEnd, assumptions, snapshot]);
+  }, [finance?.transactions, finance?.categories, lastWeekStart, trips, assumptions, snapshot]);
 
   // Only render on Mondays unless forceShow is active or toggled
   if (!isMonday && !forceShow) {
@@ -122,13 +90,13 @@ export function MondayWeeklyReviewCard({ finance, assumptions, trips = [], force
     setIsDismissed(true);
   };
 
-  const { funSpent, weeklyFunBudget, isFunOver, funOverAmount, funUnderAmount } = lastWeekStats;
+  const { totalSpent, totalBudget, isTotalOver, totalOverAmount, totalUnderAmount } = lastWeekStats;
 
   return (
     <div className="relative group my-2">
       <Card
         className={`relative overflow-hidden border-2 transition-all duration-300 shadow-md ${
-          isFunOver
+          isTotalOver
             ? 'bg-gradient-to-br from-rose-500/10 via-amber-500/5 to-rose-500/10 border-rose-400/40'
             : 'bg-gradient-to-br from-emerald-500/10 via-teal-500/5 to-emerald-500/10 border-emerald-400/40'
         } rounded-[2.2rem] p-6 text-slate-800`}
@@ -136,7 +104,7 @@ export function MondayWeeklyReviewCard({ finance, assumptions, trips = [], force
         {/* Ambient background glow */}
         <div
           className={`absolute -top-12 -right-12 w-48 h-48 rounded-full filter blur-3xl pointer-events-none ${
-            isFunOver ? 'bg-rose-500/15' : 'bg-emerald-500/15'
+            isTotalOver ? 'bg-rose-500/15' : 'bg-emerald-500/15'
           }`}
         />
 
@@ -147,12 +115,12 @@ export function MondayWeeklyReviewCard({ finance, assumptions, trips = [], force
               <Badge
                 variant="outline"
                 className={`px-3 py-1 text-xs font-bold uppercase tracking-wider rounded-xl border flex items-center gap-1.5 ${
-                  isFunOver
+                  isTotalOver
                     ? 'bg-rose-500/15 text-rose-700 border-rose-400/30'
                     : 'bg-emerald-500/15 text-emerald-700 border-emerald-400/30'
                 }`}
               >
-                {isFunOver ? (
+                {isTotalOver ? (
                   <>
                     <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
                     Monday Weekly Review · Over Budget
@@ -171,24 +139,23 @@ export function MondayWeeklyReviewCard({ finance, assumptions, trips = [], force
               </span>
             </div>
 
-            {/* Headline message directly satisfying user's prompt */}
+            {/* Headline message */}
             <div>
-              {isFunOver ? (
+              {isTotalOver ? (
                 <h2 className="text-xl sm:text-2xl font-display font-extrabold text-slate-900 tracking-tight leading-snug">
-                  You spent <span className="text-rose-600">{fmt(funSpent)}</span> last week, which is{' '}
-                  <span className="text-rose-600">{fmt(funOverAmount)} over</span> your weekly fun budget.
+                  You spent <span className="text-rose-600">{fmt(totalSpent)}</span> last week, which is{' '}
+                  <span className="text-rose-600">{fmt(totalOverAmount)} over</span> your weekly budget.
                 </h2>
               ) : (
                 <h2 className="text-xl sm:text-2xl font-display font-extrabold text-slate-900 tracking-tight leading-snug">
-                  Congrats! Now you have <span className="text-emerald-600">{fmt(funUnderAmount)} extra</span> to play with
-                  this week because you were good! 🎉
+                  Congrats! You finished <span className="text-emerald-600">{fmt(totalUnderAmount)} under</span> your weekly budget last week! 🎉
                 </h2>
               )}
 
               <p className="text-sm text-slate-600 mt-1.5 leading-relaxed">
-                {isFunOver
+                {isTotalOver
                   ? `Cut back a little bit this week to get back on track and meet your saving goals!`
-                  : `You stayed under your ${fmt(weeklyFunBudget)} weekly fun allowance. Feel free to roll over your extra savings into your pools or enjoy the bonus breathing room!`}
+                  : `You stayed under your ${fmt(totalBudget)} weekly budget. Your leftover savings have been swept into your Savings Stash!`}
               </p>
             </div>
           </div>
@@ -199,11 +166,11 @@ export function MondayWeeklyReviewCard({ finance, assumptions, trips = [], force
             <div className="bg-white/80 backdrop-blur-md border border-slate-200/80 rounded-2xl p-3.5 shadow-sm min-w-[200px] flex items-center justify-between gap-4">
               <div>
                 <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Last Week Spend</p>
-                <p className="text-lg font-display font-black text-slate-900 tabular-nums">{fmt(funSpent)}</p>
+                <p className="text-lg font-display font-black text-slate-900 tabular-nums">{fmt(totalSpent)}</p>
               </div>
               <div className="text-right">
-                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Weekly Target</p>
-                <p className="text-sm font-semibold text-slate-600 tabular-nums">{fmt(weeklyFunBudget)}</p>
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Weekly Budget</p>
+                <p className="text-sm font-semibold text-slate-600 tabular-nums">{fmt(totalBudget)}</p>
               </div>
             </div>
 

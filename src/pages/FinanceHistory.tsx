@@ -8,12 +8,13 @@ import { Calendar } from '@/components/ui/calendar';
 import { useFinanceData } from '@/hooks/useFinanceData';
 import { useFinanceAssumptions } from '@/hooks/useFinanceAssumptions';
 import { useFixedExpenses, toWeekly } from '@/hooks/useFixedExpenses';
-import { computePolicySnapshot } from '@/lib/policyEngine';
+import { computePolicySnapshot, computeWeekVariableSpend } from '@/lib/policyEngine';
 import { useWeekTypes } from '@/hooks/useWeekTypes';
+import { useFinanceTrips } from '@/hooks/useFinanceTrips';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { formatCurrency, baseAmt, parseUkDate } from '@/lib/financeUtils';
-import { startOfWeek, endOfWeek, eachWeekOfInterval, subWeeks, format, isWithinInterval, differenceInDays } from 'date-fns';
+import { formatCurrency } from '@/lib/financeUtils';
+import { startOfWeek, endOfWeek, eachWeekOfInterval, subWeeks, format } from 'date-fns';
 import { CalendarIcon, ChevronDown, ChevronUp, X } from 'lucide-react';
 import { DateRange } from 'react-day-picker';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -25,6 +26,7 @@ export default function FinanceHistory() {
   const { assumptions, loading: assumptionsLoading } = useFinanceAssumptions();
   const { expenses: fixedExpenses, monthlyTotalInternal: fixedExpensesMonthly, monthlyTotal: fixedExpensesMonthlyAll } = useFixedExpenses();
   const { weekTypes, getWeekType, setWeekType, weekTypeMap } = useWeekTypes();
+  const { trips } = useFinanceTrips();
   const { user } = useAuth();
 
   // Fetch ALL boosts (not just current week) for history
@@ -65,18 +67,9 @@ export default function FinanceHistory() {
   const fixedWeeklyCost = useMemo(() => {
     return fixedExpenses.reduce((sum, e) => sum + toWeekly(e.amount, e.frequency), 0);
   }, [fixedExpenses]);
+  void fixedWeeklyCost;
 
   const wtMap = useMemo(() => weekTypeMap(), [weekTypeMap]);
-
-  const weeklyBudget = useMemo(() => {
-    if (!assumptions) return 0;
-    const snapshot = computePolicySnapshot(
-      assumptions, finance.accounts, finance.transactions,
-      finance.categories, finance.goals, finance.convertToBase,
-      fixedExpensesMonthly, 0, wtMap, [], fixedExpensesMonthlyAll,
-    );
-    return snapshot.weeklyEssentialBudget + snapshot.baseWeeklyFun;
-  }, [assumptions, finance.accounts, finance.transactions, finance.categories, finance.goals, finance.convertToBase, fixedExpensesMonthly, fixedExpensesMonthlyAll, wtMap]);
 
   const weeks = useMemo(() => {
     const now = new Date();
@@ -93,53 +86,53 @@ export default function FinanceHistory() {
       const we = endOfWeek(ws, { weekStartsOn: 1 });
       const key = format(ws, 'yyyy-MM-dd');
       const weekType = getWeekType(ws);
-
-      const weekTxns = finance.transactions.filter(tx => {
-        if (tx.amount >= 0 || tx.is_transfer || tx.is_fixed) return false;
-        if ((tx as any).goal_id) return false;
-        const d = parseUkDate(tx.posted_at);
-        if (!isWithinInterval(d, { start: ws, end: we })) return false;
-        const cat = catMap.get(tx.category_id || '');
-        if (cat?.exclude_from_reports) return false;
-        if (cat?.type === 'fixed' || cat?.type === 'income' || cat?.type === 'transfer') return false;
-        return true;
-      });
-
-      let essentialSpent = 0;
-      let funSpent = 0;
-      const categoryBreakdown = new Map<string, { name: string; amount: number; isEssential: boolean }>();
-      const dailySpending = Array(7).fill(0);
-
-      for (const tx of weekTxns) {
-        const amt = Math.abs(baseAmt(tx));
-        const catId = tx.category_id || '__uncategorised';
-        const cat = catMap.get(catId);
-        const isEssential = essentialCatIds.has(catId);
-
-        if (isEssential) essentialSpent += amt;
-        else funSpent += amt;
-
-        const existing = categoryBreakdown.get(catId);
-        if (existing) {
-          existing.amount += amt;
-        } else {
-          categoryBreakdown.set(catId, {
-            name: cat?.name || 'Uncategorised',
-            amount: amt,
-            isEssential,
-          });
-        }
-
-        const dayIdx = differenceInDays(parseUkDate(tx.posted_at), ws);
-        if (dayIdx >= 0 && dayIdx < 7) dailySpending[dayIdx] += amt;
-      }
-
-      const totalSpent = essentialSpent + funSpent;
       const isCurrentWeek = format(startOfWeek(new Date(), { weekStartsOn: 1 }), 'yyyy-MM-dd') === key;
       const weekBoost = boostByWeek.get(key) || 0;
-      const effectiveBudget = weeklyBudget + weekBoost;
-      const effectiveFunSpent = Math.max(0, funSpent - weekBoost);
-      const effectiveTotalSpent = essentialSpent + effectiveFunSpent;
+
+      // Unified variable spend calculation (matches Weekly Budget & Home)
+      const spendSummary = computeWeekVariableSpend(
+        finance.transactions,
+        finance.categories,
+        ws,
+        trips,
+      );
+
+      const essentialSpent = spendSummary.essentialSpent;
+      const funSpent = spendSummary.funSpent;
+      const totalSpent = spendSummary.totalSpent;
+      const dailySpending = spendSummary.daily.map(d => d.total);
+
+      const categoryBreakdown: { name: string; amount: number; isEssential: boolean }[] = [];
+      for (const [catId, amount] of spendSummary.byCategory.entries()) {
+        if (amount <= 0) continue;
+        const cat = catMap.get(catId);
+        categoryBreakdown.push({
+          name: cat?.name || 'Uncategorised',
+          amount,
+          isEssential: essentialCatIds.has(catId),
+        });
+      }
+      categoryBreakdown.sort((a, b) => b.amount - a.amount);
+
+      // Compute budget snapshot as of this specific week (matches Weekly Budget `<` navigation)
+      let effectiveBudget = 0;
+      if (assumptions) {
+        const weekSnapshot = computePolicySnapshot(
+          assumptions,
+          finance.accounts,
+          finance.transactions,
+          finance.categories,
+          finance.goals,
+          finance.convertToBase,
+          fixedExpensesMonthly,
+          weekBoost,
+          wtMap,
+          trips,
+          fixedExpensesMonthlyAll,
+          isCurrentWeek ? new Date() : we,
+        );
+        effectiveBudget = weekSnapshot.weeklyEssentialBudget + weekSnapshot.weeklyFunBudget;
+      }
 
       return {
         key,
@@ -151,14 +144,30 @@ export default function FinanceHistory() {
         funSpent,
         boostAmount: weekBoost,
         budget: effectiveBudget,
-        overUnder: effectiveBudget - effectiveTotalSpent,
-        isOver: effectiveTotalSpent > effectiveBudget,
+        overUnder: effectiveBudget - totalSpent,
+        isOver: totalSpent > effectiveBudget,
         isCurrentWeek,
-        categoryBreakdown: Array.from(categoryBreakdown.values()).sort((a, b) => b.amount - a.amount),
+        categoryBreakdown,
         dailySpending,
       };
     });
-  }, [weeks, finance.transactions, catMap, essentialCatIds, weeklyBudget, getWeekType, boostByWeek]);
+  }, [
+    weeks,
+    finance.transactions,
+    finance.categories,
+    finance.accounts,
+    finance.goals,
+    finance.convertToBase,
+    assumptions,
+    fixedExpensesMonthly,
+    fixedExpensesMonthlyAll,
+    wtMap,
+    trips,
+    catMap,
+    essentialCatIds,
+    getWeekType,
+    boostByWeek,
+  ]);
 
   if (finance.loading || assumptionsLoading) {
     return (
@@ -181,7 +190,7 @@ export default function FinanceHistory() {
       <div className="space-y-2">
         {weekData.map(w => {
           const isExpanded = expandedWeek === w.key;
-          const effectiveSpent = w.essentialSpent + Math.max(0, w.funSpent - w.boostAmount);
+          const effectiveSpent = w.totalSpent;
           const percentSpent = w.budget > 0 ? Math.min((effectiveSpent / w.budget) * 100, 100) : 0;
           const barColor = w.isOver ? 'bg-destructive' : effectiveSpent > w.budget * 0.85 ? 'bg-amber-500' : 'bg-emerald-500';
 

@@ -1,7 +1,7 @@
 import { FinanceTransaction, FinanceCategory, FinanceAccount, FinanceGoal } from '@/hooks/useFinanceData';
 import { FinanceAssumptions } from '@/hooks/useFinanceAssumptions';
 import type { FinanceTrip } from '@/hooks/useFinanceTrips';
-import { startOfWeek, subWeeks, format } from 'date-fns';
+import { startOfWeek, endOfWeek, subWeeks, differenceInCalendarDays, format } from 'date-fns';
 import type { WeekType } from '@/hooks/useWeekTypes';
 import { isExcludedSpendDate, weekOverlapsExclusion, baseAmt, parseUkDate } from './financeUtils';
 import { calcTakeHome } from './ukTakeHome';
@@ -207,13 +207,15 @@ export function computeActualSpendingIncome(
   let cycleStart = curMonthStart;
   let nextPayday = new Date(now.getFullYear(), now.getMonth() + 1, 0);
 
-  // If no Gamma pay has landed yet this month (e.g. 1st-3rd of the month), fall back to previous month
+  // If no Gamma pay has landed yet this month (e.g. before payday), fall back to previous month
   const hasCurrentMonthGamma = monthItems.some(x => x.kind === 'gamma');
-  if (!hasCurrentMonthGamma && monthItems.length === 0) {
+  if (!hasCurrentMonthGamma) {
     const prevMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1, 0, 0, 0, 0);
     const prevMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
     const prevItems = allClassified.filter(x => x.date >= prevMonthStart && x.date <= prevMonthEnd);
-    if (prevItems.length > 0) {
+    const curSum = monthItems.reduce((s, x) => s + baseAmt(x.tx), 0);
+    const prevSum = prevItems.reduce((s, x) => s + baseAmt(x.tx), 0);
+    if (prevItems.length > 0 && (prevItems.some(x => x.kind === 'gamma') || prevSum > curSum)) {
       monthItems = prevItems;
       isLate = true;
       cycleStart = prevMonthStart;
@@ -348,8 +350,10 @@ export function computeEssentialVariableMonthly(
   categories: FinanceCategory[],
   weekTypeMap?: Map<string, WeekType>,
   trips: FinanceTrip[] = [],
+  referenceDate: Date = new Date(),
 ): { monthly: number; normalWeeksUsed: number; excludedWeeksCount: number } {
-  const now = new Date();
+  const now = startOfWeek(referenceDate, { weekStartsOn: 1 });
+  const catMap = new Map(categories.map(c => [c.id, c]));
   const essentialCatIds = new Set(
     categories
       .filter(c => c.is_essential && c.type === 'variable')
@@ -358,7 +362,7 @@ export function computeEssentialVariableMonthly(
 
   if (essentialCatIds.size === 0) return { monthly: 0, normalWeeksUsed: 0, excludedWeeksCount: 0 };
 
-  // Collect last 12 weeks of data, pick last 4 normal ones
+  // Collect last 12 weeks of data prior to `now`, pick last 4 normal ones
   const weeklyTotals: { weekKey: string; total: number; isNormal: boolean }[] = [];
   let excludedCount = 0;
 
@@ -391,17 +395,24 @@ export function computeEssentialVariableMonthly(
 
     let weekTotal = 0;
     for (const tx of transactions) {
-      if (tx.amount >= 0 || tx.is_transfer || tx.is_reimbursable || tx.is_fixed) continue;
-      if ((tx as any).is_travel_spend || (tx as any).trip_id) continue;
+      if (tx.is_transfer || tx.is_reimbursable || tx.is_fixed || (tx as any).fixed_expense_id) continue;
+      if (tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed' || isInternalTransferTx(tx)) continue;
+      if ((tx as any).goal_id || (tx as any).is_travel_spend || (tx as any).trip_id) continue;
       if (!tx.category_id || !essentialCatIds.has(tx.category_id)) continue;
+      const cat = catMap.get(tx.category_id);
+      if (cat?.exclude_from_reports || cat?.type === 'fixed' || cat?.type === 'income' || cat?.type === 'transfer') continue;
       const d = parseUkDate(tx.posted_at);
       if (isExcludedSpendDate(d)) continue;
       if (isInAnyTrip(d, trips)) continue; // Auto-exclude transactions on trip dates
       if (d >= ws && d < we) {
-        weekTotal += Math.abs(baseAmt(tx));
+        if ((tx as any).is_refund && tx.amount > 0) {
+          weekTotal -= Math.abs(baseAmt(tx));
+        } else if (tx.amount < 0) {
+          weekTotal += Math.abs(baseAmt(tx));
+        }
       }
     }
-    weeklyTotals.push({ weekKey, total: weekTotal, isNormal });
+    weeklyTotals.push({ weekKey, total: Math.max(0, weekTotal), isNormal });
   }
 
   const normalWeeks = weeklyTotals.filter(w => w.isNormal);
@@ -427,8 +438,11 @@ export function computePolicySnapshot(
   fixedExpensesMonthlyAll?: number,
   referenceDate: Date = new Date(),
 ): PolicySnapshot {
-  // Essential variable: rolling average of normal weeks
-  const essentialResult = computeEssentialVariableMonthly(transactions, categories, weekTypeMap);
+  const now = referenceDate;
+  const weekStart = startOfWeek(now, { weekStartsOn: 1 });
+
+  // Essential variable: rolling average of normal weeks prior to the reference week
+  const essentialResult = computeEssentialVariableMonthly(transactions, categories, weekTypeMap, trips, weekStart);
   const computedEssentialVariable = essentialResult.monthly;
   // Use the higher of manual estimate or computed actual
   const essentialVariable = Math.max(
@@ -460,7 +474,6 @@ export function computePolicySnapshot(
   const targetSavings = assumptions.target_savings ?? 0;
 
   // Determine drawdown mode
-  const now = referenceDate;
   // Spending income = REAL Gamma + Venture deposits that hit the account this calendar month.
   // If no Gamma pay has landed yet this month, use last month's Gamma + Venture deposits.
   const actualIncome = computeActualSpendingIncome(transactions, categories, now);
@@ -482,7 +495,7 @@ export function computePolicySnapshot(
     // Fun money is the user-configured weekly amount (default $100/wk)
     baseWeeklyFun = assumptions.weekly_fun_budget > 0 ? assumptions.weekly_fun_budget : 100;
     // Calculate required goal savings even in drawdown mode so active goals with deadlines are not zeroed out
-    const drawdownGoalSavings = computeRequiredGoalSavingsMonthly(goals, convertToBase, now, 0);
+    const drawdownGoalSavings = computeRequiredGoalSavingsMonthly(goals, convertToBase, weekStart, 0);
     // Weekly gross = all weekly costs combined
     weeklyGross = weeklyFixedCosts + weeklyEssentialBudget + (drawdownGoalSavings / 4.33) + baseWeeklyFun;
     // Runway-based weeks (how long living pool lasts at this burn rate)
@@ -497,8 +510,18 @@ export function computePolicySnapshot(
       monthlyIncome: 0,
     };
   } else {
-    // For cashflow split of incoming salary, only deduct internal bills paid from this income (not external rent)
-    split = computeMoneySplit(assumptions, transactions, categories, goals, convertToBase, fixedExpensesMonthlyAll ?? fixedMonthly, monthlyIncome);
+    split = computeMoneySplit(
+      assumptions,
+      transactions,
+      categories,
+      goals,
+      convertToBase,
+      fixedExpensesMonthlyAll ?? fixedMonthly,
+      monthlyIncome,
+      weekTypeMap,
+      trips,
+      weekStart,
+    );
     baseWeeklyFun = split.weeklyFunAmount;
     weeklyGross = split.monthlyIncome / 4.33;
   }
@@ -507,7 +530,6 @@ export function computePolicySnapshot(
   const boostAmount = weeklyBoostAmount ?? 0;
   let weeklyFunBudget = baseWeeklyFun + boostAmount + (!isDrawdownMode ? actualIncome.otherWeeklyBonus : 0);
 
-  const weekStart = startOfWeek(now, { weekStartsOn: 1 });
   const spentThisWeek = computeWeeklyFunSpend(transactions, categories, weekStart, undefined, trips);
 
   // ===== Travel mode (multi-trip union) =====
@@ -535,21 +557,29 @@ export function computePolicySnapshot(
   // Last week performance & overspend deduction
   const lastWeekStart = subWeeks(weekStart, 1);
   const lastWeekFunSpent = computeWeeklyFunSpend(transactions, categories, lastWeekStart, weekStart, trips);
-  const lastWeekOverspend = Math.max(0, lastWeekFunSpent - baseWeeklyFun);
+  const lastWeekEssentialSpent = computeWeeklyEssentialSpend(transactions, categories, lastWeekStart, weekStart, trips);
+  const lastWeekOverspend = Math.max(
+    0,
+    (lastWeekEssentialSpent + lastWeekFunSpent) - (weeklyEssentialBudget + baseWeeklyFun),
+  );
 
-  // Carry-forward debt: deduct last week's overspend from this week's fun budget
+  // Carry-forward debt: only applies to the week matching assumptions.last_debt_week,
+  // or to the current active week before auto-settle runs. Never retroactively deduct from past weeks!
   const currentWeekKey = format(weekStart, 'yyyy-MM-dd');
+  const todayWeekKey = format(startOfWeek(new Date(), { weekStartsOn: 1 }), 'yyyy-MM-dd');
+  const isViewingCurrentWeek = currentWeekKey === todayWeekKey;
   const debtAppliesThisWeek = assumptions.last_debt_week === currentWeekKey;
   const storedDebt = debtAppliesThisWeek ? (assumptions.carry_forward_debt ?? 0) : 0;
-  // After settle runs, stored debt is authoritative (already reduced by Stash/pot cover); before that, fall back to raw overspend
-  const carryForwardDebt = debtAppliesThisWeek ? storedDebt : lastWeekOverspend;
+  const carryForwardDebt = debtAppliesThisWeek
+    ? storedDebt
+    : (isViewingCurrentWeek ? lastWeekOverspend : 0);
   const effectiveDebt = !isTravelWeek ? carryForwardDebt : 0;
 
   // Deduct last week's overspend from this week's fun budget
   weeklyFunBudget = Math.max(0, weeklyFunBudget - effectiveDebt);
 
   // Underspent rollover is NOT added to weeklyFunBudget (it is swept into Savings Stash by auto-settle)
-  const rollover = Math.max(0, baseWeeklyFun - lastWeekFunSpent);
+  const rollover = Math.max(0, (weeklyEssentialBudget + baseWeeklyFun) - (lastWeekEssentialSpent + lastWeekFunSpent));
 
   // Bidirectional overspend: each category's excess eats into the other
   const essentialSpentThisWeek = computeWeeklyEssentialSpend(transactions, categories, weekStart, undefined, trips);
@@ -784,10 +814,12 @@ export function computeRequiredGoalSavingsMonthly(
   now: Date = new Date(),
   monthlyIncome: number = 0,
 ): number {
+  const anchorNow = startOfWeek(now, { weekStartsOn: 1 });
   let poolSavingsMonthly = 0;
   for (const g of (goals || [])) {
     if ((g as any)?.is_stash) continue;
-    if (g.start_date && new Date(g.start_date) > now) continue;
+    if ((g as any)?.is_emergency === true || (g.name || '').toLowerCase().includes('emergency')) continue;
+    if (g.start_date && new Date(g.start_date) > anchorNow) continue;
     const targetBase = convertToBase ? convertToBase(g.target_amount || 0, g.currency) : (g.target_amount || 0);
     const assignedBase = convertToBase ? convertToBase(g.assigned_amount || 0, g.currency) : (g.assigned_amount || 0);
     const remainingBase = Math.max(0, targetBase - assignedBase);
@@ -797,10 +829,12 @@ export function computeRequiredGoalSavingsMonthly(
 
     if (g.deadline) {
       const dl = new Date(g.deadline);
-      const daysLeft = Math.max(1, Math.ceil((dl.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
+      const daysLeft = Math.max(1, Math.ceil((dl.getTime() - anchorNow.getTime()) / (1000 * 60 * 60 * 24)));
       const weeksLeft = Math.max(1, daysLeft / 7);
-      const weeklyRequired = Math.min(remainingBase, remainingBase / weeksLeft);
-      poolSavingsMonthly += weeklyRequired * 4.33;
+      // Cap monthly requirement at remainingBase (matching MonthlyPotPlanner & paycheckEngine)
+      // so a goal with <4.33 weeks left never deducts up to 4.33x its remaining balance in a single month
+      const monthlyTarget = Math.min(remainingBase, (remainingBase / weeksLeft) * 4.33);
+      poolSavingsMonthly += monthlyTarget;
     } else if (g.percent_allocation && g.percent_allocation > 0 && monthlyIncome > 0) {
       poolSavingsMonthly += Math.min(remainingBase, (g.percent_allocation / 100) * monthlyIncome);
     }
@@ -816,7 +850,12 @@ export function computeMoneySplit(
   convertToBase: (amount: number, currency: string) => number,
   fixedExpensesMonthly?: number,
   overrideMonthlyIncome?: number,
+  weekTypeMap?: Map<string, WeekType>,
+  trips: FinanceTrip[] = [],
+  referenceDate: Date = new Date(),
 ): MoneySplit {
+  const now = startOfWeek(referenceDate, { weekStartsOn: 1 });
+
   // 1. Calculate effective net monthly income (Net Salary via PAYE Tax/NI + Venture Advisory £70/wk)
   const salaryTakeHome = calcTakeHome({
     grossAnnual: assumptions.gross_annual_salary || 0,
@@ -825,42 +864,45 @@ export function computeMoneySplit(
   }).netMonthly;
   const ventureSideMonthly = (70 * 52) / 12; // ~£303.33/mo
   const baseNetIncome = salaryTakeHome > 0 ? salaryTakeHome + ventureSideMonthly : 0;
+  void baseNetIncome;
   
   const monthlyIncome = (overrideMonthlyIncome && overrideMonthlyIncome > 0)
     ? overrideMonthlyIncome
-    : computeActualSpendingIncome(transactions, categories, new Date()).total;
+    : computeActualSpendingIncome(transactions, categories, referenceDate).total;
 
   // 2. Committed fixed bills (use passed fixed expenses if provided, else historic average)
   let monthlyMandatory = fixedExpensesMonthly ?? 0;
   if (!fixedExpensesMonthly) {
-    const threeMonthsAgo = new Date();
+    const threeMonthsAgo = new Date(now);
     threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
     const mandatoryCategories = categories.filter(c => c.type === 'fixed');
     const mandatoryCatIds = new Set(mandatoryCategories.map(c => c.id));
     let mandatorySpend = 0;
-    const relevantTxs = transactions.filter(tx => parseUkDate(tx.posted_at) >= threeMonthsAgo);
+    const relevantTxs = transactions.filter(tx => {
+      const d = parseUkDate(tx.posted_at);
+      return d >= threeMonthsAgo && d <= referenceDate;
+    });
     for (const tx of relevantTxs) {
       if (tx.is_transfer || tx.is_reimbursable) continue;
-      if (tx.amount < 0 && (tx.is_fixed || (tx.category_id && mandatoryCatIds.has(tx.category_id)))) {
+      if (tx.amount < 0 && (tx.is_fixed || (tx as any).fixed_expense_id || (tx.category_id && mandatoryCatIds.has(tx.category_id)))) {
         mandatorySpend += Math.abs(baseAmt(tx));
       }
     }
-    const daysCovered = Math.max(1, (Date.now() - threeMonthsAgo.getTime()) / (1000 * 60 * 60 * 24));
+    const daysCovered = Math.max(1, (referenceDate.getTime() - threeMonthsAgo.getTime()) / (1000 * 60 * 60 * 24));
     monthlyMandatory = mandatorySpend / (daysCovered / 30.44);
   }
 
   const effectiveIncome = monthlyIncome;
   const mandatoryPercent = effectiveIncome > 0 ? (monthlyMandatory / effectiveIncome) * 100 : 0;
 
-  // 3. Essential variable spending
-  const essentialResult = computeEssentialVariableMonthly(transactions, categories);
+  // 3. Essential variable spending (using same weekTypeMap, trips, and referenceDate as computePolicySnapshot)
+  const essentialResult = computeEssentialVariableMonthly(transactions, categories, weekTypeMap, trips, now);
   const essentialVariable = Math.max(
     assumptions.estimated_essential_variable ?? 0,
     essentialResult.monthly,
   );
 
   // 4. Goal pool savings requirements
-  const now = new Date();
   const poolSavingsMonthly = computeRequiredGoalSavingsMonthly(goals, convertToBase, now, effectiveIncome);
 
   const goalSavingsAmount = poolSavingsMonthly;
@@ -891,68 +933,116 @@ export function computeMoneySplit(
 
 // ---- Helpers ----
 
-function computeWeeklyFunSpend(
+export interface WeekVariableSpendSummary {
+  essentialSpent: number;
+  funSpent: number;
+  totalSpent: number;
+  daily: { essential: number; fun: number; total: number }[];
+  byCategory: Map<string, number>;
+  txns: FinanceTransaction[];
+}
+
+/**
+ * Single source of truth for variable spending in any Monday–Sunday week.
+ * Used across Home, Weekly Budget, Spending History, Monday Weekly Review, and Policy Engine.
+ */
+export function computeWeekVariableSpend(
   txs: FinanceTransaction[],
   categories: FinanceCategory[],
-  weekStart: Date,
-  weekEnd?: Date,
+  weekStartInput: Date,
   trips: FinanceTrip[] = [],
-): number {
-  let total = 0;
+): WeekVariableSpendSummary {
+  const ws = startOfWeek(weekStartInput, { weekStartsOn: 1 });
+  const we = endOfWeek(ws, { weekStartsOn: 1 });
+  const catMap = new Map(categories.map(c => [c.id, c]));
+  const essentialCatIds = new Set(
+    categories.filter(c => c.is_essential && c.type === 'variable').map(c => c.id),
+  );
+
+  let essentialSpent = 0;
+  let funSpent = 0;
+  const daily = Array.from({ length: 7 }, () => ({ essential: 0, fun: 0, total: 0 }));
+  const byCategory = new Map<string, number>();
+  const matchedTxns: FinanceTransaction[] = [];
+
   for (const tx of txs) {
     if (tx.is_transfer || tx.is_reimbursable || tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') continue;
-    if (tx.goal_id) continue;
+    if (isInternalTransferTx(tx)) continue;
+    if ((tx as any).goal_id) continue;
     if ((tx as any).is_travel_spend || (tx as any).trip_id) continue;
-    const cat = categories.find(c => c.id === tx.category_id);
-    if (cat?.exclude_from_reports) continue;
-    if (cat?.type === 'transfer') continue;
-    const d = parseUkDate(tx.posted_at);
-    if (isInAnyTrip(d, trips)) continue; // Auto-exclude spend on trip dates
-    if (d < weekStart) continue;
-    if (weekEnd && d >= weekEnd) continue;
+    if (tx.is_fixed || (tx as any).fixed_expense_id) continue;
 
-    // Refunds (positive amounts flagged is_refund) reduce fun spend for the week
+    const catId = tx.category_id || '__uncategorised';
+    const cat = catMap.get(catId);
+    if (cat?.exclude_from_reports) continue;
+    if (cat?.type === 'transfer' || cat?.type === 'fixed' || cat?.type === 'income') continue;
+
+    const d = parseUkDate(tx.posted_at);
+    if (d < ws || d > we) continue;
+    if (isInAnyTrip(d, trips)) continue;
+
+    const isEssential = essentialCatIds.has(catId);
+    const dayIdx = Math.min(6, Math.max(0, differenceInCalendarDays(d, ws)));
+    const amt = Math.abs(baseAmt(tx));
+
     if ((tx as any).is_refund && tx.amount > 0) {
-      total -= Math.abs(baseAmt(tx));
+      if (isEssential) {
+        essentialSpent -= amt;
+        daily[dayIdx].essential = Math.max(0, daily[dayIdx].essential - amt);
+      } else {
+        funSpent -= amt;
+        daily[dayIdx].fun = Math.max(0, daily[dayIdx].fun - amt);
+      }
+      daily[dayIdx].total = daily[dayIdx].essential + daily[dayIdx].fun;
+      byCategory.set(catId, Math.max(0, (byCategory.get(catId) || 0) - amt));
       continue;
     }
 
     if (tx.amount >= 0) continue;
-    if (tx.is_fixed || cat?.type === 'fixed' || cat?.type === 'income') continue;
-    if (cat?.is_essential) continue;
-    total += Math.abs(baseAmt(tx));
+
+    if (isEssential) {
+      essentialSpent += amt;
+      daily[dayIdx].essential += amt;
+    } else {
+      funSpent += amt;
+      daily[dayIdx].fun += amt;
+    }
+    daily[dayIdx].total = daily[dayIdx].essential + daily[dayIdx].fun;
+    byCategory.set(catId, (byCategory.get(catId) || 0) + amt);
+    matchedTxns.push(tx);
   }
-  return total;
+
+  essentialSpent = Math.max(0, essentialSpent);
+  funSpent = Math.max(0, funSpent);
+
+  return {
+    essentialSpent,
+    funSpent,
+    totalSpent: essentialSpent + funSpent,
+    daily,
+    byCategory,
+    txns: matchedTxns,
+  };
+}
+
+function computeWeeklyFunSpend(
+  txs: FinanceTransaction[],
+  categories: FinanceCategory[],
+  weekStart: Date,
+  _weekEnd?: Date,
+  trips: FinanceTrip[] = [],
+): number {
+  return computeWeekVariableSpend(txs, categories, weekStart, trips).funSpent;
 }
 
 function computeWeeklyEssentialSpend(
   txs: FinanceTransaction[],
   categories: FinanceCategory[],
   weekStart: Date,
-  weekEnd?: Date,
+  _weekEnd?: Date,
   trips: FinanceTrip[] = [],
 ): number {
-  const essentialCatIds = new Set(
-    categories
-      .filter(c => c.is_essential && c.type === 'variable')
-      .map(c => c.id),
-  );
-  if (essentialCatIds.size === 0) return 0;
-
-  return txs
-    .filter(tx => {
-      if (tx.amount >= 0) return false;
-      if (tx.is_transfer || tx.is_reimbursable || tx.is_fixed) return false;
-      if ((tx as any).goal_id) return false; // goal-funded spend draws from the goal pool
-      if ((tx as any).is_travel_spend || (tx as any).trip_id) return false;
-      if (!tx.category_id || !essentialCatIds.has(tx.category_id)) return false;
-      const d = parseUkDate(tx.posted_at);
-      if (isInAnyTrip(d, trips)) return false; // Auto-exclude spend on trip dates
-      if (d < weekStart) return false;
-      if (weekEnd && d >= weekEnd) return false;
-      return true;
-    })
-    .reduce((sum, tx) => sum + Math.abs(baseAmt(tx)), 0);
+  return computeWeekVariableSpend(txs, categories, weekStart, trips).essentialSpent;
 }
 
 /** Compute rolling average weekly spend over last N complete weeks (ALL non-transfer spend) */

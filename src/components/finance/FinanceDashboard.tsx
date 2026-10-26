@@ -14,7 +14,7 @@ import { useFixedExpenses } from '@/hooks/useFixedExpenses';
 import { useWeeklyBoosts } from '@/hooks/useWeeklyBoosts';
 import { useWeekTypes } from '@/hooks/useWeekTypes';
 import { useFinanceTrips } from '@/hooks/useFinanceTrips';
-import { computePolicySnapshot } from '@/lib/policyEngine';
+import { computePolicySnapshot, computeWeekVariableSpend } from '@/lib/policyEngine';
 import { formatCurrency, baseAmt, parseUkDate } from '@/lib/financeUtils';
 import { calcTakeHome, type StudentLoanPlan } from '@/lib/ukTakeHome';
 import { MultiSegmentDonut } from '@/components/finance/MultiSegmentDonut';
@@ -151,40 +151,26 @@ export function FinanceDashboard() {
   const daysInMonth = getDaysInMonth(monthStart);
   const daysElapsed = getDate(now);
 
-  // Weekly spend + Mon-Sun daily bar chart data
+  // Weekly spend + Mon-Sun daily bar chart data (using canonical computeWeekVariableSpend)
   const { essentialSpentThisWeek, funSpentThisWeek, weekDailyBars } = useMemo(() => {
-    let essential = 0;
-    let fun = 0;
-    const bars = DAY_LABELS.map(label => ({ label, essential: 0, fun: 0 }));
-
-    for (const tx of finance.transactions) {
-      if (tx.amount >= 0 || tx.is_transfer || tx.is_reimbursable) continue;
-      if ((tx as any).goal_id || (tx as any).is_travel_spend) continue;
-      const d = parseUkDate(tx.posted_at);
-      if (d < weekStart || d > weekEnd) continue;
-
-      const cat = catMap.get(tx.category_id || '');
-      if (cat?.exclude_from_reports || cat?.type === 'income' || cat?.type === 'transfer') continue;
-      if (isFixedTx(tx)) continue;
-
-      const amt = Math.abs(baseAmt(tx));
-      const dayIdx = Math.min(6, Math.max(0, differenceInDays(d, weekStart)));
-
-      if (essentialCatIds.has(tx.category_id || '')) {
-        essential += amt;
-        bars[dayIdx].essential += amt;
-      } else {
-        fun += amt;
-        bars[dayIdx].fun += amt;
-      }
-    }
+    const breakdown = computeWeekVariableSpend(
+      finance.transactions,
+      finance.categories,
+      weekStart,
+      trips
+    );
+    const bars = DAY_LABELS.map((label, idx) => ({
+      label,
+      essential: breakdown.daily[idx]?.essential || 0,
+      fun: breakdown.daily[idx]?.fun || 0,
+    }));
 
     return {
-      essentialSpentThisWeek: essential,
-      funSpentThisWeek: fun,
+      essentialSpentThisWeek: breakdown.essentialSpent,
+      funSpentThisWeek: breakdown.funSpent,
       weekDailyBars: bars,
     };
-  }, [finance.transactions, weekStart, weekEnd, catMap, essentialCatIds, isFixedTx]);
+  }, [finance.transactions, finance.categories, weekStart, trips]);
 
   // Monthly spend
   const { essentialSpentMonth, funSpentMonth, fixedSpentMonth } = useMemo(() => {
