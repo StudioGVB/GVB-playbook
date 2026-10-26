@@ -10,6 +10,12 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import { useFinanceData } from '@/hooks/useFinanceData';
 import { useFinanceAssumptions } from '@/hooks/useFinanceAssumptions';
 import { useFixedExpenses, FREQ_TO_MONTHLY } from '@/hooks/useFixedExpenses';
@@ -20,7 +26,7 @@ import { formatCurrency, baseAmt, parseUkDate } from '@/lib/financeUtils';
 import MonthlyCashFlowBreakdown from '@/components/finance/MonthlyCashFlowBreakdown';
 import {
   startOfMonth, endOfMonth, subMonths, addMonths, format,
-  getDaysInMonth, getDate,
+  getDaysInMonth, getDate, getDay,
 } from 'date-fns';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import {
@@ -28,6 +34,7 @@ import {
   Lock, TrendingUp, TrendingDown, Minus, DollarSign,
   Pencil, Gauge, LayoutGrid, Sparkles,
   Award, MapPin, BarChart3, PiggyBank, Percent, CheckCircle2, Clock,
+  Flame, Calendar,
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -631,6 +638,138 @@ export default function FinanceMonthly() {
   // Category drill-down (for clicking any category row)
   const [selectedCategory, setSelectedCategory] = useState<{ catId: string; name: string; color: string } | null>(null);
   const [selectedDayNum, setSelectedDayNum] = useState<number | null>(null);
+  const [dailyViewMode, setDailyViewMode] = useState<'heatmap' | 'timeline'>('heatmap');
+
+  // Heatmap & Habit Trends calculation
+  const heatmapData = useMemo(() => {
+    const daysInMonth = getDaysInMonth(monthStart);
+    // Find weekday index for 1st of month: Monday = 0, ..., Sunday = 6
+    const firstDayWeekday = (getDay(monthStart) + 6) % 7;
+
+    const days = Array.from({ length: daysInMonth }, (_, i) => {
+      const dayNum = i + 1;
+      const dayDate = new Date(monthStart.getFullYear(), monthStart.getMonth(), dayNum);
+      const dayOfWeek = (getDay(dayDate) + 6) % 7; // 0 = Mon, 6 = Sun
+      const isWeekend = dayOfWeek === 5 || dayOfWeek === 6; // Sat or Sun
+
+      const dayTxns = monthTxns.filter(tx => {
+        if (tx.amount >= 0 || tx.is_transfer || tx.is_reimbursable) return false;
+        if ((tx as any).goal_id || isFixedTx(tx)) return false;
+        const cat = catMap.get(tx.category_id || '');
+        if (cat?.exclude_from_reports || cat?.type === 'income' || cat?.type === 'transfer') return false;
+        const txDate = parseUkDate(tx.posted_at);
+        return getDate(txDate) === dayNum &&
+               txDate.getMonth() === monthStart.getMonth() &&
+               txDate.getFullYear() === monthStart.getFullYear();
+      });
+
+      let essential = 0;
+      let fun = 0;
+      let topMerchant = '';
+      let topMerchantAmount = 0;
+
+      for (const tx of dayTxns) {
+        const amt = Math.abs(baseAmt(tx));
+        if (essentialCatIds.has(tx.category_id || '')) {
+          essential += amt;
+        } else {
+          fun += amt;
+        }
+        if (amt > topMerchantAmount) {
+          topMerchantAmount = amt;
+          topMerchant = tx.merchant || tx.description || 'Expense';
+        }
+      }
+
+      const total = essential + fun;
+      return {
+        dayNum,
+        date: dayDate,
+        dayOfWeek,
+        isWeekend,
+        essential,
+        fun,
+        total,
+        txCount: dayTxns.length,
+        topMerchant,
+        topMerchantAmount,
+      };
+    });
+
+    const maxSpent = Math.max(...days.map(d => d.total), 1);
+    const nonZeroDays = days.filter(d => d.total > 0);
+    const avgDailySpent = nonZeroDays.length > 0
+      ? nonZeroDays.reduce((sum, d) => sum + d.total, 0) / nonZeroDays.length
+      : 0;
+
+    // Heat Level (0 to 5)
+    const getHeatLevel = (total: number): number => {
+      if (total <= 0.01) return 0;
+      const ratio = total / maxSpent;
+      if (ratio > 0.85) return 5;
+      if (ratio > 0.60) return 4;
+      if (ratio > 0.35) return 3;
+      if (ratio > 0.15) return 2;
+      return 1;
+    };
+
+    // Trends & Habits
+    // 1. Top 3 spending spikes
+    const sortedBySpend = [...days].filter(d => d.total > 0).sort((a, b) => b.total - a.total);
+    const topSpikes = sortedBySpend.slice(0, 3);
+    const topSpikeDayNums = new Set(topSpikes.map(s => s.dayNum));
+
+    // 2. Weekday vs Weekend spending
+    const weekdayDays = days.filter(d => !d.isWeekend);
+    const weekendDays = days.filter(d => d.isWeekend);
+    const weekdayTotal = weekdayDays.reduce((s, d) => s + d.total, 0);
+    const weekendTotal = weekendDays.reduce((s, d) => s + d.total, 0);
+    const weekdayAvg = weekdayDays.length > 0 ? weekdayTotal / weekdayDays.length : 0;
+    const weekendAvg = weekendDays.length > 0 ? weekendTotal / weekendDays.length : 0;
+    const weekendMultiplier = weekdayAvg > 0 ? (weekendAvg / weekdayAvg) : 0;
+
+    // 3. Day of week totals (Mon..Sun)
+    const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    const dayShortNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    const byDayOfWeek = Array.from({ length: 7 }, (_, dow) => {
+      const matchDays = days.filter(d => d.dayOfWeek === dow);
+      const total = matchDays.reduce((s, d) => s + d.total, 0);
+      const avg = matchDays.length > 0 ? total / matchDays.length : 0;
+      return {
+        dow,
+        name: dayNames[dow],
+        shortName: dayShortNames[dow],
+        total,
+        avg,
+        count: matchDays.length,
+      };
+    });
+    const peakDayOfWeek = [...byDayOfWeek].sort((a, b) => b.total - a.total)[0];
+
+    // 4. No-spend days count
+    const noSpendDaysCount = days.filter(d => d.total <= 0.01).length;
+    const noSpendPct = Math.round((noSpendDaysCount / daysInMonth) * 100);
+
+    return {
+      days,
+      firstDayWeekday,
+      maxSpent,
+      avgDailySpent,
+      getHeatLevel,
+      topSpikes,
+      topSpikeDayNums,
+      weekdayTotal,
+      weekendTotal,
+      weekdayAvg,
+      weekendAvg,
+      weekendMultiplier,
+      byDayOfWeek,
+      peakDayOfWeek,
+      noSpendDaysCount,
+      noSpendPct,
+      totalVariableSpent: days.reduce((s, d) => s + d.total, 0),
+    };
+  }, [monthStart, monthTxns, catMap, isFixedTx, essentialCatIds]);
 
   const selectedMonthlyDayDate = useMemo(() => {
     if (selectedDayNum === null) return null;
@@ -1645,80 +1784,387 @@ export default function FinanceMonthly() {
             </div>
           </div>
 
-          {/* BLOCK 4: DAILY VARIABLE SPENDING TIMELINE */}
-          <Card className="rounded-2xl border border-slate-200/90 bg-white shadow-xs">
-            <CardContent className="p-5">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
-                <div>
-                  <p className="text-sm font-display font-bold text-slate-900">Daily Variable Spending Timeline</p>
-                  <p className="text-xs text-slate-500">
-                    Click any day to inspect or recategorise transactions · Daily target average: <strong>{fmt(targetDailyVariable)}/day</strong>
-                  </p>
+          {/* BLOCK 4: MONTHLY SPENDING HEATMAP & HABIT TRENDS */}
+          <Card className="rounded-2xl border border-slate-200/90 bg-white shadow-xs overflow-hidden">
+            <CardContent className="p-5 sm:p-6 space-y-5">
+              {/* Header with Title and View Switcher */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-slate-100">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-rose-50 border border-rose-200/70 flex items-center justify-center text-rose-600 shrink-0">
+                    <Flame className="w-5 h-5 fill-rose-500/20 text-rose-600" />
+                  </div>
+                  <div>
+                    <h3 className="text-base sm:text-lg font-display font-bold text-slate-900 flex items-center gap-2">
+                      Monthly Spending Heatmap
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      Red intensity reflects heavier spending days · Click any day to inspect transactions & recategorise · Target: <strong>{fmt(targetDailyVariable)}/day</strong>
+                    </p>
+                  </div>
                 </div>
-                <div className="flex items-center gap-4 text-xs">
-                  <div className="flex items-center gap-1.5">
-                    <div className="w-2.5 h-2.5 rounded-full bg-purple-600" />
-                    <span className="text-slate-600 font-medium">Essentials</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <div className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
-                    <span className="text-slate-600 font-medium">Fun Money</span>
-                  </div>
+
+                {/* View Switcher: Heatmap vs Timeline */}
+                <div className="inline-flex rounded-xl border border-slate-200 p-0.5 bg-slate-50 text-xs shrink-0 self-start sm:self-auto">
+                  <button
+                    type="button"
+                    onClick={() => setDailyViewMode('heatmap')}
+                    className={cn(
+                      "flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-display font-semibold transition-all",
+                      dailyViewMode === 'heatmap'
+                        ? "bg-white shadow-xs text-rose-600 font-bold"
+                        : "text-slate-600 hover:text-slate-900"
+                    )}
+                  >
+                    <Flame className="w-3.5 h-3.5" />
+                    Heatmap
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDailyViewMode('timeline')}
+                    className={cn(
+                      "flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-display font-semibold transition-all",
+                      dailyViewMode === 'timeline'
+                        ? "bg-white shadow-xs text-slate-900 font-bold"
+                        : "text-slate-600 hover:text-slate-900"
+                    )}
+                  >
+                    <BarChart3 className="w-3.5 h-3.5" />
+                    Timeline
+                  </button>
                 </div>
               </div>
 
-              <div className="flex items-end gap-px h-36 pt-4">
-                {dailyData.map((day, i) => {
-                  const total = day.essential + day.fun;
-                  const essH = total > 0 ? (day.essential / maxDaily) * 100 : 0;
-                  const funH = total > 0 ? (day.fun / maxDaily) * 100 : 0;
-                  const isToday = monthStart.getMonth() === new Date().getMonth() &&
-                    monthStart.getFullYear() === new Date().getFullYear() &&
-                    i + 1 === new Date().getDate();
-                  const isSelected = selectedDayNum === i + 1;
-                  return (
-                    <div
-                      key={i}
-                      onClick={() => setSelectedDayNum(i + 1)}
-                      className={cn(
-                        "flex-1 flex flex-col items-center justify-end h-full group relative cursor-pointer hover:bg-slate-100/80 rounded-sm p-0.5 transition-all",
-                        isSelected && "bg-pink-50 ring-1 ring-[#FF2EB8]"
-                      )}
-                      title={`Click to view transactions for ${format(monthStart, 'MMM')} ${i + 1}`}
-                    >
-                      {total > 0 && (
-                        <div className="absolute -top-7 bg-slate-900 text-white rounded px-1.5 py-0.5 text-[10px] font-semibold opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10 whitespace-nowrap shadow-xs">
-                          {fmt(total)}
+              {dailyViewMode === 'heatmap' ? (
+                /* --- VIEW 1: CALENDAR HEATMAP --- */
+                <div className="space-y-4">
+                  {/* Day of Week Headers (Mon - Sun) */}
+                  <div className="grid grid-cols-7 gap-1.5 sm:gap-2 text-center">
+                    {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d, idx) => {
+                      const isWeekendCol = idx === 5 || idx === 6;
+                      return (
+                        <div
+                          key={d}
+                          className={cn(
+                            "text-xs font-display font-bold py-1 rounded-md",
+                            isWeekendCol ? "text-rose-600 bg-rose-50/60" : "text-slate-500"
+                          )}
+                        >
+                          {d}
                         </div>
-                      )}
-                      <div className="w-full flex flex-col justify-end" style={{ height: '100%' }}>
-                        {funH > 0 && (
-                          <div
-                            className="w-full rounded-t-sm bg-emerald-500 group-hover:brightness-110"
-                            style={{ height: `${funH}%`, minHeight: funH > 0 ? 2 : 0 }}
-                          />
-                        )}
-                        {essH > 0 && (
-                          <div
-                            className="w-full bg-purple-600 group-hover:brightness-110"
-                            style={{
-                              height: `${essH}%`,
-                              minHeight: essH > 0 ? 2 : 0,
-                              borderRadius: funH > 0 ? 0 : '2px 2px 0 0',
-                            }}
-                          />
+                      );
+                    })}
+                  </div>
+
+                  {/* Calendar Matrix with Red Heat Intensity */}
+                  <div className="grid grid-cols-7 gap-1.5 sm:gap-2">
+                    {/* Empty padding cells for days prior to 1st of month */}
+                    {Array.from({ length: heatmapData.firstDayWeekday }).map((_, idx) => (
+                      <div
+                        key={`empty-${idx}`}
+                        className="rounded-xl sm:rounded-2xl min-h-[64px] sm:min-h-[80px] bg-slate-50/40 border border-dashed border-slate-200/50"
+                      />
+                    ))}
+
+                    {/* Active Days */}
+                    {heatmapData.days.map((day) => {
+                      const heatLevel = heatmapData.getHeatLevel(day.total);
+                      const isToday = monthStart.getMonth() === new Date().getMonth() &&
+                        monthStart.getFullYear() === new Date().getFullYear() &&
+                        day.dayNum === new Date().getDate();
+                      const isSelected = selectedDayNum === day.dayNum;
+                      const isTopSpike = heatmapData.topSpikeDayNums.has(day.dayNum) && day.total > 0;
+
+                      return (
+                        <div
+                          key={day.dayNum}
+                          onClick={() => setSelectedDayNum(day.dayNum)}
+                          className={cn(
+                            "relative rounded-xl sm:rounded-2xl p-2 sm:p-2.5 min-h-[66px] sm:min-h-[82px] flex flex-col justify-between transition-all cursor-pointer group border select-none",
+                            // Heat Color Mapping
+                            heatLevel === 0 && "bg-slate-50/80 border-slate-200/70 text-slate-500 hover:bg-slate-100 hover:border-slate-300",
+                            heatLevel === 1 && "bg-rose-50 border-rose-200 text-rose-900 hover:bg-rose-100 hover:border-rose-300 shadow-2xs",
+                            heatLevel === 2 && "bg-rose-100/90 border-rose-300 text-rose-950 hover:bg-rose-200 hover:border-rose-400 shadow-xs",
+                            heatLevel === 3 && "bg-rose-300 border-rose-400 text-rose-950 font-medium hover:bg-rose-400 hover:border-rose-500 shadow-xs",
+                            heatLevel === 4 && "bg-rose-500 border-rose-600 text-white font-bold hover:bg-rose-600 hover:border-rose-700 shadow-xs",
+                            heatLevel === 5 && "bg-red-600 border-red-700 text-white font-black hover:bg-red-700 shadow-sm ring-2 ring-red-400/70",
+                            // Selected or Today Highlights
+                            isSelected && "ring-2 ring-[#FF2EB8] shadow-md scale-[1.02] z-10",
+                            isToday && !isSelected && "ring-2 ring-purple-500/80"
+                          )}
+                          title={`${format(day.date, 'EEEE, d MMMM')}: ${fmt(day.total)}${day.txCount > 0 ? ` (${day.txCount} txs)` : ''}${day.topMerchant ? ` · Largest: ${day.topMerchant}` : ''}`}
+                        >
+                          {/* Day Header */}
+                          <div className="flex items-center justify-between">
+                            <span className={cn(
+                              "text-xs sm:text-sm font-display font-bold leading-none",
+                              heatLevel >= 4 ? "text-white" : heatLevel >= 2 ? "text-rose-950" : "text-slate-700",
+                              isToday && "text-purple-600 font-black"
+                            )}>
+                              {day.dayNum}
+                            </span>
+                            <div className="flex items-center gap-0.5">
+                              {isTopSpike && (
+                                <span
+                                  className={cn(
+                                    "text-[9px] font-bold px-1 py-0.2 rounded-sm flex items-center gap-0.5",
+                                    heatLevel >= 4 ? "bg-white/20 text-white" : "bg-red-100 text-red-700"
+                                  )}
+                                  title="Top 3 spending spike this month"
+                                >
+                                  <Flame className="w-2.5 h-2.5 fill-current" />
+                                </span>
+                              )}
+                              {isToday && (
+                                <span className="text-[8px] uppercase tracking-wider font-extrabold px-1 rounded bg-[#FF2EB8] text-white">
+                                  Today
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Day Spend & Count */}
+                          <div className="mt-1">
+                            <div className={cn(
+                              "text-xs sm:text-sm font-display font-black tabular-nums leading-tight truncate",
+                              heatLevel >= 4 ? "text-white" : heatLevel >= 1 ? "text-rose-950" : "text-slate-400 font-medium"
+                            )}>
+                              {day.total > 0 ? fmt(day.total) : '£0'}
+                            </div>
+                            <div className={cn(
+                              "text-[9px] sm:text-[10px] truncate leading-none mt-0.5",
+                              heatLevel >= 4 ? "text-rose-100" : "text-slate-500"
+                            )}>
+                              {day.txCount > 0 ? `${day.txCount} tx${day.txCount > 1 ? 's' : ''}` : 'No spend'}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Heat Scale Legend */}
+                  <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-100 text-xs">
+                    <span className="text-slate-500 font-medium flex items-center gap-1">
+                      <Flame className="w-3.5 h-3.5 text-rose-500" />
+                      Spending Heat Scale:
+                    </span>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <div className="flex items-center gap-1">
+                        <div className="w-3.5 h-3.5 rounded bg-slate-50 border border-slate-200" />
+                        <span className="text-[11px] text-slate-500">£0 No Spend</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <div className="w-3.5 h-3.5 rounded bg-rose-50 border border-rose-200" />
+                        <span className="text-[11px] text-slate-600">Light</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <div className="w-3.5 h-3.5 rounded bg-rose-100 border border-rose-300" />
+                        <span className="text-[11px] text-slate-600">Moderate</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <div className="w-3.5 h-3.5 rounded bg-rose-300 border border-rose-400" />
+                        <span className="text-[11px] text-slate-700">High</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <div className="w-3.5 h-3.5 rounded bg-rose-500 border border-rose-600" />
+                        <span className="text-[11px] text-rose-700 font-semibold">Heavy</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <div className="w-3.5 h-3.5 rounded bg-red-600 border border-red-700 text-white flex items-center justify-center text-[8px] font-black">🔥</div>
+                        <span className="text-[11px] text-red-700 font-bold">Peak Spike</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* HABITS & TRENDS INSIGHT CARDS */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-2">
+                    {/* 1. Top 3 Spikes */}
+                    <div className="p-3.5 rounded-2xl bg-rose-50/60 border border-rose-200/70 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-display font-bold uppercase tracking-wider text-rose-700 flex items-center gap-1">
+                          <Flame className="w-3.5 h-3.5 text-red-500" />
+                          Top Spending Spikes
+                        </span>
+                        <span className="text-[10px] text-rose-600 font-medium">Click to inspect</span>
+                      </div>
+                      <div className="space-y-1.5">
+                        {heatmapData.topSpikes.length === 0 ? (
+                          <p className="text-xs text-slate-500">No variable spending recorded.</p>
+                        ) : (
+                          heatmapData.topSpikes.map((spike, idx) => (
+                            <button
+                              key={spike.dayNum}
+                              type="button"
+                              onClick={() => setSelectedDayNum(spike.dayNum)}
+                              className="w-full flex items-center justify-between text-left p-1.5 rounded-lg hover:bg-white/80 transition-colors text-xs"
+                            >
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                <span className="w-4 h-4 rounded-full bg-rose-200 text-rose-800 text-[10px] font-bold flex items-center justify-center shrink-0">
+                                  {idx + 1}
+                                </span>
+                                <span className="font-semibold text-slate-800 truncate">
+                                  {format(spike.date, 'EEE, d MMM')}
+                                </span>
+                                {spike.topMerchant && (
+                                  <span className="text-[10px] text-slate-500 truncate max-w-[80px]">
+                                    ({spike.topMerchant})
+                                  </span>
+                                )}
+                              </div>
+                              <span className="font-black text-rose-950 tabular-nums shrink-0 ml-1">
+                                {fmt(spike.total)}
+                              </span>
+                            </button>
+                          ))
                         )}
                       </div>
-                      <span className={cn(
-                        "text-[9px] mt-1 tabular-nums",
-                        isToday ? "font-black text-[#FF2EB8]" : "text-slate-400"
-                      )}>
-                        {i + 1}
-                      </span>
                     </div>
-                  );
-                })}
-              </div>
+
+                    {/* 2. Weekend vs Weekday Habit */}
+                    <div className="p-3.5 rounded-2xl bg-amber-50/60 border border-amber-200/70 space-y-2">
+                      <span className="text-[11px] font-display font-bold uppercase tracking-wider text-amber-800 flex items-center gap-1">
+                        <Calendar className="w-3.5 h-3.5 text-amber-600" />
+                        Weekend vs Weekday
+                      </span>
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-slate-600">Weekend Avg:</span>
+                          <span className="font-bold text-slate-900 tabular-nums">{fmt(heatmapData.weekendAvg)}/day</span>
+                        </div>
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-slate-600">Weekday Avg:</span>
+                          <span className="font-bold text-slate-900 tabular-nums">{fmt(heatmapData.weekdayAvg)}/day</span>
+                        </div>
+                      </div>
+                      <div className="text-[11px] font-medium text-amber-900 bg-white/70 rounded-lg p-1.5 border border-amber-200/60 leading-tight">
+                        {heatmapData.weekendMultiplier > 1.25 ? (
+                          <>Weekends are <strong className="font-bold text-amber-950">{heatmapData.weekendMultiplier.toFixed(1)}× higher</strong> burn than weekdays.</>
+                        ) : heatmapData.weekendMultiplier > 0.8 ? (
+                          <>Spending is <strong className="font-bold text-amber-950">balanced</strong> evenly across the week.</>
+                        ) : (
+                          <>Weekdays are higher burn than weekends this month.</>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* 3. Peak Day of Week */}
+                    <div className="p-3.5 rounded-2xl bg-purple-50/60 border border-purple-200/70 space-y-2">
+                      <span className="text-[11px] font-display font-bold uppercase tracking-wider text-purple-800 flex items-center gap-1">
+                        <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+                        Peak Day of Week
+                      </span>
+                      <div>
+                        <p className="text-base font-display font-black text-purple-950">
+                          {heatmapData.peakDayOfWeek?.name || 'None'}
+                        </p>
+                        <p className="text-xs text-purple-900/80 mt-0.5">
+                          {heatmapData.peakDayOfWeek && heatmapData.peakDayOfWeek.total > 0 ? (
+                            <>
+                              <strong className="font-bold">{fmt(heatmapData.peakDayOfWeek.total)}</strong> total ({fmt(heatmapData.peakDayOfWeek.avg)}/day avg)
+                            </>
+                          ) : (
+                            'No spend recorded yet'
+                          )}
+                        </p>
+                      </div>
+                      <p className="text-[10px] text-purple-700/80 pt-1 border-t border-purple-100">
+                        {heatmapData.peakDayOfWeek && heatmapData.totalVariableSpent > 0 ? (
+                          `${Math.round((heatmapData.peakDayOfWeek.total / heatmapData.totalVariableSpent) * 100)}% of your variable spending hits on ${heatmapData.peakDayOfWeek.shortName}s.`
+                        ) : ''}
+                      </p>
+                    </div>
+
+                    {/* 4. No-Spend Days Tracked */}
+                    <div className="p-3.5 rounded-2xl bg-emerald-50/60 border border-emerald-200/70 space-y-2">
+                      <span className="text-[11px] font-display font-bold uppercase tracking-wider text-emerald-800 flex items-center gap-1">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                        No-Spend Days
+                      </span>
+                      <div>
+                        <p className="text-2xl font-display font-black text-emerald-950 tabular-nums">
+                          {heatmapData.noSpendDaysCount} <span className="text-xs font-semibold text-emerald-700">days</span>
+                        </p>
+                        <p className="text-xs text-emerald-800 font-medium mt-0.5">
+                          {heatmapData.noSpendPct}% of the month had £0 variable spend
+                        </p>
+                      </div>
+                      <div className="h-1.5 rounded-full bg-emerald-200/60 overflow-hidden w-full">
+                        <div
+                          className="h-full bg-emerald-500 rounded-full transition-all"
+                          style={{ width: `${Math.min(100, heatmapData.noSpendPct)}%` }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                /* --- VIEW 2: STACKED BAR TIMELINE --- */
+                <div className="space-y-4">
+                  <div className="flex items-center justify-end gap-4 text-xs">
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-2.5 h-2.5 rounded-full bg-purple-600" />
+                      <span className="text-slate-600 font-medium">Essentials</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+                      <span className="text-slate-600 font-medium">Fun Money</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-end gap-px h-36 pt-4">
+                    {dailyData.map((day, i) => {
+                      const total = day.essential + day.fun;
+                      const essH = total > 0 ? (day.essential / maxDaily) * 100 : 0;
+                      const funH = total > 0 ? (day.fun / maxDaily) * 100 : 0;
+                      const isToday = monthStart.getMonth() === new Date().getMonth() &&
+                        monthStart.getFullYear() === new Date().getFullYear() &&
+                        i + 1 === new Date().getDate();
+                      const isSelected = selectedDayNum === i + 1;
+                      return (
+                        <div
+                          key={i}
+                          onClick={() => setSelectedDayNum(i + 1)}
+                          className={cn(
+                            "flex-1 flex flex-col items-center justify-end h-full group relative cursor-pointer hover:bg-slate-100/80 rounded-sm p-0.5 transition-all",
+                            isSelected && "bg-pink-50 ring-1 ring-[#FF2EB8]"
+                          )}
+                          title={`Click to view transactions for ${format(monthStart, 'MMM')} ${i + 1}`}
+                        >
+                          {total > 0 && (
+                            <div className="absolute -top-7 bg-slate-900 text-white rounded px-1.5 py-0.5 text-[10px] font-semibold opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10 whitespace-nowrap shadow-xs">
+                              {fmt(total)}
+                            </div>
+                          )}
+                          <div className="w-full flex flex-col justify-end" style={{ height: '100%' }}>
+                            {funH > 0 && (
+                              <div
+                                className="w-full rounded-t-sm bg-emerald-500 group-hover:brightness-110"
+                                style={{ height: `${funH}%`, minHeight: funH > 0 ? 2 : 0 }}
+                              />
+                            )}
+                            {essH > 0 && (
+                              <div
+                                className="w-full bg-purple-600 group-hover:brightness-110"
+                                style={{
+                                  height: `${essH}%`,
+                                  minHeight: essH > 0 ? 2 : 0,
+                                  borderRadius: funH > 0 ? 0 : '2px 2px 0 0',
+                                }}
+                              />
+                            )}
+                          </div>
+                          <span className={cn(
+                            "text-[9px] mt-1 tabular-nums",
+                            isToday ? "font-black text-[#FF2EB8]" : "text-slate-400"
+                          )}>
+                            {i + 1}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
 
