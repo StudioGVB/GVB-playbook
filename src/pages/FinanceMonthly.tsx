@@ -270,7 +270,10 @@ export default function FinanceMonthly() {
   }, [finance.goals, finance.convertToBase, selectedMonth, incomeTotal, expectedIncomeVal, snapshot]);
 
   // Savings Stash: shock absorber pool that absorbs weekly/monthly overspend
-  const stashGoal = useMemo(() => finance.goals.find(g => (g as any).is_stash === true || g.name.toLowerCase().includes('stash')), [finance.goals]);
+  const stashGoal = useMemo(() => {
+    const stashes = finance.goals.filter(g => (g as any).is_stash === true || g.name.toLowerCase().includes('stash'));
+    return stashes.find(g => g.currency === baseCurrency) || stashes[0];
+  }, [finance.goals, baseCurrency]);
   const stashBalance = stashGoal ? finance.convertToBase(stashGoal.assigned_amount || 0, stashGoal.currency) : 0;
 
   // Pace projection (focused on Variable Spending: Essentials + Fun)
