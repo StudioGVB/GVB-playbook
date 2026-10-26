@@ -269,6 +269,10 @@ export default function FinanceMonthly() {
       : directGoalSavings;
   }, [finance.goals, finance.convertToBase, selectedMonth, incomeTotal, expectedIncomeVal, snapshot]);
 
+  // Savings Stash: shock absorber pool that absorbs weekly/monthly overspend
+  const stashGoal = useMemo(() => finance.goals.find(g => (g as any).is_stash === true || g.name.toLowerCase().includes('stash')), [finance.goals]);
+  const stashBalance = stashGoal ? finance.convertToBase(stashGoal.assigned_amount || 0, stashGoal.currency) : 0;
+
   // Pace projection (focused on Variable Spending: Essentials + Fun)
   const today = new Date();
   const isCurrentMonth = today >= monthStart && today <= monthEnd;
@@ -1013,97 +1017,101 @@ export default function FinanceMonthly() {
               </div>
             </div>
 
-            {/* 3. Essentials Variable */}
+            {/* 3. Unified Variable Spending (Weekly Allowance Combined) */}
             <div className={cn(
               "rounded-2xl border bg-white p-4 shadow-2xs flex flex-col justify-between gap-2",
-              essentialSpent > monthlyEssentialBudget ? "border-rose-300 bg-rose-50/20" : "border-slate-200/90"
+              variableSpent > monthlyVariableBudget ? "border-rose-300 bg-rose-50/20" : "border-slate-200/90"
             )}>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <div className="w-7 h-7 rounded-lg bg-purple-100 flex items-center justify-center shrink-0">
                     <ShoppingCart className="w-4 h-4 text-purple-700" />
                   </div>
-                  <p className="text-[11px] font-display font-bold uppercase tracking-wider text-purple-800">
-                    2. Essentials
-                  </p>
+                  <div>
+                    <p className="text-[11px] font-display font-bold uppercase tracking-wider text-purple-800">
+                      2. Variable Spending
+                    </p>
+                  </div>
                 </div>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-50 text-purple-700">
-                  {monthlyEssentialBudget > 0 ? `${Math.round((essentialSpent / monthlyEssentialBudget) * 100)}%` : '0%'}
+                <span className={cn(
+                  "text-[10px] font-bold px-2 py-0.5 rounded-full",
+                  variableSpent > monthlyVariableBudget ? "bg-rose-50 text-rose-700" : "bg-purple-50 text-purple-700"
+                )}>
+                  {monthlyVariableBudget > 0 ? `${Math.round((variableSpent / monthlyVariableBudget) * 100)}%` : '0%'}
                 </span>
               </div>
               <div>
                 <div className="font-display font-black tabular-nums text-2xl sm:text-[1.65rem] text-purple-700 leading-none">
-                  {fmt(essentialSpent)}
+                  {fmt(variableSpent)}
                 </div>
                 <p className="text-xs font-semibold text-slate-600 mt-1.5">
-                  of {fmt(monthlyEssentialBudget)} budget
+                  of {fmt(monthlyVariableBudget)} combined budget
                 </p>
                 <div className="mt-2 h-1.5 w-full rounded-full bg-slate-100 overflow-hidden">
                   <div
-                    className={cn("h-full rounded-full", essentialSpent > monthlyEssentialBudget ? "bg-rose-500" : "bg-purple-600")}
-                    style={{ width: `${Math.min(100, monthlyEssentialBudget > 0 ? (essentialSpent / monthlyEssentialBudget) * 100 : 0)}%` }}
+                    className={cn("h-full rounded-full", variableSpent > monthlyVariableBudget ? "bg-rose-500" : "bg-purple-600")}
+                    style={{ width: `${Math.min(100, monthlyVariableBudget > 0 ? (variableSpent / monthlyVariableBudget) * 100 : 0)}%` }}
                   />
                 </div>
-                <div className="text-[11px] text-slate-500 mt-1.5 flex items-center justify-between">
+                <div className="text-[10px] font-medium text-slate-500 mt-1.5 flex items-center justify-between">
                   <span>
-                    {essentialSpent <= monthlyEssentialBudget
-                      ? `${fmt(monthlyEssentialBudget - essentialSpent)} left`
-                      : `${fmt(essentialSpent - monthlyEssentialBudget)} over`}
+                    Ess {fmt(essentialSpent)} · Fun {fmt(funSpent)}
                   </span>
-                  <span className="flex items-center gap-0.5">
-                    {trendIcon(essentialSpent, prevTotalsProrated.essential)}
-                    {trendPercent(essentialSpent, prevTotalsProrated.essential)}
+                  <span className="tabular-nums">
+                    {variableSpent <= monthlyVariableBudget
+                      ? `${fmt(monthlyVariableBudget - variableSpent)} left`
+                      : `${fmt(variableSpent - monthlyVariableBudget)} over`}
                   </span>
                 </div>
               </div>
             </div>
 
-            {/* 4. Fun & Lifestyle */}
+            {/* 4. Savings Stash & Shock Absorber */}
             <div className={cn(
               "rounded-2xl border bg-white p-4 shadow-2xs flex flex-col justify-between gap-2",
-              funSpent > monthlyFunBudget ? "border-rose-300 bg-rose-50/20" : "border-slate-200/90"
+              variableSpent > monthlyVariableBudget
+                ? "border-amber-300 bg-amber-50/20"
+                : "border-slate-200/90"
             )}>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <div className="w-7 h-7 rounded-lg bg-emerald-100 flex items-center justify-center shrink-0">
-                    <PartyPopper className="w-4 h-4 text-emerald-700" />
+                  <div className="w-7 h-7 rounded-lg bg-amber-100 flex items-center justify-center shrink-0">
+                    <PiggyBank className="w-4 h-4 text-amber-700" />
                   </div>
-                  <p className="text-[11px] font-display font-bold uppercase tracking-wider text-emerald-800">
-                    3. Fun Money
+                  <p className="text-[11px] font-display font-bold uppercase tracking-wider text-amber-800">
+                    3. Savings Stash
                   </p>
                 </div>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700">
-                  {monthlyFunBudget > 0 ? `${Math.round((funSpent / monthlyFunBudget) * 100)}%` : '0%'}
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700">
+                  Shock Absorber
                 </span>
               </div>
               <div>
-                <div className="font-display font-black tabular-nums text-2xl sm:text-[1.65rem] text-emerald-600 leading-none">
-                  {fmt(funSpent)}
+                <div className="font-display font-black tabular-nums text-2xl sm:text-[1.65rem] text-amber-700 leading-none">
+                  {fmt(stashBalance)}
                 </div>
                 <p className="text-xs font-semibold text-slate-600 mt-1.5">
-                  of {fmt(monthlyFunBudget)} budget
+                  Available in Stash Pool
                 </p>
-                <div className="mt-2 h-1.5 w-full rounded-full bg-slate-100 overflow-hidden">
-                  <div
-                    className={cn("h-full rounded-full", funSpent > monthlyFunBudget ? "bg-rose-500" : "bg-emerald-500")}
-                    style={{ width: `${Math.min(100, monthlyFunBudget > 0 ? (funSpent / monthlyFunBudget) * 100 : 0)}%` }}
-                  />
+                <div className="mt-2 p-1.5 rounded-lg bg-slate-50 border border-slate-200/60 text-[10px] text-slate-600 leading-tight">
+                  {variableSpent > monthlyVariableBudget ? (
+                    <span className="text-amber-800 font-medium">
+                      Absorbing <strong>{fmt(variableSpent - monthlyVariableBudget)}</strong> monthly overspend so goals stay protected ✓
+                    </span>
+                  ) : (
+                    <span className="text-emerald-800 font-medium">
+                      Weekly underspend automatically sweeps here to protect goals ✓
+                    </span>
+                  )}
                 </div>
-                <div className="text-[11px] text-slate-500 mt-1.5 flex items-center justify-between">
-                  <span>
-                    {funSpent <= monthlyFunBudget
-                      ? `${fmt(monthlyFunBudget - funSpent)} left`
-                      : `${fmt(funSpent - monthlyFunBudget)} over`}
-                  </span>
-                  <span className="flex items-center gap-0.5">
-                    {trendIcon(funSpent, prevTotalsProrated.fun)}
-                    {trendPercent(funSpent, prevTotalsProrated.fun)}
-                  </span>
+                <div className="text-[10px] text-slate-500 mt-1.5 flex items-center justify-between">
+                  <span>Weekly Overspend Shield</span>
+                  <span className="font-medium text-slate-700">Auto-balanced</span>
                 </div>
               </div>
             </div>
 
-            {/* 5. Income & Pool Savings */}
+            {/* 5. Income & Goal Allocations */}
             <div className="rounded-2xl border border-sky-200/90 bg-gradient-to-br from-sky-50/50 via-white to-white p-4 shadow-2xs flex flex-col justify-between gap-2">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -1111,7 +1119,7 @@ export default function FinanceMonthly() {
                     <TrendingUp className="w-4 h-4 text-sky-700" />
                   </div>
                   <p className="text-[11px] font-display font-bold uppercase tracking-wider text-sky-800">
-                    Income &amp; Savings
+                    4. Income &amp; Goals
                   </p>
                 </div>
               </div>
