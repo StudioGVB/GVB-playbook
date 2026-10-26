@@ -148,22 +148,15 @@ export function isDuplicatePair(a: any, b: any): { isDuplicate: boolean; keeper:
     extA !== extB;
   const timeDiffMinutes = Math.abs(dateA.getTime() - dateB.getTime()) / (1000 * 60);
 
-  // If both transactions have distinct official bank API transaction IDs (e.g. two distinct Monzo tx_ IDs),
-  // they are guaranteed to be separate real-world card transactions, NOT clearing duplicates!
-  if (bothAreDistinctApiTx && diffDays > 0) {
-    return { isDuplicate: false, keeper: null, duplicate: null };
-  }
-
   // Condition 1: Same calendar day (unless both are verified distinct bank API events > 5 mins apart)
   const isSameDay = diffDays === 0 && (!bothAreDistinctApiTx || timeDiffMinutes <= 5);
 
-  // Condition 2: Weekend to Monday/Tuesday clearing
-  const dayEarlier = earlierDate.getDay(); // 5 = Fri, 6 = Sat, 0 = Sun
+  // Condition 2: Weekend to Monday/Tuesday clearing (Saturday/Sunday or Friday evening purchase clearing on Monday/Tuesday)
+  const dayEarlier = earlierDate.getDay(); // 6 = Sat, 0 = Sun, 5 = Fri
   const dayLater = laterDate.getDay();    // 1 = Mon, 2 = Tue
-  const isWeekendClearing =
-    (dayEarlier === 5 || dayEarlier === 6 || dayEarlier === 0) &&
-    (dayLater === 1 || dayLater === 2) &&
-    diffDays <= 4;
+  const isWeekendPurchase = dayEarlier === 6 || dayEarlier === 0 || (dayEarlier === 5 && earlierDate.getHours() >= 18);
+  const isMondayTuesdayClearing = dayLater === 1 || dayLater === 2;
+  const isWeekendClearing = isWeekendPurchase && isMondayTuesdayClearing && diffDays <= 4;
 
   // Condition 3: CSV import vs API sync
   const hasCsv = extA.includes('|') || extB.includes('|');
@@ -173,7 +166,7 @@ export function isDuplicatePair(a: any, b: any): { isDuplicate: boolean; keeper:
   // Condition 4: Amazon orders (auth vs capture can happen across 0-4 days)
   const isAmazonOrder = key === 'AMAZON' && diffDays <= 4;
 
-  // Condition 5: Near-identical description within 48h (unless distinct API txs)
+  // Condition 5: Near-identical description within 48h
   const cleanA = cleanMerchantString(`${descA} ${merchA}`);
   const cleanB = cleanMerchantString(`${descB} ${merchB}`);
   const isCloseTimeIdentical = cleanA === cleanB && diffDays <= 2 && (!bothAreDistinctApiTx || timeDiffMinutes <= 5);
