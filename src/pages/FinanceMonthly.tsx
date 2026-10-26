@@ -20,11 +20,13 @@ import { useFinanceData } from '@/hooks/useFinanceData';
 import { useFinanceAssumptions } from '@/hooks/useFinanceAssumptions';
 import { useFixedExpenses, FREQ_TO_MONTHLY } from '@/hooks/useFixedExpenses';
 import { useWeeklyBoosts } from '@/hooks/useWeeklyBoosts';
+import { useFinanceTrips } from '@/hooks/useFinanceTrips';
 import { useWeekTypes } from '@/hooks/useWeekTypes';
 import { computePolicySnapshot, computeRequiredGoalSavingsMonthly } from '@/lib/policyEngine';
 import { formatCurrency, baseAmt, parseUkDate } from '@/lib/financeUtils';
 import { deduplicateTransactions } from '@/lib/deduplication';
 import MonthlyCashFlowBreakdown from '@/components/finance/MonthlyCashFlowBreakdown';
+import MonthlyPotLedger from '@/components/finance/MonthlyPotLedger';
 import {
   startOfMonth, endOfMonth, subMonths, addMonths, format,
   getDaysInMonth, getDate, getDay,
@@ -88,7 +90,8 @@ export default function FinanceMonthly() {
   const finance = useFinanceData();
   const { assumptions, loading: assumptionsLoading, update: updateAssumptions } = useFinanceAssumptions();
   const { expenses: fixedExpenses, monthlyTotalInternal: fixedExpensesMonthly, monthlyTotal: fixedExpensesMonthlyAll, reimbursementsOn } = useFixedExpenses();
-  const { totalBoostThisWeek } = useWeeklyBoosts();
+  const { totalBoostThisWeek, boosts } = useWeeklyBoosts();
+  const { trips } = useFinanceTrips();
   const { weekTypeMap: wtMap } = useWeekTypes();
 
   const snapshot = useMemo(() => {
@@ -2321,6 +2324,27 @@ export default function FinanceMonthly() {
               )}
             </CardContent>
           </Card>
+
+          {/* Monthly Cash Flow & Pot Ledger (Where every dollar went) */}
+          <MonthlyPotLedger
+            selectedMonth={selectedMonth}
+            baseCurrency={baseCurrency}
+            incomeTotal={incomeTotal}
+            fixedMonthly={fixedMonthly}
+            fixedSpent={fixedSpent}
+            monthlyEssentialBudget={monthlyEssentialBudget}
+            essentialSpent={essentialSpent}
+            monthlyFunBudget={monthlyFunBudget}
+            funSpent={funSpent}
+            paidFixedTxns={paidFixedTxns}
+            variableCategoryBreakdown={variableCategoryBreakdown}
+            goals={finance.goals}
+            transactions={finance.transactions}
+            trips={trips}
+            boosts={boosts}
+            emergencyFloor={assumptions?.emergency_floor || 0}
+            convertToBase={finance.convertToBase}
+          />
 
         </TabsContent>
 
