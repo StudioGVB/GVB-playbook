@@ -140,6 +140,9 @@ export default function MonthlyPotLedger({
       .reduce((s, g) => s + convertToBase(g.assigned_amount || 0, g.currency), 0);
     const unassignedCash = Math.max(0, effectiveTotalCash - assignedOtherGoals);
 
+    // Target emergency floor
+    const targetEm = emergencyFloor > 0 ? emergencyFloor : 1000;
+
     // Helper: compute monthly delta for a goal in any given month mDate
     const getMonthDeltaForGoal = (g: FinanceGoal, mDate: Date) => {
       const mStart = startOfMonth(mDate);
@@ -158,7 +161,7 @@ export default function MonthlyPotLedger({
 
         const raw = `${t.merchant || ''} ${t.description || ''} ${(t as any).raw?.message || ''}`.toLowerCase();
         if (isEmergency) {
-          return raw.includes('emergency') || (raw.includes('saving') && Math.abs(baseAmt(t)) === 200 && (t.is_transfer || t.amount > 0));
+          return raw.includes('emergency') || (raw.includes('saving') && (t.is_transfer || t.amount > 0));
         }
         if (isStash) {
           return raw.includes('stash');
@@ -180,7 +183,7 @@ export default function MonthlyPotLedger({
         const txDate = new Date(t.posted_at);
         if (txDate >= mStart && txDate <= mEnd) {
           const bAmt = baseAmt(t);
-          if (t.amount > 0 || (t.is_transfer && bAmt > 0) || (isEmergency && Math.abs(bAmt) === 200)) {
+          if (t.amount > 0 || (t.is_transfer && bAmt > 0)) {
             const addedAmt = Math.abs(bAmt);
             txInflow += addedAmt;
             monthTxActivity.push({
@@ -277,16 +280,14 @@ export default function MonthlyPotLedger({
       // Emergency Fund target & current funding resolution
       let currentAssigned = convertToBase(g.assigned_amount || 0, g.currency);
       if (isEmergency) {
-        targetBase = emergencyFloor > 0 ? emergencyFloor : (targetBase > 0 ? targetBase : 1000);
-        // Consolidate across all emergency goals and detect unassigned cash / £200 deposit
+        targetBase = targetEm;
         const allEmGoals = goals.filter(x => (x as any).is_emergency === true || x.name.toLowerCase().includes('emergency'));
         const emAssignedSum = allEmGoals.reduce((s, x) => s + convertToBase(x.assigned_amount || 0, x.currency), 0);
         
-        // Did Gabriella put £200 in, or is there liquid cash?
+        // Funded by explicitly assigned funds OR liquid unassigned cash buffer
         currentAssigned = Math.max(
           emAssignedSum,
-          unassignedCash >= 200 ? 200 : unassignedCash,
-          200 // Explicitly tracks the £200 user added
+          Math.min(targetEm, unassignedCash)
         );
       }
 
@@ -294,7 +295,9 @@ export default function MonthlyPotLedger({
       if (isStash) {
         const allStashes = goals.filter(x => (x as any).is_stash === true || x.name.toLowerCase().includes('stash'));
         const stashAssignedSum = allStashes.reduce((s, x) => s + convertToBase(x.assigned_amount || 0, x.currency), 0);
-        currentAssigned = Math.max(stashBalance, stashAssignedSum);
+        // Excess cash above emergency floor flows to stash
+        const stashExcess = Math.max(0, unassignedCash - targetEm);
+        currentAssigned = Math.max(stashBalance, stashAssignedSum, stashExcess);
         if (targetBase <= 0 || targetBase === 9999) {
           targetBase = 0; // Open-ended shock absorber
         }
@@ -302,23 +305,11 @@ export default function MonthlyPotLedger({
 
       const selectedMonthData = getMonthDeltaForGoal(g, selectedMonth);
 
-      // For Emergency Fund in October: ensure the £200 contribution is reflected
-      if (isEmergency && selectedMonthData.contributions <= 0 && currentAssigned >= 200) {
-        selectedMonthData.contributions = 200;
-        selectedMonthData.netDelta = 200;
-        if (selectedMonthData.activityTransactions.length === 0) {
-          selectedMonthData.activityTransactions.push({
-            id: 'em_topup_oct',
-            description: 'Emergency Fund Top-Up',
-            amount: 200,
-            type: 'inflow',
-            date: format(selectedMonth, 'yyyy-MM-15'),
-          });
-        }
-      }
+      // If funds were situated this month and no prior activity:
+      const mStart = startOfMonth(selectedMonth);
+      const isCreatedThisMonth = g.created_at && new Date(g.created_at) >= mStart;
 
-      // For Stash in October: reflect excess money / weekly sweeps
-      if (isStash && currentAssigned > 0 && selectedMonthData.contributions <= 0) {
+      if ((isEmergency || isStash) && currentAssigned > 0 && selectedMonthData.contributions <= 0) {
         selectedMonthData.contributions = currentAssigned;
         selectedMonthData.netDelta = currentAssigned;
       }
@@ -328,7 +319,13 @@ export default function MonthlyPotLedger({
 
       if (isCurrentMonth) {
         endBalance = currentAssigned;
-        startBalance = Math.max(0, currentAssigned - selectedMonthData.netDelta);
+        // If created this month or newly situated, start balance is 0 and difference is the situated amount
+        if (isCreatedThisMonth || selectedMonthData.netDelta >= currentAssigned) {
+          startBalance = 0;
+          selectedMonthData.netDelta = endBalance;
+        } else {
+          startBalance = Math.max(0, currentAssigned - selectedMonthData.netDelta);
+        }
       } else if (isPastMonth) {
         let postDeltas = 0;
         let iterMonth = addMonths(startOfMonth(selectedMonth), 1);
@@ -397,8 +394,7 @@ export default function MonthlyPotLedger({
     // Fallback: If Emergency Fund was completely missing from goals
     // -------------------------------------------------------------
     if (!seenEmergency.handled) {
-      const targetEm = emergencyFloor > 0 ? emergencyFloor : 1000;
-      const emBalance = Math.max(unassignedCash >= 200 ? 200 : unassignedCash, 200);
+      const emBalance = Math.min(targetEm, unassignedCash);
 
       list.push({
         id: '__emergency_virtual__',
@@ -408,20 +404,14 @@ export default function MonthlyPotLedger({
         accentColor: '#10B981',
         targetBase: targetEm,
         startBalance: 0,
-        contributions: 200,
+        contributions: emBalance,
         spend: 0,
-        netDelta: 200,
+        netDelta: emBalance,
         endBalance: emBalance,
         progressPct: targetEm > 0 ? Math.min(100, (emBalance / targetEm) * 100) : 100,
         isCompleted: emBalance >= targetEm,
         deadlineLabel: 'Ongoing Reserve',
-        activityTransactions: [{
-          id: 'em_topup_oct',
-          description: 'Emergency Fund Top-Up',
-          amount: 200,
-          type: 'inflow',
-          date: format(selectedMonth, 'yyyy-MM-15'),
-        }],
+        activityTransactions: [],
       });
     }
 
@@ -429,7 +419,7 @@ export default function MonthlyPotLedger({
     // Fallback: If Savings Stash was completely missing from goals
     // -------------------------------------------------------------
     if (!seenStash.handled) {
-      const stashBal = Math.max(stashBalance, 17.01);
+      const stashBal = Math.max(stashBalance, Math.max(0, unassignedCash - targetEm));
       list.push({
         id: '__stash_virtual__',
         name: 'Savings Stash',
