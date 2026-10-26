@@ -775,16 +775,41 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
           <button
             key={key}
             onClick={() => setTransferFilter(key)}
-            className={`shrink-0 whitespace-nowrap px-3 py-1 rounded-full text-xs font-medium transition-colors border ${
+            className={`shrink-0 whitespace-nowrap px-3 py-1 rounded-full text-xs font-medium transition-colors border inline-flex items-center gap-1.5 ${
               transferFilter === key
                 ? 'bg-primary text-primary-foreground border-primary'
                 : 'bg-card text-muted-foreground border-border hover:border-primary/40'
             }`}
           >
-            {label}
+            <span>{label}</span>
+            {key === 'reimbursable_only' && reimbursableTotal > 0 && (
+              <span
+                className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold tabular-nums ${
+                  transferFilter === 'reimbursable_only'
+                    ? 'bg-white/20 text-white'
+                    : 'bg-sky-500/15 text-sky-700 dark:text-sky-300'
+                }`}
+              >
+                {formatCurrency(reimbursableTotal, baseCurrency)}
+              </span>
+            )}
           </button>
         ))}
       </div>
+
+      {transferFilter === 'reimbursable_only' && (
+        <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 rounded-2xl bg-sky-50/80 dark:bg-sky-950/30 border border-sky-200/80 dark:border-sky-800/50">
+          <div className="flex items-center gap-2 text-xs text-sky-950 dark:text-sky-100 font-medium">
+            <span>💼 Pending Work Claims</span>
+            <span className="text-sky-600/80 dark:text-sky-300/80">
+              ({reimbursableCount} {reimbursableCount === 1 ? 'item' : 'items'})
+            </span>
+          </div>
+          <Badge className="bg-sky-600 hover:bg-sky-600 text-white font-display font-bold text-xs px-3 py-1 rounded-full tabular-nums shadow-xs">
+            Total Outstanding: {formatCurrency(reimbursableTotal, baseCurrency)}
+          </Badge>
+        </div>
+      )}
 
       {/* Duplicate Transactions Alert Banner & Resolver Modal */}
       {duplicatePairs.length > 0 && (
