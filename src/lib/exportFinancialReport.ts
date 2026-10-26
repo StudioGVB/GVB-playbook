@@ -199,9 +199,13 @@ export function generate3MonthReportData({ finance, assumptions, fixedExpenses, 
   const activePools = sortedPools.map(g => {
     const isStash = (g as any).is_stash || g.name.toLowerCase().includes('stash');
     const remaining = Math.max(0, (g.target_amount || 0) - (g.assigned_amount || 0));
+    const rawDesc = (g.description || '').trim();
+    const cleanDesc = rawDesc.startsWith('{')
+      ? (isStash ? 'Cash surplus' : '')
+      : (rawDesc || (isStash ? 'Cash surplus' : ''));
     return {
       name: g.name,
-      description: g.description || '',
+      description: cleanDesc,
       currentSavedBalance: g.assigned_amount || 0,
       targetAmount: g.target_amount || 0,
       targetDate: g.deadline ? format(new Date(g.deadline), 'MMM d, yyyy') : (g.target_date ? format(new Date(g.target_date), 'MMM d, yyyy') : 'No fixed date'),

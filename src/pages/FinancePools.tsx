@@ -644,11 +644,23 @@ export default function FinancePoolsPage() {
       }
     }
     const existingGoal = finance.goals.find(g => g.id === editGoalId);
-    const existingRawDesc = existingGoal?.description || '';
-    const isInternalJson = existingRawDesc.trim().startsWith('{');
+    const existingRawDesc = (existingGoal?.description || '').trim();
+    const isInternalJson = existingRawDesc.startsWith('{');
+    let nextDescription: string | null = editDescription.trim() || null;
+    if (isInternalJson) {
+      try {
+        const parsed = JSON.parse(existingRawDesc);
+        nextDescription = JSON.stringify({
+          ...parsed,
+          user_description: editDescription.trim() || 'Cash surplus',
+        });
+      } catch {
+        nextDescription = existingRawDesc;
+      }
+    }
     await finance.updateGoal(editGoalId, {
       name: editName.trim(),
-      description: editDescription.trim() || (isInternalJson ? existingRawDesc : null),
+      description: nextDescription,
       target_amount: parseFloat(editTarget),
       currency: editCurrency,
       color: editColor,
@@ -665,8 +677,18 @@ export default function FinancePoolsPage() {
   const openEditDialog = (goal: typeof finance.goals[0]) => {
     setEditGoalId(goal.id);
     setEditName(goal.name);
-    const rawDesc = goal.description || '';
-    setEditDescription(rawDesc.trim().startsWith('{') ? '' : rawDesc);
+    const isStashGoal = (goal as any).is_stash === true || /stash/i.test(goal.name);
+    const rawDesc = (goal.description || '').trim();
+    if (rawDesc.startsWith('{')) {
+      try {
+        const parsed = JSON.parse(rawDesc);
+        setEditDescription(parsed?.user_description || (isStashGoal ? 'Cash surplus' : ''));
+      } catch {
+        setEditDescription(isStashGoal ? 'Cash surplus' : '');
+      }
+    } else {
+      setEditDescription(rawDesc || (isStashGoal ? 'Cash surplus' : ''));
+    }
     setEditTarget(String(goal.target_amount));
     setEditCurrency(goal.currency);
     setEditColor(goal.color || POOL_COLORS[0]);
@@ -1364,11 +1386,25 @@ export default function FinancePoolsPage() {
                           </Badge>
                         )}
                       </div>
-                      {goal.description && !goal.description.trim().startsWith('{') && (
-                        <p className="text-[11px] text-slate-500 font-normal mt-0.5 line-clamp-2 leading-tight">
-                          {goal.description}
-                        </p>
-                      )}
+                      {(() => {
+                        const isStashGoal = (goal as any).is_stash === true || /stash/i.test(goal.name);
+                        const rawDesc = (goal.description || '').trim();
+                        const visibleDescription = rawDesc.startsWith('{')
+                          ? (() => {
+                              try {
+                                const parsed = JSON.parse(rawDesc);
+                                return parsed?.user_description || (isStashGoal ? 'Cash surplus' : '');
+                              } catch {
+                                return isStashGoal ? 'Cash surplus' : '';
+                              }
+                            })()
+                          : (rawDesc || (isStashGoal ? 'Cash surplus' : ''));
+                        return visibleDescription ? (
+                          <p className="text-[11px] text-slate-500 font-normal mt-0.5 line-clamp-2 leading-tight">
+                            {visibleDescription}
+                          </p>
+                        ) : null;
+                      })()}
                     </div>
                   </div>
                   <div className="flex items-center gap-0.5 flex-shrink-0">
