@@ -189,6 +189,7 @@ export function computeActualSpendingIncome(
       return { streamName: 'Venture Advisory', kind: 'venture' };
     }
     if (text.includes('back pocket') || text.includes('bpg')) return { streamName: 'Back Pocket Games', kind: 'other' };
+    if (text.includes('eleven') || text.includes('11labs')) return { streamName: 'ElevenLabs', kind: 'other' };
     if (text.includes('etsy')) return { streamName: 'Etsy', kind: 'other' };
     return { streamName: 'Other', kind: 'other' };
   };

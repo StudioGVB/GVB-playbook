@@ -41,6 +41,7 @@ const LEGACY_MATCHERS: Record<string, string[]> = {
   'venture advisory': ['venture advisory', 'venture', 'proposal', 'batchbase', 'batch base', 'batch'],
   'etsy': ['etsy'],
   'back pocket games': ['back pocket', 'bpg', 'back pocket games'],
+  'elevenlabs': ['elevenlabs', 'eleven labs', '11labs', 'eleven'],
 };
 
 function isInternalTransfer(tx: any): boolean {
