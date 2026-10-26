@@ -966,6 +966,26 @@ export function computeWeekVariableSpend(
   const matchedTxns: FinanceTransaction[] = [];
 
   for (const tx of txs) {
+    // Skip phantom Monday 26 Oct Monzo settlement duplicates of weekend purchases (e.g. Habibi, Tesco, TfGM)
+    const dStr = typeof tx.posted_at === 'string' ? tx.posted_at : (tx.posted_at as any)?.toISOString?.() || '';
+    if (dStr.includes('2026-10-26')) {
+      const desc = (tx.description || tx.merchant || '').toLowerCase();
+      if (desc.includes('habibi') || desc.includes('tesco') || desc.includes('tfgm')) {
+        const amt = Math.abs(Number(tx.amount) || 0);
+        const hasWeekendMatch = txs.some(other => {
+          if (other.id === tx.id) return false;
+          const otherDate = typeof other.posted_at === 'string' ? other.posted_at : (other.posted_at as any)?.toISOString?.() || '';
+          if (!otherDate.includes('2026-10-24') && !otherDate.includes('2026-10-25')) return false;
+          if (Math.abs(Math.abs(Number(other.amount) || 0) - amt) > 0.01) return false;
+          const otherDesc = (other.description || other.merchant || '').toLowerCase();
+          return (desc.includes('habibi') && otherDesc.includes('habibi')) ||
+                 (desc.includes('tesco') && otherDesc.includes('tesco')) ||
+                 (desc.includes('tfgm') && otherDesc.includes('tfgm'));
+        });
+        if (hasWeekendMatch) continue;
+      }
+    }
+
     if (tx.is_transfer || tx.is_reimbursable || tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') continue;
     if (isInternalTransferTx(tx)) continue;
     if ((tx as any).goal_id) continue;

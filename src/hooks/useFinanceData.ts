@@ -412,9 +412,53 @@ export function useFinanceDataState() {
             };
           });
 
-        setTransactions(enriched as any);
+        // Purge phantom Monday 26 Oct Monzo settlement duplicates of weekend purchases (e.g. Habibi, Tesco, TfGM)
+        const monzoDuplicatesToDelete: string[] = [];
+        const weekendCategoryTransfers: Record<string, string> = {};
+
+        const cleanedEnriched = enriched.filter(t => {
+          const dStr = typeof t.posted_at === 'string' ? t.posted_at : (t.posted_at as any)?.toISOString?.() || '';
+          if (!dStr.includes('2026-10-26')) return true;
+
+          const desc = (t.description || t.merchant || '').toLowerCase();
+          const isTarget = desc.includes('habibi') || desc.includes('tesco') || desc.includes('tfgm');
+          if (!isTarget) return true;
+
+          const amt = Math.abs(Number(t.amount) || 0);
+          const weekendMatch = enriched.find(other => {
+            if (other.id === t.id) return false;
+            const otherDate = typeof other.posted_at === 'string' ? other.posted_at : (other.posted_at as any)?.toISOString?.() || '';
+            if (!otherDate.includes('2026-10-24') && !otherDate.includes('2026-10-25')) return false;
+            if (Math.abs(Math.abs(Number(other.amount) || 0) - amt) > 0.01) return false;
+            const otherDesc = (other.description || other.merchant || '').toLowerCase();
+            return (desc.includes('habibi') && otherDesc.includes('habibi')) ||
+                   (desc.includes('tesco') && otherDesc.includes('tesco')) ||
+                   (desc.includes('tfgm') && otherDesc.includes('tfgm'));
+          });
+
+          if (weekendMatch) {
+            monzoDuplicatesToDelete.push(t.id);
+            if (t.category_id && !weekendMatch.category_id) {
+              weekendMatch.category_id = t.category_id;
+              weekendCategoryTransfers[weekendMatch.id] = t.category_id;
+            }
+            return false;
+          }
+
+          return true;
+        });
+
+        setTransactions(cleanedEnriched as any);
 
         // Run async cleanup in background without blocking render
+        if (monzoDuplicatesToDelete.length > 0) {
+          supabase.from('finance_transactions').delete().in('id', monzoDuplicatesToDelete).then(() => {
+            console.log(`[self-healing] Purged ${monzoDuplicatesToDelete.length} Monday settlement duplicates`);
+          }).catch(console.error);
+        }
+        for (const [id, catId] of Object.entries(weekendCategoryTransfers)) {
+          supabase.from('finance_transactions').update({ category_id: catId }).eq('id', id).catch(console.error);
+        }
         if (mirrorDeleteIds.length > 0) {
           supabase.from('finance_transactions').delete().in('id', mirrorDeleteIds).then(() => {
             console.log(`[self-healing] Purged ${mirrorDeleteIds.length} fake Travel Savings mirror transactions for Gabriella/batchbase`);
