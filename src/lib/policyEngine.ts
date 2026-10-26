@@ -3,7 +3,7 @@ import { FinanceAssumptions } from '@/hooks/useFinanceAssumptions';
 import type { FinanceTrip } from '@/hooks/useFinanceTrips';
 import { startOfWeek, endOfWeek, subWeeks, differenceInCalendarDays, format } from 'date-fns';
 import type { WeekType } from '@/hooks/useWeekTypes';
-import { isExcludedSpendDate, weekOverlapsExclusion, baseAmt, parseUkDate, isClearingDuplicateTx } from './financeUtils';
+import { isExcludedSpendDate, weekOverlapsExclusion, baseAmt, parseUkDate } from './financeUtils';
 import { calcTakeHome } from './ukTakeHome';
 
 
@@ -965,24 +965,7 @@ export function computeWeekVariableSpend(
   const byCategory = new Map<string, number>();
   const matchedTxns: FinanceTransaction[] = [];
 
-  // Deduplicate bank clearing settlement duplicates (e.g. Monday morning settlement copies of weekend card purchases)
-  const clearingDuplicateIds = new Set<string>();
-  const expenseTxs = txs.filter(t => t.amount < 0);
-  for (let i = 0; i < expenseTxs.length; i++) {
-    const earlier = expenseTxs[i];
-    if (clearingDuplicateIds.has(earlier.id)) continue;
-    for (let j = 0; j < expenseTxs.length; j++) {
-      if (i === j) continue;
-      const later = expenseTxs[j];
-      if (clearingDuplicateIds.has(later.id)) continue;
-      if (isClearingDuplicateTx(earlier, later)) {
-        clearingDuplicateIds.add(later.id);
-      }
-    }
-  }
-
   for (const tx of txs) {
-    if (clearingDuplicateIds.has(tx.id)) continue;
     if (tx.is_transfer || tx.is_reimbursable || tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') continue;
     if (isInternalTransferTx(tx)) continue;
     if ((tx as any).goal_id) continue;
