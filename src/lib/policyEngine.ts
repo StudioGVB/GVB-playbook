@@ -964,6 +964,7 @@ export function computeWeekVariableSpend(
   const daily = Array.from({ length: 7 }, () => ({ essential: 0, fun: 0, total: 0 }));
   const byCategory = new Map<string, number>();
   const matchedTxns: FinanceTransaction[] = [];
+  const seenSameDayTxs = new Set<string>();
 
   for (const tx of txs) {
     // Skip phantom Monday 26 Oct Monzo settlement duplicates of weekend purchases (e.g. Habibi, Tesco, TfGM)
@@ -1000,6 +1001,12 @@ export function computeWeekVariableSpend(
     const d = parseUkDate(tx.posted_at);
     if (d < ws || d > we) continue;
     if (isInAnyTrip(d, trips)) continue;
+
+    // Skip duplicate transactions on the same calendar day with the exact same amount and merchant
+    const norm = (tx.description || tx.merchant || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10);
+    const sameDayKey = `${format(d, 'yyyy-MM-dd')}_${Math.abs(baseAmt(tx)).toFixed(2)}_${norm}`;
+    if (seenSameDayTxs.has(sameDayKey)) continue;
+    seenSameDayTxs.add(sameDayKey);
 
     const isEssential = essentialCatIds.has(catId);
     const dayIdx = Math.min(6, Math.max(0, differenceInCalendarDays(d, ws)));

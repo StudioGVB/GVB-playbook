@@ -412,21 +412,32 @@ export function useFinanceDataState() {
             };
           });
 
-        // Purge phantom Monday 26 Oct Monzo settlement duplicates of weekend purchases (e.g. Habibi, Tesco, TfGM)
-        const monzoDuplicatesToDelete: string[] = [];
-        const weekendCategoryTransfers: Record<string, string> = {};
+        // Clean up duplicates:
+        // 1) Monday 26 Oct Monzo settlement duplicates of weekend purchases (e.g. Habibi, Tesco, TfGM)
+        // 2) Exact same-day duplicate entries (e.g. transactions synced or imported twice on the same day)
+        const duplicatesToDelete: string[] = [];
+        const duplicateIdSet = new Set<string>();
+        const categoryTransfers: Record<string, string> = {};
 
-        const cleanedEnriched = enriched.filter(t => {
+        const normMerch = (s: string) =>
+          (s || '')
+            .toUpperCase()
+            .replace(/[^A-Z0-9]/g, '')
+            .trim();
+
+        // 1. Identify Monday 26 Oct clearing duplicates of weekend purchases
+        for (const t of enriched) {
+          if (duplicateIdSet.has(t.id)) continue;
           const dStr = typeof t.posted_at === 'string' ? t.posted_at : (t.posted_at as any)?.toISOString?.() || '';
-          if (!dStr.includes('2026-10-26')) return true;
+          if (!dStr.includes('2026-10-26')) continue;
 
           const desc = (t.description || t.merchant || '').toLowerCase();
           const isTarget = desc.includes('habibi') || desc.includes('tesco') || desc.includes('tfgm');
-          if (!isTarget) return true;
+          if (!isTarget) continue;
 
           const amt = Math.abs(Number(t.amount) || 0);
           const weekendMatch = enriched.find(other => {
-            if (other.id === t.id) return false;
+            if (other.id === t.id || duplicateIdSet.has(other.id)) return false;
             const otherDate = typeof other.posted_at === 'string' ? other.posted_at : (other.posted_at as any)?.toISOString?.() || '';
             if (!otherDate.includes('2026-10-24') && !otherDate.includes('2026-10-25')) return false;
             if (Math.abs(Math.abs(Number(other.amount) || 0) - amt) > 0.01) return false;
@@ -437,26 +448,73 @@ export function useFinanceDataState() {
           });
 
           if (weekendMatch) {
-            monzoDuplicatesToDelete.push(t.id);
+            duplicateIdSet.add(t.id);
+            duplicatesToDelete.push(t.id);
             if (t.category_id && !weekendMatch.category_id) {
               weekendMatch.category_id = t.category_id;
-              weekendCategoryTransfers[weekendMatch.id] = t.category_id;
+              categoryTransfers[weekendMatch.id] = t.category_id;
             }
-            return false;
           }
+        }
 
-          return true;
-        });
+        // 2. Identify exact same-day duplicates (same calendar day in UK time, same expense amount, matching merchant)
+        for (let i = 0; i < enriched.length; i++) {
+          const a = enriched[i];
+          if (duplicateIdSet.has(a.id)) continue;
+          if (a.amount >= 0) continue; // focus on expense duplicates
+
+          const normA = normMerch(a.description || a.merchant || '');
+          if (!normA) continue;
+          const amtA = Math.abs(Number(a.amount) || 0);
+          const dateA = recalibrateBankTimestamp(a.posted_at, 'Australia/Melbourne', 'Europe/London');
+          const dayA = formatInTimezone(dateA, 'yyyy-MM-dd', 'Europe/London');
+
+          for (let j = i + 1; j < enriched.length; j++) {
+            const b = enriched[j];
+            if (duplicateIdSet.has(b.id)) continue;
+            if (b.amount >= 0) continue;
+
+            const amtB = Math.abs(Number(b.amount) || 0);
+            if (Math.abs(amtA - amtB) > 0.005) continue;
+
+            const dateB = recalibrateBankTimestamp(b.posted_at, 'Australia/Melbourne', 'Europe/London');
+            const dayB = formatInTimezone(dateB, 'yyyy-MM-dd', 'Europe/London');
+            if (dayA !== dayB) continue; // must be exact same calendar day!
+
+            const normB = normMerch(b.description || b.merchant || '');
+            if (!normB) continue;
+
+            const isMatch = normA === normB || 
+                            normA.startsWith(normB) || 
+                            normB.startsWith(normA) || 
+                            normA.includes(normB) || 
+                            normB.includes(normA) ||
+                            (normA.slice(0, 6) === normB.slice(0, 6) && normA.length >= 6);
+
+            if (isMatch) {
+              // Found same-day duplicate! Keep `a`, mark `b` for deletion
+              duplicateIdSet.add(b.id);
+              duplicatesToDelete.push(b.id);
+
+              if (b.category_id && !a.category_id) {
+                a.category_id = b.category_id;
+                categoryTransfers[a.id] = b.category_id;
+              }
+            }
+          }
+        }
+
+        const cleanedEnriched = enriched.filter(t => !duplicateIdSet.has(t.id));
 
         setTransactions(cleanedEnriched as any);
 
         // Run async cleanup in background without blocking render
-        if (monzoDuplicatesToDelete.length > 0) {
-          supabase.from('finance_transactions').delete().in('id', monzoDuplicatesToDelete).then(() => {
-            console.log(`[self-healing] Purged ${monzoDuplicatesToDelete.length} Monday settlement duplicates`);
+        if (duplicatesToDelete.length > 0) {
+          supabase.from('finance_transactions').delete().in('id', duplicatesToDelete).then(() => {
+            console.log(`[self-healing] Purged ${duplicatesToDelete.length} duplicate transactions`);
           }).catch(console.error);
         }
-        for (const [id, catId] of Object.entries(weekendCategoryTransfers)) {
+        for (const [id, catId] of Object.entries(categoryTransfers)) {
           supabase.from('finance_transactions').update({ category_id: catId }).eq('id', id).catch(console.error);
         }
         if (mirrorDeleteIds.length > 0) {
