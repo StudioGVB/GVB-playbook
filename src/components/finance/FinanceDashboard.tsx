@@ -15,6 +15,8 @@ import { useWeeklyBoosts } from '@/hooks/useWeeklyBoosts';
 import { useWeekTypes } from '@/hooks/useWeekTypes';
 import { useFinanceTrips } from '@/hooks/useFinanceTrips';
 import { computePolicySnapshot, computeWeekVariableSpend } from '@/lib/policyEngine';
+import { parseCoverMeta } from '@/lib/overspendCover';
+import { deduplicateTransactions } from '@/lib/deduplication';
 import { formatCurrency, baseAmt, parseUkDate } from '@/lib/financeUtils';
 import { calcTakeHome, type StudentLoanPlan } from '@/lib/ukTakeHome';
 import { MultiSegmentDonut } from '@/components/finance/MultiSegmentDonut';
@@ -118,6 +120,9 @@ export function FinanceDashboard() {
     trips,
   ]);
 
+  const baseCurrency = finance.settings?.base_currency || 'GBP';
+  const fmt = (n: number) => formatCurrency(n, baseCurrency);
+
   const lastWeekSnapshot = useMemo(() => {
     if (!assumptions) return null;
     const prevWeekStart = startOfWeek(addWeeks(new Date(), -1), { weekStartsOn: 1 });
@@ -125,7 +130,7 @@ export function FinanceDashboard() {
     const prevWeekBoost = boosts
       .filter(b => b.week_start === prevWeekKey)
       .reduce((sum, b) => sum + b.amount, 0);
-    return computePolicySnapshot(
+    const computed = computePolicySnapshot(
       assumptions,
       finance.accounts,
       finance.transactions,
@@ -139,6 +144,23 @@ export function FinanceDashboard() {
       fixedExpensesMonthlyAll,
       prevWeekStart
     );
+    const stashes = finance.goals.filter(g => (g as any).is_stash === true || g.name.toLowerCase().includes('stash'));
+    const stashGoal = stashes.find(g => g.currency === baseCurrency) || stashes[0];
+    const stashMeta = parseCoverMeta(stashGoal?.description);
+    const locked = stashMeta.closed_weeks?.[prevWeekKey];
+    if (locked && locked.totalBudget > 0) {
+      const weeklyEssentialBudget = locked.essentialBudget;
+      const baseWeeklyFun = locked.baseFunBudget;
+      const weeklyFunBudget = baseWeeklyFun + prevWeekBoost;
+      return {
+        ...computed,
+        weeklyEssentialBudget,
+        baseWeeklyFun,
+        weeklyFunBudget,
+        baseBudgetBeforeRollover: baseWeeklyFun + prevWeekBoost,
+      };
+    }
+    return computed;
   }, [
     assumptions,
     finance.accounts,
@@ -151,10 +173,8 @@ export function FinanceDashboard() {
     boosts,
     wtMap,
     trips,
+    baseCurrency,
   ]);
-
-  const baseCurrency = finance.settings?.base_currency || 'GBP';
-  const fmt = (n: number) => formatCurrency(n, baseCurrency);
 
   const catMap = useMemo(
     () => new Map(finance.categories.map(c => [c.id, c])),
@@ -207,15 +227,17 @@ export function FinanceDashboard() {
     };
   }, [finance.transactions, finance.categories, weekStart, trips]);
 
-  // Monthly spend
+  // Monthly spend (deduplicated to match Monthly Report)
   const { essentialSpentMonth, funSpentMonth, fixedSpentMonth } = useMemo(() => {
     let essential = 0;
     let fun = 0;
     let fixed = 0;
+    const { cleaned: dedupedTxs } = deduplicateTransactions(finance.transactions);
 
-    for (const tx of finance.transactions) {
+    for (const tx of dedupedTxs) {
       if (tx.is_reimbursable || tx.amount >= 0 || tx.is_transfer) continue;
-      if ((tx as any).goal_id) continue;
+      if (tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') continue;
+      if ((tx as any).goal_id || (tx as any).is_travel_spend || (tx as any).trip_id) continue;
       const d = parseUkDate(tx.posted_at);
       if (d < monthStart || d > monthEnd) continue;
 

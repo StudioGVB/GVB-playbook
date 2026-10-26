@@ -145,20 +145,6 @@ export default function FinanceBudget() {
       .reduce((sum, b) => sum + b.amount, 0);
   }, [boosts, weekStartKey]);
 
-  const referenceDateForEngine = useMemo(() => {
-    return isCurrentWeek ? today : weekEnd;
-  }, [isCurrentWeek, today, weekEnd]);
-
-  const snapshot = useMemo(() => {
-    if (!assumptions) return null;
-    return computePolicySnapshot(
-      assumptions, finance.accounts, finance.transactions,
-      finance.categories, finance.goals, finance.convertToBase,
-      fixedExpensesMonthly, boostAmount, typeof wtMap === 'function' ? wtMap() : wtMap, trips, fixedExpensesMonthlyAll,
-      referenceDateForEngine
-    );
-  }, [assumptions, finance.accounts, finance.transactions, finance.categories, finance.goals, finance.convertToBase, fixedExpensesMonthly, fixedExpensesMonthlyAll, boostAmount, wtMap, trips, referenceDateForEngine]);
-
   const baseCurrency = finance.settings?.base_currency || 'AUD';
   const fxRates = (finance.settings?.fx_rates || {}) as Record<string, number>;
   const audToGbp = fxRates['AUD_GBP'] || 0.52;
@@ -166,8 +152,42 @@ export default function FinanceBudget() {
   const fmtGbp = (n: number) => formatCurrency(baseCurrency === 'GBP' ? n : n * audToGbp, 'GBP');
 
   // Savings Stash: find existing goal named "Savings Stash" or marked with is_stash
-  const stashGoal = useMemo(() => finance.goals.find(g => (g as any).is_stash === true || g.name.toLowerCase().includes('stash')), [finance.goals]);
+  const stashGoal = useMemo(() => {
+    const stashes = finance.goals.filter(g => (g as any).is_stash === true || g.name.toLowerCase().includes('stash'));
+    return stashes.find(g => g.currency === baseCurrency) || stashes[0];
+  }, [finance.goals, baseCurrency]);
   const stashBalance = stashGoal?.assigned_amount || 0;
+
+  const referenceDateForEngine = useMemo(() => {
+    return isCurrentWeek ? today : weekStart;
+  }, [isCurrentWeek, today, weekStart]);
+
+  const snapshot = useMemo(() => {
+    if (!assumptions) return null;
+    const computed = computePolicySnapshot(
+      assumptions, finance.accounts, finance.transactions,
+      finance.categories, finance.goals, finance.convertToBase,
+      fixedExpensesMonthly, boostAmount, typeof wtMap === 'function' ? wtMap() : wtMap, trips, fixedExpensesMonthlyAll,
+      referenceDateForEngine
+    );
+    if (!isCurrentWeek && selectedDate < today) {
+      const meta = parseCoverMeta(stashGoal?.description);
+      const locked = meta.closed_weeks?.[weekStartKey];
+      if (locked && locked.totalBudget > 0) {
+        const weeklyEssentialBudget = locked.essentialBudget;
+        const baseWeeklyFun = locked.baseFunBudget;
+        const weeklyFunBudget = baseWeeklyFun + boostAmount;
+        return {
+          ...computed,
+          weeklyEssentialBudget,
+          baseWeeklyFun,
+          weeklyFunBudget,
+          baseBudgetBeforeRollover: baseWeeklyFun + boostAmount,
+        };
+      }
+    }
+    return computed;
+  }, [assumptions, finance.accounts, finance.transactions, finance.categories, finance.goals, finance.convertToBase, fixedExpensesMonthly, fixedExpensesMonthlyAll, boostAmount, wtMap, trips, referenceDateForEngine, isCurrentWeek, selectedDate, today, stashGoal?.description, weekStartKey]);
 
   // Emergency Fund Goal: find existing goal marked with is_emergency or named "Emergency"
   const emergencyGoal = useMemo(() => finance.goals.find(g => (g as any).is_emergency === true || g.name.toLowerCase().includes('emergency')), [finance.goals]);
@@ -313,12 +333,26 @@ export default function FinanceBudget() {
         if (g) await finance.updateGoal(goalId, { assigned_amount: Math.max(0, (g.assigned_amount || 0) + delta) } as any);
       }
 
-      // Stash balance + metadata (settle marker, version, stash delta, borrowed ledger, last cover summary) — always written
+      // Stash balance + metadata (settle marker, version, stash delta, closed_weeks lock, borrowed ledger, last cover summary) — always written
       const newMeta: CoverMeta = {
         ...meta,
+        user_description: meta.user_description || 'Cash surplus',
         last_settled_week: prevWeekKey,
         settled_version: SETTLE_VERSION,
         last_settled_stash_delta: recordedStashDelta,
+        closed_weeks: {
+          ...(meta.closed_weeks || {}),
+          [prevWeekKey]: {
+            essentialBudget: Math.round(prevWeekSnapshot.weeklyEssentialBudget * 100) / 100,
+            baseFunBudget: Math.round(prevWeekSnapshot.baseWeeklyFun * 100) / 100,
+            boost: Math.round(prevWeekBoost * 100) / 100,
+            totalBudget: Math.round(totalBudget * 100) / 100,
+            essentialSpent: Math.round(prevEssentialSpent * 100) / 100,
+            funSpent: Math.round(prevFunSpent * 100) / 100,
+            totalSpent: Math.round(totalSpent * 100) / 100,
+            netDifference,
+          },
+        },
         borrowed: newBorrowed,
         last_cover: netDifference < 0
           ? { week: prevWeekKey, overspend: Math.abs(netDifference), steps, leftoverDebt: carryDebt }

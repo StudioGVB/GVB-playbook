@@ -9,6 +9,7 @@ import { useFinanceData } from '@/hooks/useFinanceData';
 import { useFinanceAssumptions } from '@/hooks/useFinanceAssumptions';
 import { useFixedExpenses, toWeekly } from '@/hooks/useFixedExpenses';
 import { computePolicySnapshot, computeWeekVariableSpend } from '@/lib/policyEngine';
+import { parseCoverMeta } from '@/lib/overspendCover';
 import { useWeekTypes } from '@/hooks/useWeekTypes';
 import { useFinanceTrips } from '@/hooks/useFinanceTrips';
 import { supabase } from '@/integrations/supabase/client';
@@ -114,9 +115,16 @@ export default function FinanceHistory() {
       }
       categoryBreakdown.sort((a, b) => b.amount - a.amount);
 
-      // Compute budget snapshot as of this specific week (matches Weekly Budget `<` navigation)
+      // Compute budget snapshot as of this specific week (matches Weekly Budget `<` navigation & Home Monday review)
       let effectiveBudget = 0;
-      if (assumptions) {
+      const stashes = finance.goals.filter(g => (g as any).is_stash === true || g.name.toLowerCase().includes('stash'));
+      const stashGoal = stashes.find(g => g.currency === baseCurrency) || stashes[0];
+      const stashMeta = parseCoverMeta(stashGoal?.description);
+      const lockedWeek = !isCurrentWeek ? stashMeta.closed_weeks?.[key] : undefined;
+
+      if (lockedWeek && lockedWeek.totalBudget > 0) {
+        effectiveBudget = lockedWeek.essentialBudget + lockedWeek.baseFunBudget + weekBoost;
+      } else if (assumptions) {
         const weekSnapshot = computePolicySnapshot(
           assumptions,
           finance.accounts,
@@ -129,7 +137,7 @@ export default function FinanceHistory() {
           wtMap,
           trips,
           fixedExpensesMonthlyAll,
-          isCurrentWeek ? new Date() : we,
+          isCurrentWeek ? new Date() : ws,
         );
         effectiveBudget = weekSnapshot.weeklyEssentialBudget + weekSnapshot.weeklyFunBudget;
       }

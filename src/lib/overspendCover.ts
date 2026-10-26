@@ -1,10 +1,24 @@
 import { differenceInCalendarDays } from 'date-fns';
 
+export interface ClosedWeekRecord {
+  essentialBudget: number;
+  baseFunBudget: number;
+  boost: number;
+  totalBudget: number;
+  essentialSpent: number;
+  funSpent: number;
+  totalSpent: number;
+  netDifference: number;
+}
+
 /** Metadata stored as JSON in the Savings Stash goal's `description` (no DB migration needed). */
 export interface CoverMeta {
+  user_description?: string;
   last_settled_week?: string;
   settled_version?: number;
   last_settled_stash_delta?: number;
+  /** Immutable budget/spend records for closed weeks so past weeks never drift */
+  closed_weeks?: Record<string, ClosedWeekRecord>;
   /** goalId -> amount borrowed and not yet repaid */
   borrowed?: Record<string, number>;
   /** goalIds the user has protected from overspend cover */

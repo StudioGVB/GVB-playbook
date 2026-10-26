@@ -134,27 +134,30 @@ export default function FinanceMonthly() {
   const monthlyTotalBudget = (budgetOverride != null && budgetOverride !== '') ? Number(budgetOverride) : autoTotalBudget;
   const expectedIncomeVal = snapshot?.split.monthlyIncome ?? (assumptions?.expected_monthly_income || 0);
 
-  // Filter transactions for selected month (with canonical deduplication)
+  const dedupedAllTxns = useMemo(
+    () => deduplicateTransactions(finance.transactions).cleaned,
+    [finance.transactions]
+  );
+
+  // Filter transactions for selected month (from canonical deduplicated list)
   const monthTxns = useMemo(() => {
-    const raw = finance.transactions.filter(tx => {
+    return dedupedAllTxns.filter(tx => {
       if (tx.is_reimbursable) return false;
       const d = parseUkDate(tx.posted_at);
       return d >= monthStart && d <= monthEnd;
     });
-    return deduplicateTransactions(raw).cleaned;
-  }, [finance.transactions, monthStart, monthEnd]);
+  }, [dedupedAllTxns, monthStart, monthEnd]);
 
   // Previous month transactions for comparison
   const prevMonthStart = startOfMonth(subMonths(selectedMonth, 1));
   const prevMonthEnd = endOfMonth(subMonths(selectedMonth, 1));
   const prevMonthTxns = useMemo(() => {
-    const raw = finance.transactions.filter(tx => {
+    return dedupedAllTxns.filter(tx => {
       if (tx.is_reimbursable) return false;
       const d = parseUkDate(tx.posted_at);
       return d >= prevMonthStart && d <= prevMonthEnd;
     });
-    return deduplicateTransactions(raw).cleaned;
-  }, [finance.transactions, prevMonthStart, prevMonthEnd]);
+  }, [dedupedAllTxns, prevMonthStart, prevMonthEnd]);
 
   // Treat transaction as fixed bill if linked to fixed expense, has is_fixed flag, or belongs to fixed category
   const isFixedTx = useCallback((tx: any): boolean => {
@@ -186,7 +189,8 @@ export default function FinanceMonthly() {
         }
       }
       if (tx.amount >= 0 || tx.is_transfer) continue;
-      if ((tx as any).goal_id) continue;
+      if (tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') continue;
+      if ((tx as any).goal_id || (tx as any).is_travel_spend || (tx as any).trip_id) continue;
       if (cat?.exclude_from_reports) continue;
 
       const amt = Math.abs(baseAmt(tx));
