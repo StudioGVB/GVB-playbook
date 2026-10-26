@@ -128,10 +128,34 @@ export function isDuplicatePair(a: any, b: any): { isDuplicate: boolean; keeper:
   const earlierDate = dateA <= dateB ? dateA : dateB;
   const laterDate = dateA <= dateB ? dateB : dateA;
 
+  // Never deduplicate internal transfers
+  if (a.is_transfer || b.is_transfer) {
+    return { isDuplicate: false, keeper: null, duplicate: null };
+  }
+
+  // Never deduplicate fixed recurring bills across different days
+  if (a.is_fixed && b.is_fixed && diffDays > 0) {
+    return { isDuplicate: false, keeper: null, duplicate: null };
+  }
+
   const key = getCanonicalMerchantKey(`${descA} ${merchA}`) || getCanonicalMerchantKey(`${descB} ${merchB}`);
 
-  // Condition 1: Same calendar day (exact duplicate sync / double entry)
-  const isSameDay = diffDays === 0;
+  const extA = String(a.external_transaction_id || '');
+  const extB = String(b.external_transaction_id || '');
+  const bothAreDistinctApiTx =
+    ((extA.startsWith('tx_') && extB.startsWith('tx_')) ||
+     (extA.length > 20 && extB.length > 20 && !extA.includes('|') && !extB.includes('|'))) &&
+    extA !== extB;
+  const timeDiffMinutes = Math.abs(dateA.getTime() - dateB.getTime()) / (1000 * 60);
+
+  // If both transactions have distinct official bank API transaction IDs (e.g. two distinct Monzo tx_ IDs),
+  // they are guaranteed to be separate real-world card transactions, NOT clearing duplicates!
+  if (bothAreDistinctApiTx && diffDays > 0) {
+    return { isDuplicate: false, keeper: null, duplicate: null };
+  }
+
+  // Condition 1: Same calendar day (unless both are verified distinct bank API events > 5 mins apart)
+  const isSameDay = diffDays === 0 && (!bothAreDistinctApiTx || timeDiffMinutes <= 5);
 
   // Condition 2: Weekend to Monday/Tuesday clearing
   const dayEarlier = earlierDate.getDay(); // 5 = Fri, 6 = Sat, 0 = Sun
@@ -142,8 +166,6 @@ export function isDuplicatePair(a: any, b: any): { isDuplicate: boolean; keeper:
     diffDays <= 4;
 
   // Condition 3: CSV import vs API sync
-  const extA = String(a.external_transaction_id || '');
-  const extB = String(b.external_transaction_id || '');
   const hasCsv = extA.includes('|') || extB.includes('|');
   const hasApi = extA.startsWith('tx_') || extB.startsWith('tx_') || (!extA.includes('|') && extA.length > 10) || (!extB.includes('|') && extB.length > 10);
   const isCsvVsApi = hasCsv && hasApi && diffDays <= 4;
@@ -151,10 +173,10 @@ export function isDuplicatePair(a: any, b: any): { isDuplicate: boolean; keeper:
   // Condition 4: Amazon orders (auth vs capture can happen across 0-4 days)
   const isAmazonOrder = key === 'AMAZON' && diffDays <= 4;
 
-  // Condition 5: Near-identical description within 48h
+  // Condition 5: Near-identical description within 48h (unless distinct API txs)
   const cleanA = cleanMerchantString(`${descA} ${merchA}`);
   const cleanB = cleanMerchantString(`${descB} ${merchB}`);
-  const isCloseTimeIdentical = cleanA === cleanB && diffDays <= 2;
+  const isCloseTimeIdentical = cleanA === cleanB && diffDays <= 2 && (!bothAreDistinctApiTx || timeDiffMinutes <= 5);
 
   if (isSameDay || isWeekendClearing || isCsvVsApi || isAmazonOrder || isCloseTimeIdentical) {
     // Keep earlier (actual transaction date), delete later (settlement/duplicate)
