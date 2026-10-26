@@ -4,7 +4,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import { computeTxFingerprint } from '@/lib/txFingerprint';
 import { FinanceContext } from '@/contexts/FinanceContext';
-import { recalibrateBankTimestamp, formatInTimezone } from '@/lib/timezoneEngine';
+import { recalibrateBankTimestamp } from '@/lib/timezoneEngine';
+import { formatUkDate } from '@/lib/financeUtils';
 
 export interface FinanceAccount {
   id: string;
@@ -466,8 +467,7 @@ export function useFinanceDataState() {
           const normA = normMerch(a.description || a.merchant || '');
           if (!normA) continue;
           const amtA = Math.abs(Number(a.amount) || 0);
-          const dateA = recalibrateBankTimestamp(a.posted_at, 'Australia/Melbourne', 'Europe/London');
-          const dayA = formatInTimezone(dateA, 'yyyy-MM-dd', 'Europe/London');
+          const dayA = formatUkDate(a.posted_at, 'yyyy-MM-dd');
 
           for (let j = i + 1; j < enriched.length; j++) {
             const b = enriched[j];
@@ -477,8 +477,7 @@ export function useFinanceDataState() {
             const amtB = Math.abs(Number(b.amount) || 0);
             if (Math.abs(amtA - amtB) > 0.005) continue;
 
-            const dateB = recalibrateBankTimestamp(b.posted_at, 'Australia/Melbourne', 'Europe/London');
-            const dayB = formatInTimezone(dateB, 'yyyy-MM-dd', 'Europe/London');
+            const dayB = formatUkDate(b.posted_at, 'yyyy-MM-dd');
             if (dayA !== dayB) continue; // must be exact same calendar day!
 
             const normB = normMerch(b.description || b.merchant || '');
