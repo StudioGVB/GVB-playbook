@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { computeTxFingerprint } from '@/lib/txFingerprint';
 import { FinanceContext } from '@/contexts/FinanceContext';
 import { recalibrateBankTimestamp, formatInTimezone } from '@/lib/timezoneEngine';
+import { isClearingDuplicateTx } from '@/lib/financeUtils';
 
 export interface FinanceAccount {
   id: string;
@@ -412,9 +413,55 @@ export function useFinanceDataState() {
             };
           });
 
-        setTransactions(enriched as any);
+        // Bank clearing duplicate detection & self-healing (e.g. Monzo card purchases on weekend settling on Monday)
+        const duplicateDeleteIds: string[] = [];
+        const duplicateIdsSet = new Set<string>();
+        const categoryTransfers: Record<string, string> = {};
+
+        // Sort chronologically ascending to match earlier purchase with later settlement copy
+        const sortedEnriched = [...enriched].sort((a, b) => {
+          const ta = recalibrateBankTimestamp(a.posted_at, 'Australia/Melbourne', 'Europe/London').getTime();
+          const tb = recalibrateBankTimestamp(b.posted_at, 'Australia/Melbourne', 'Europe/London').getTime();
+          return ta - tb;
+        });
+
+        for (let i = 0; i < sortedEnriched.length; i++) {
+          const earlier = sortedEnriched[i];
+          if (duplicateIdsSet.has(earlier.id)) continue;
+          if (earlier.amount >= 0) continue; // focus on expenses
+
+          for (let j = i + 1; j < sortedEnriched.length; j++) {
+            const later = sortedEnriched[j];
+            if (duplicateIdsSet.has(later.id)) continue;
+            if (later.amount >= 0) continue;
+
+            if (isClearingDuplicateTx(earlier, later)) {
+              duplicateIdsSet.add(later.id);
+              duplicateDeleteIds.push(later.id);
+
+              // If the user categorized the later copy while clearing through transactions,
+              // carry that category forward to the surviving original purchase!
+              if (later.category_id && !earlier.category_id) {
+                earlier.category_id = later.category_id;
+                categoryTransfers[earlier.id] = later.category_id;
+              }
+            }
+          }
+        }
+
+        const finalEnriched = enriched.filter(t => !duplicateIdsSet.has(t.id));
+
+        setTransactions(finalEnriched as any);
 
         // Run async cleanup in background without blocking render
+        if (duplicateDeleteIds.length > 0) {
+          supabase.from('finance_transactions').delete().in('id', duplicateDeleteIds).then(() => {
+            console.log(`[self-healing] Purged ${duplicateDeleteIds.length} bank clearing duplicate transactions`);
+          }).catch(console.error);
+        }
+        for (const [keepId, catId] of Object.entries(categoryTransfers)) {
+          supabase.from('finance_transactions').update({ category_id: catId }).eq('id', keepId).catch(console.error);
+        }
         if (mirrorDeleteIds.length > 0) {
           supabase.from('finance_transactions').delete().in('id', mirrorDeleteIds).then(() => {
             console.log(`[self-healing] Purged ${mirrorDeleteIds.length} fake Travel Savings mirror transactions for Gabriella/batchbase`);

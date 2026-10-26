@@ -89,6 +89,68 @@ export function baseAmt(tx: any): number {
   return typeof v === 'number' ? v : (Number(tx?.amount) || 0);
 }
 
+/**
+ * Cleans a merchant or transaction description for robust duplicate comparison.
+ */
+export function cleanMerchantName(s: string): string {
+  return (s || '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Checks whether two merchant names match or refer to the same merchant
+ * (e.g. "HABIBI MANCHES" vs "HABIBI, MANCHESTER", "TESCO-STORES-6146 MANCHES" vs "TESCO-STORES-6146, MANCHESTER").
+ */
+export function isMerchantNameMatch(a: string, b: string): boolean {
+  const normA = cleanMerchantName(a);
+  const normB = cleanMerchantName(b);
+  if (!normA || !normB) return false;
+  if (normA === normB) return true;
+  if (normA.startsWith(normB) || normB.startsWith(normA)) return true;
+  if (normA.includes(normB) || normB.includes(normA)) return true;
+  const firstA = normA.split(' ')[0] || '';
+  const firstB = normB.split(' ')[0] || '';
+  return firstA.length >= 3 && firstA === firstB;
+}
+
+/**
+ * Determines whether `laterTx` is a bank clearing duplicate of `earlierTx`.
+ * For example, a card purchase made on Saturday evening or Sunday that Monzo / Mastercard
+ * settled on Monday morning with a slightly different descriptor and timestamp.
+ */
+export function isClearingDuplicateTx(
+  earlierTx: { amount: number; posted_at: string | Date; description?: string; merchant?: string; currency?: string },
+  laterTx: { amount: number; posted_at: string | Date; description?: string; merchant?: string; currency?: string }
+): boolean {
+  // Both must be expenses (or both refunds/income)
+  if ((earlierTx.amount < 0) !== (laterTx.amount < 0)) return false;
+
+  // Amounts must match exactly within 0.005
+  if (Math.abs(Number(earlierTx.amount) - Number(laterTx.amount)) > 0.005) return false;
+
+  // Same currency if provided
+  if (earlierTx.currency && laterTx.currency && earlierTx.currency !== laterTx.currency) return false;
+
+  // Timestamp difference: between 0 ms and 4.5 days apart (earlier before later)
+  const tEarlier = parseUkDate(earlierTx.posted_at).getTime();
+  const tLater = parseUkDate(laterTx.posted_at).getTime();
+  const diffMs = tLater - tEarlier;
+  if (diffMs < 0 || diffMs > 4.5 * 86400 * 1000) return false;
+
+  // If same timestamp, must be different transaction records
+  if (diffMs === 0 && (earlierTx as any).id && (laterTx as any).id && (earlierTx as any).id === (laterTx as any).id) {
+    return false;
+  }
+
+  // Merchant name similarity
+  const aName = earlierTx.description || earlierTx.merchant || '';
+  const bName = laterTx.description || laterTx.merchant || '';
+  return isMerchantNameMatch(aName, bName);
+}
+
 // ---- Time-range helpers ----
 
 export function getDateRangeFromDays(days: number): { start: Date; end: Date } {

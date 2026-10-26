@@ -8,7 +8,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Search, Check, Sparkles, Loader2, X, ArrowLeftRight, Target, Receipt, Undo2, DollarSign, Briefcase, RefreshCw, Wallet, Plus, Trash2, AlertTriangle } from 'lucide-react';
-import { formatCurrency, formatUkDate, parseUkDate, baseAmt } from '@/lib/financeUtils';
+import { formatCurrency, formatUkDate, parseUkDate, baseAmt, isClearingDuplicateTx } from '@/lib/financeUtils';
 import { format, isToday, isYesterday, startOfWeek, endOfWeek, subWeeks } from 'date-fns';
 import { toast } from 'sonner';
 import type { useFinanceData } from '@/hooks/useFinanceData';
@@ -284,7 +284,7 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
 
     // Sort transactions by posted_at ascending
     const sorted = [...transactions].sort(
-      (a, b) => new Date(a.posted_at).getTime() - new Date(b.posted_at).getTime()
+      (a, b) => parseUkDate(a.posted_at).getTime() - parseUkDate(b.posted_at).getTime()
     );
 
     for (let i = 0; i < sorted.length; i++) {
@@ -295,21 +295,7 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
         const b = sorted[j];
         if (seenIds.has(b.id)) continue;
 
-        // Compare timestamps - max 4 days window (e.g. Friday evening purchase settling Monday/Tuesday)
-        const timeDiff = Math.abs(new Date(b.posted_at).getTime() - new Date(a.posted_at).getTime());
-        if (timeDiff > 4 * 86400 * 1000) break;
-
-        // Must have exact same amount
-        if (Math.abs(a.amount - b.amount) > 0.001) continue;
-
-        // Compare merchant / descriptions
-        const aDesc = cleanMerchant(a.description || a.merchant || '');
-        const bDesc = cleanMerchant(b.description || b.merchant || '');
-
-        const isExactName = aDesc.length > 2 && aDesc === bDesc;
-        const isPrefixMatch = aDesc.length >= 3 && bDesc.length >= 3 && (aDesc.startsWith(bDesc.slice(0, 3)) || bDesc.startsWith(aDesc.slice(0, 3)));
-
-        if (isExactName || isPrefixMatch) {
+        if (isClearingDuplicateTx(a, b)) {
           seenIds.add(a.id);
           seenIds.add(b.id);
           pairs.push({ earlier: a, later: b });
