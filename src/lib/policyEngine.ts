@@ -5,6 +5,7 @@ import { startOfWeek, endOfWeek, subWeeks, differenceInCalendarDays, format } fr
 import type { WeekType } from '@/hooks/useWeekTypes';
 import { isExcludedSpendDate, weekOverlapsExclusion, baseAmt, parseUkDate } from './financeUtils';
 import { calcTakeHome } from './ukTakeHome';
+import { deduplicateTransactions } from './deduplication';
 
 
 // ---- Trip helpers ----
@@ -964,29 +965,11 @@ export function computeWeekVariableSpend(
   const daily = Array.from({ length: 7 }, () => ({ essential: 0, fun: 0, total: 0 }));
   const byCategory = new Map<string, number>();
   const matchedTxns: FinanceTransaction[] = [];
-  const seenSameDayTxs = new Set<string>();
 
-  for (const tx of txs) {
-    // Skip phantom Monday 26 Oct Monzo settlement duplicates of weekend purchases (e.g. Habibi, Tesco, TfGM)
-    const dStr = typeof tx.posted_at === 'string' ? tx.posted_at : (tx.posted_at as any)?.toISOString?.() || '';
-    if (dStr.includes('2026-10-26')) {
-      const desc = (tx.description || tx.merchant || '').toLowerCase();
-      if (desc.includes('habibi') || desc.includes('tesco') || desc.includes('tfgm')) {
-        const amt = Math.abs(Number(tx.amount) || 0);
-        const hasWeekendMatch = txs.some(other => {
-          if (other.id === tx.id) return false;
-          const otherDate = typeof other.posted_at === 'string' ? other.posted_at : (other.posted_at as any)?.toISOString?.() || '';
-          if (!otherDate.includes('2026-10-24') && !otherDate.includes('2026-10-25')) return false;
-          if (Math.abs(Math.abs(Number(other.amount) || 0) - amt) > 0.01) return false;
-          const otherDesc = (other.description || other.merchant || '').toLowerCase();
-          return (desc.includes('habibi') && otherDesc.includes('habibi')) ||
-                 (desc.includes('tesco') && otherDesc.includes('tesco')) ||
-                 (desc.includes('tfgm') && otherDesc.includes('tfgm'));
-        });
-        if (hasWeekendMatch) continue;
-      }
-    }
+  // Filter out any settlement duplicates (Amazon, weekend-to-Monday clearing, same-day double records)
+  const { cleaned: dedupedTxs } = deduplicateTransactions(txs);
 
+  for (const tx of dedupedTxs) {
     if (tx.is_transfer || tx.is_reimbursable || tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') continue;
     if (isInternalTransferTx(tx)) continue;
     if ((tx as any).goal_id) continue;
@@ -1001,12 +984,6 @@ export function computeWeekVariableSpend(
     const d = parseUkDate(tx.posted_at);
     if (d < ws || d > we) continue;
     if (isInAnyTrip(d, trips)) continue;
-
-    // Skip duplicate transactions on the same calendar day with the exact same amount and merchant
-    const norm = (tx.description || tx.merchant || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10);
-    const sameDayKey = `${format(d, 'yyyy-MM-dd')}_${Math.abs(baseAmt(tx)).toFixed(2)}_${norm}`;
-    if (seenSameDayTxs.has(sameDayKey)) continue;
-    seenSameDayTxs.add(sameDayKey);
 
     const isEssential = essentialCatIds.has(catId);
     const dayIdx = Math.min(6, Math.max(0, differenceInCalendarDays(d, ws)));

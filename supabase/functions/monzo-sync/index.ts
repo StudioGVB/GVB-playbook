@@ -237,8 +237,62 @@ serve(async (req) => {
     }
 
     // 5. Transform transactions
+    function cleanMerch(s: string): string {
+      return (s || '')
+        .toUpperCase()
+        .replace(/[^A-Z0-9 ]/g, ' ')
+        .replace(/\b(LTD|PLC|INC|CORP|CO|UK|GB|MANCHESTER|LONDON|MANCHES|MCHESTE|STORE|STORES|CARD|PURCHASE|PAYMENT|COM|COUK)\b/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+    }
+
+    function areMerchantsMatchEdge(descA = '', merchA = '', descB = '', merchB = ''): boolean {
+      const textA = `${descA} ${merchA}`.toLowerCase()
+      const textB = `${descB} ${merchB}`.toLowerCase()
+
+      if (/\b(amazon|amzn)\b/.test(textA) && /\b(amazon|amzn)\b/.test(textB)) return true
+      if (/\btesco\b/.test(textA) && /\btesco\b/.test(textB)) return true
+      if (/\bhabibi\b/.test(textA) && /\bhabibi\b/.test(textB)) return true
+      if (/\blidl\b/.test(textA) && /\blidl\b/.test(textB)) return true
+      if (/\bgreggs\b/.test(textA) && /\bgreggs\b/.test(textB)) return true
+      if (/\bprimark\b/.test(textA) && /\bprimark\b/.test(textB)) return true
+      if (/\b(tfgm|beenetwork|greater manchester|piccadilly)\b/.test(textA) && /\b(tfgm|beenetwork|greater manchester|piccadilly)\b/.test(textB)) return true
+      if (/\b(tfl|transport for london)\b/.test(textA) && /\b(tfl|transport for london)\b/.test(textB)) return true
+      if (/\bthree square\b/.test(textA) && /\bthree square\b/.test(textB)) return true
+      if (/\bcosta\b/.test(textA) && /\bcosta\b/.test(textB)) return true
+      if (/\b(m14 crispy|crispy burger)\b/.test(textA) && /\b(m14 crispy|crispy burger)\b/.test(textB)) return true
+      if (/\bko twins\b/.test(textA) && /\bko twins\b/.test(textB)) return true
+      if (/\bsainsbury/.test(textA) && /\bsainsbury/.test(textB)) return true
+      if (/\baldi\b/.test(textA) && /\baldi\b/.test(textB)) return true
+      if (/\basda\b/.test(textA) && /\basda\b/.test(textB)) return true
+      if (/\b(m&s|marks and spencer|marks & spencer)\b/.test(textA) && /\b(m&s|marks and spencer|marks & spencer)\b/.test(textB)) return true
+      if (/\bboots\b/.test(textA) && /\bboots\b/.test(textB)) return true
+
+      const cleanA = cleanMerch(textA)
+      const cleanB = cleanMerch(textB)
+      if (!cleanA || !cleanB) return false
+      if (cleanA === cleanB) return true
+
+      const compA = cleanA.replace(/\s+/g, '')
+      const compB = cleanB.replace(/\s+/g, '')
+      if (compA.length >= 4 && compB.length >= 4) {
+        if (compA.includes(compB) || compB.includes(compA)) return true
+        if (compA.slice(0, 6) === compB.slice(0, 6) && compA.length >= 6) return true
+      }
+
+      const wordsA = cleanA.split(' ').filter(w => w.length >= 4)
+      const wordsB = cleanB.split(' ').filter(w => w.length >= 4)
+      for (const w of wordsA) {
+        if (wordsB.includes(w)) return true
+      }
+      return false
+    }
+
+    // 5. Transform transactions
     const txBatch = await Promise.all(allTransactions.map(async ({ tx, dbAccountId }) => {
       // Amount in pence, convert to main unit
+      const rawAmount = (tx.amount || 0) / 100
+      
       // Prioritize tx.created (when the purchase actually took place, e.g. Saturday night)
       // over tx.settled (when Mastercard cleared the funds 1-3 business days later, e.g. Monday morning)
       const postedAt = tx.created || tx.settled || new Date().toISOString()
@@ -280,7 +334,7 @@ serve(async (req) => {
     const { data: existingTransactions, error: existingTxError } = dbAccountIds.length > 0
       ? await supabase
           .from('finance_transactions')
-          .select('account_id, external_transaction_id, transaction_fingerprint, category_id, is_transfer, goal_id, is_fixed')
+          .select('id, account_id, external_transaction_id, transaction_fingerprint, category_id, is_transfer, goal_id, is_fixed, amount, description, merchant, posted_at')
           .eq('user_id', userId)
           .in('account_id', dbAccountIds)
           .order('posted_at', { ascending: false })
@@ -306,6 +360,7 @@ serve(async (req) => {
         .filter(Boolean)
     )
 
+    const matchedExistingIds = new Set<string>()
     const dedupedNewTransactions = new Map<string, typeof txBatch[number]>()
     const rowsToUpsert: typeof txBatch = []
 
@@ -328,8 +383,35 @@ serve(async (req) => {
       } else if (dedupedNewTransactions.has(row.transaction_fingerprint)) {
         // Skip duplicate in current batch
       } else {
-        dedupedNewTransactions.set(row.transaction_fingerprint, row)
-        rowsToUpsert.unshift(row)
+        // Check for clearing / CSV duplicate match against existing records
+        const match = (existingTransactions || []).find((existing: any) => {
+          if (matchedExistingIds.has(existing.id)) return false
+          if (existing.account_id !== row.account_id) return false
+          const amtExist = Math.abs(Number(existing.amount) || 0)
+          const amtRow = Math.abs(Number(row.amount) || 0)
+          if (Math.abs(amtExist - amtRow) > 0.005) return false
+          if ((Number(existing.amount) < 0) !== (Number(row.amount) < 0)) return false
+
+          const dExist = new Date(existing.posted_at).getTime()
+          const dRow = new Date(row.posted_at).getTime()
+          const diffDays = Math.abs(dExist - dRow) / (1000 * 60 * 60 * 24)
+          if (diffDays > 4.5) return false
+
+          return areMerchantsMatchEdge(existing.description, existing.merchant, row.description, row.merchant)
+        })
+
+        if (match) {
+          matchedExistingIds.add(match.id)
+          // Link existing transaction to this external ID and fingerprint
+          await supabase.from('finance_transactions').update({
+            external_transaction_id: row.external_transaction_id,
+            transaction_fingerprint: row.transaction_fingerprint,
+            raw: row.raw,
+          }).eq('id', match.id)
+        } else {
+          dedupedNewTransactions.set(row.transaction_fingerprint, row)
+          rowsToUpsert.unshift(row)
+        }
       }
     }
 
