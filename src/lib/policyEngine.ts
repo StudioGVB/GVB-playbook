@@ -363,11 +363,11 @@ export function computeEssentialVariableMonthly(
 
   if (essentialCatIds.size === 0) return { monthly: 0, normalWeeksUsed: 0, excludedWeeksCount: 0 };
 
-  // Collect last 24 weeks of data prior to `now`, pick up to 8 normal ones for maximum stability
+  // Collect last 12 weeks of data prior to `now`, pick last 4 normal ones
   const weeklyTotals: { weekKey: string; total: number; isNormal: boolean }[] = [];
   let excludedCount = 0;
 
-  for (let w = 1; w <= 24; w++) {
+  for (let w = 1; w <= 12; w++) {
     const ws = startOfWeek(subWeeks(now, w), { weekStartsOn: 1 });
     const we = startOfWeek(subWeeks(now, w - 1), { weekStartsOn: 1 });
     const weekKey = format(ws, 'yyyy-MM-dd');
@@ -417,12 +417,12 @@ export function computeEssentialVariableMonthly(
   }
 
   const normalWeeks = weeklyTotals.filter(w => w.isNormal);
-  const normalWeeksToUse = normalWeeks.slice(0, 8);
+  const last4Normal = normalWeeks.slice(0, 4);
   
-  if (normalWeeksToUse.length === 0) return { monthly: 0, normalWeeksUsed: 0, excludedWeeksCount: excludedCount };
+  if (last4Normal.length === 0) return { monthly: 0, normalWeeksUsed: 0, excludedWeeksCount: excludedCount };
 
-  const weeklyAvg = normalWeeksToUse.reduce((s, w) => s + w.total, 0) / normalWeeksToUse.length;
-  return { monthly: weeklyAvg * 4.33, normalWeeksUsed: normalWeeksToUse.length, excludedWeeksCount: excludedCount };
+  const weeklyAvg = last4Normal.reduce((s, w) => s + w.total, 0) / last4Normal.length;
+  return { monthly: weeklyAvg * 4.33, normalWeeksUsed: last4Normal.length, excludedWeeksCount: excludedCount };
 }
 
 export function computePolicySnapshot(
@@ -441,10 +441,9 @@ export function computePolicySnapshot(
 ): PolicySnapshot {
   const now = referenceDate;
   const weekStart = startOfWeek(now, { weekStartsOn: 1 });
-  const monthAnchor = startOfMonth(now);
 
-  // Essential variable: rolling 8-week average of normal weeks anchored to the month for steady consistency across all weeks
-  const essentialResult = computeEssentialVariableMonthly(transactions, categories, weekTypeMap, trips, monthAnchor);
+  // Essential variable: rolling average of normal weeks prior to the reference week
+  const essentialResult = computeEssentialVariableMonthly(transactions, categories, weekTypeMap, trips, weekStart);
   const computedEssentialVariable = essentialResult.monthly;
   // Use the higher of manual estimate or computed actual
   const essentialVariable = Math.max(
@@ -478,7 +477,7 @@ export function computePolicySnapshot(
   // Determine drawdown mode
   // Spending income = REAL Gamma + Venture deposits that hit the account this calendar month.
   // If no Gamma pay has landed yet this month, use last month's Gamma + Venture deposits.
-  const actualIncome = computeActualSpendingIncome(transactions, categories, monthAnchor);
+  const actualIncome = computeActualSpendingIncome(transactions, categories, now);
   const monthlyIncome = actualIncome.total;
   const isDrawdownMode = monthlyIncome === 0;
 
@@ -497,7 +496,7 @@ export function computePolicySnapshot(
     // Fun money is the user-configured weekly amount (default $100/wk)
     baseWeeklyFun = assumptions.weekly_fun_budget > 0 ? assumptions.weekly_fun_budget : 100;
     // Calculate required goal savings even in drawdown mode so active goals with deadlines are not zeroed out
-    const drawdownGoalSavings = computeRequiredGoalSavingsMonthly(goals, convertToBase, monthAnchor, 0);
+    const drawdownGoalSavings = computeRequiredGoalSavingsMonthly(goals, convertToBase, weekStart, 0);
     // Weekly gross = all weekly costs combined
     weeklyGross = weeklyFixedCosts + weeklyEssentialBudget + (drawdownGoalSavings / 4.33) + baseWeeklyFun;
     // Runway-based weeks (how long living pool lasts at this burn rate)
@@ -522,7 +521,7 @@ export function computePolicySnapshot(
       monthlyIncome,
       weekTypeMap,
       trips,
-      monthAnchor,
+      weekStart,
     );
     baseWeeklyFun = split.weeklyFunAmount;
     weeklyGross = split.monthlyIncome / 4.33;
@@ -816,13 +815,12 @@ export function computeRequiredGoalSavingsMonthly(
   now: Date = new Date(),
   monthlyIncome: number = 0,
 ): number {
-  // Anchor to month start so all weeks within the same month see an identical monthly requirement
-  const anchorMonth = startOfMonth(now);
+  const anchorNow = startOfWeek(now, { weekStartsOn: 1 });
   let poolSavingsMonthly = 0;
   for (const g of (goals || [])) {
     if ((g as any)?.is_stash) continue;
     if ((g as any)?.is_emergency === true || (g.name || '').toLowerCase().includes('emergency')) continue;
-    if (g.start_date && new Date(g.start_date) > anchorMonth) continue;
+    if (g.start_date && new Date(g.start_date) > anchorNow) continue;
     const targetBase = convertToBase ? convertToBase(g.target_amount || 0, g.currency) : (g.target_amount || 0);
     const assignedBase = convertToBase ? convertToBase(g.assigned_amount || 0, g.currency) : (g.assigned_amount || 0);
     const remainingBase = Math.max(0, targetBase - assignedBase);
@@ -832,7 +830,7 @@ export function computeRequiredGoalSavingsMonthly(
 
     if (g.deadline) {
       const dl = new Date(g.deadline);
-      const daysLeft = Math.max(1, Math.ceil((dl.getTime() - anchorMonth.getTime()) / (1000 * 60 * 60 * 24)));
+      const daysLeft = Math.max(1, Math.ceil((dl.getTime() - anchorNow.getTime()) / (1000 * 60 * 60 * 24)));
       const weeksLeft = Math.max(1, daysLeft / 7);
       // Cap monthly requirement at remainingBase (matching MonthlyPotPlanner & paycheckEngine)
       // so a goal with <4.33 weeks left never deducts up to 4.33x its remaining balance in a single month
@@ -857,8 +855,7 @@ export function computeMoneySplit(
   trips: FinanceTrip[] = [],
   referenceDate: Date = new Date(),
 ): MoneySplit {
-  const monthAnchor = startOfMonth(referenceDate);
-  const now = monthAnchor;
+  const now = startOfWeek(referenceDate, { weekStartsOn: 1 });
 
   // 1. Calculate effective net monthly income (Net Salary via PAYE Tax/NI + Venture Advisory £70/wk)
   const salaryTakeHome = calcTakeHome({
@@ -872,7 +869,7 @@ export function computeMoneySplit(
   
   const monthlyIncome = (overrideMonthlyIncome && overrideMonthlyIncome > 0)
     ? overrideMonthlyIncome
-    : computeActualSpendingIncome(transactions, categories, monthAnchor).total;
+    : computeActualSpendingIncome(transactions, categories, referenceDate).total;
 
   // 2. Committed fixed bills (use passed fixed expenses if provided, else historic average)
   let monthlyMandatory = fixedExpensesMonthly ?? 0;
