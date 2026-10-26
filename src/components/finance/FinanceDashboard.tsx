@@ -41,7 +41,7 @@ export function FinanceDashboard() {
     monthlyTotal: fixedExpensesMonthlyAll,
     monthlyTotalInternal: fixedExpensesMonthly,
   } = useFixedExpenses();
-  const { totalBoostThisWeek } = useWeeklyBoosts();
+  const { boosts, totalBoostThisWeek } = useWeeklyBoosts();
   const { weekTypeMap: wtMap } = useWeekTypes();
   const { trips } = useFinanceTrips();
 
@@ -114,6 +114,41 @@ export function FinanceDashboard() {
     fixedExpensesMonthly,
     fixedExpensesMonthlyAll,
     totalBoostThisWeek,
+    wtMap,
+    trips,
+  ]);
+
+  const lastWeekSnapshot = useMemo(() => {
+    if (!assumptions) return null;
+    const prevWeekStart = startOfWeek(addWeeks(new Date(), -1), { weekStartsOn: 1 });
+    const prevWeekKey = format(prevWeekStart, 'yyyy-MM-dd');
+    const prevWeekBoost = boosts
+      .filter(b => b.week_start === prevWeekKey)
+      .reduce((sum, b) => sum + b.amount, 0);
+    return computePolicySnapshot(
+      assumptions,
+      finance.accounts,
+      finance.transactions,
+      finance.categories,
+      finance.goals,
+      finance.convertToBase,
+      fixedExpensesMonthly,
+      prevWeekBoost,
+      wtMap(),
+      trips,
+      fixedExpensesMonthlyAll,
+      prevWeekStart
+    );
+  }, [
+    assumptions,
+    finance.accounts,
+    finance.transactions,
+    finance.categories,
+    finance.goals,
+    finance.convertToBase,
+    fixedExpensesMonthly,
+    fixedExpensesMonthlyAll,
+    boosts,
     wtMap,
     trips,
   ]);
@@ -396,7 +431,7 @@ export function FinanceDashboard() {
         finance={finance}
         assumptions={assumptions}
         trips={trips}
-        snapshot={snapshot}
+        snapshot={lastWeekSnapshot}
         forceShow={showMondayPreview}
       />
 

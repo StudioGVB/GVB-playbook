@@ -51,7 +51,7 @@ export function MondayWeeklyReviewCard({ finance, assumptions, trips = [], force
     const funSpent = summary.funSpent;
     const essentialSpent = summary.essentialSpent;
 
-    const weeklyFunBudget = snapshot?.baseWeeklyFun ?? assumptions?.weekly_fun_budget ?? 100;
+    const weeklyFunBudget = snapshot?.weeklyFunBudget ?? snapshot?.baseWeeklyFun ?? assumptions?.weekly_fun_budget ?? 100;
     const weeklyEssentialBudget = snapshot?.weeklyEssentialBudget ?? ((assumptions?.estimated_essential_variable ?? 300) / 4.33);
 
     // Total variable spend comparison (matches Weekly Budget & Spending History)
