@@ -643,9 +643,12 @@ export default function FinancePoolsPage() {
         await finance.updateGoal(currentStash.id, { is_stash: false } as any);
       }
     }
+    const existingGoal = finance.goals.find(g => g.id === editGoalId);
+    const existingRawDesc = existingGoal?.description || '';
+    const isInternalJson = existingRawDesc.trim().startsWith('{');
     await finance.updateGoal(editGoalId, {
       name: editName.trim(),
-      description: editDescription.trim() || null,
+      description: editDescription.trim() || (isInternalJson ? existingRawDesc : null),
       target_amount: parseFloat(editTarget),
       currency: editCurrency,
       color: editColor,
@@ -662,7 +665,8 @@ export default function FinancePoolsPage() {
   const openEditDialog = (goal: typeof finance.goals[0]) => {
     setEditGoalId(goal.id);
     setEditName(goal.name);
-    setEditDescription(goal.description || '');
+    const rawDesc = goal.description || '';
+    setEditDescription(rawDesc.trim().startsWith('{') ? '' : rawDesc);
     setEditTarget(String(goal.target_amount));
     setEditCurrency(goal.currency);
     setEditColor(goal.color || POOL_COLORS[0]);
@@ -1265,7 +1269,8 @@ export default function FinancePoolsPage() {
           const displayAmount = tripInfo ? remaining : assigned;
           const pct = goal.target_amount > 0 ? Math.min((displayAmount / goal.target_amount) * 100, 100) : 0;
           const isHit = goal.target_amount > 0 && displayAmount >= goal.target_amount;
-          const goalColor = isHit ? '#10b981' : (goal.color || '#4558ff');
+          const iconColor = goal.color || '#4558ff';
+          const goalColor = isHit ? '#10b981' : iconColor;
           const GoalIcon = getPoolIcon(goal.name);
           const cardFeasibility = goal.deadline ? evaluatePoolFeasibility({
             targetAmount: finance.convertToBase(goal.target_amount || 0, goal.currency),
@@ -1303,7 +1308,7 @@ export default function FinancePoolsPage() {
                       <PopoverTrigger asChild>
                         <button
                           className="w-10 h-10 rounded-xl flex-shrink-0 cursor-pointer hover:ring-2 hover:ring-offset-2 ring-offset-background transition-all flex items-center justify-center"
-                          style={{ backgroundColor: goalColor }}
+                          style={{ backgroundColor: iconColor }}
                           title="Change color"
                         >
                           <GoalIcon className="w-5 h-5 text-white" />
@@ -1317,7 +1322,7 @@ export default function FinancePoolsPage() {
                               className="w-7 h-7 rounded-md transition-all hover:scale-110"
                               style={{
                                 backgroundColor: c,
-                                outline: c === goalColor ? '2px solid hsl(var(--foreground))' : 'none',
+                                outline: c === iconColor ? '2px solid hsl(var(--foreground))' : 'none',
                                 outlineOffset: 2,
                               }}
                               onClick={() => finance.updateGoal(goal.id, { color: c } as any)}
@@ -1359,7 +1364,7 @@ export default function FinancePoolsPage() {
                           </Badge>
                         )}
                       </div>
-                      {goal.description && (
+                      {goal.description && !goal.description.trim().startsWith('{') && (
                         <p className="text-[11px] text-slate-500 font-normal mt-0.5 line-clamp-2 leading-tight">
                           {goal.description}
                         </p>
