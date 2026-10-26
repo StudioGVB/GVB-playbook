@@ -23,6 +23,7 @@ import { useWeeklyBoosts } from '@/hooks/useWeeklyBoosts';
 import { useWeekTypes } from '@/hooks/useWeekTypes';
 import { computePolicySnapshot, computeRequiredGoalSavingsMonthly } from '@/lib/policyEngine';
 import { formatCurrency, baseAmt, parseUkDate } from '@/lib/financeUtils';
+import { deduplicateTransactions } from '@/lib/deduplication';
 import MonthlyCashFlowBreakdown from '@/components/finance/MonthlyCashFlowBreakdown';
 import {
   startOfMonth, endOfMonth, subMonths, addMonths, format,
@@ -130,24 +131,26 @@ export default function FinanceMonthly() {
   const monthlyTotalBudget = (budgetOverride != null && budgetOverride !== '') ? Number(budgetOverride) : autoTotalBudget;
   const expectedIncomeVal = snapshot?.split.monthlyIncome ?? (assumptions?.expected_monthly_income || 0);
 
-  // Filter transactions for selected month
+  // Filter transactions for selected month (with canonical deduplication)
   const monthTxns = useMemo(() => {
-    return finance.transactions.filter(tx => {
+    const raw = finance.transactions.filter(tx => {
       if (tx.is_reimbursable) return false;
       const d = parseUkDate(tx.posted_at);
       return d >= monthStart && d <= monthEnd;
     });
+    return deduplicateTransactions(raw).cleaned;
   }, [finance.transactions, monthStart, monthEnd]);
 
   // Previous month transactions for comparison
   const prevMonthStart = startOfMonth(subMonths(selectedMonth, 1));
   const prevMonthEnd = endOfMonth(subMonths(selectedMonth, 1));
   const prevMonthTxns = useMemo(() => {
-    return finance.transactions.filter(tx => {
+    const raw = finance.transactions.filter(tx => {
       if (tx.is_reimbursable) return false;
       const d = parseUkDate(tx.posted_at);
       return d >= prevMonthStart && d <= prevMonthEnd;
     });
+    return deduplicateTransactions(raw).cleaned;
   }, [finance.transactions, prevMonthStart, prevMonthEnd]);
 
   // Treat transaction as fixed bill if linked to fixed expense, has is_fixed flag, or belongs to fixed category
