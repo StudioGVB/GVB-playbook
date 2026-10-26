@@ -2343,7 +2343,9 @@ export default function FinanceMonthly() {
             accounts={finance.accounts}
             trips={trips}
             boosts={boosts}
-            emergencyFloor={assumptions?.emergency_floor || 0}
+            emergencyFloor={snapshot?.emergencyFloor ?? assumptions?.emergency_floor ?? 1000}
+            totalLiquidCash={snapshot?.totalLiquidCash ?? 0}
+            stashBalance={stashBalance}
             convertToBase={finance.convertToBase}
           />
 
