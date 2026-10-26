@@ -239,8 +239,9 @@ serve(async (req) => {
     // 5. Transform transactions
     const txBatch = await Promise.all(allTransactions.map(async ({ tx, dbAccountId }) => {
       // Amount in pence, convert to main unit
-      const rawAmount = (tx.amount || 0) / 100
-      const postedAt = tx.settled || tx.created || new Date().toISOString()
+      // Prioritize tx.created (when the purchase actually took place, e.g. Saturday night)
+      // over tx.settled (when Mastercard cleared the funds 1-3 business days later, e.g. Monday morning)
+      const postedAt = tx.created || tx.settled || new Date().toISOString()
       const description = tx.description || 'Monzo transaction'
       const merchant = tx.merchant?.name || tx.description || null
       

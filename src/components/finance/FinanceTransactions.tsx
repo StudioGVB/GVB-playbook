@@ -7,8 +7,8 @@ import { Badge } from '@/components/ui/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
-import { Search, Check, Sparkles, Loader2, X, ArrowLeftRight, Target, Receipt, Undo2, DollarSign, Briefcase, RefreshCw, Wallet, Plus, Trash2 } from 'lucide-react';
-import { formatCurrency, formatUkDate, baseAmt } from '@/lib/financeUtils';
+import { Search, Check, Sparkles, Loader2, X, ArrowLeftRight, Target, Receipt, Undo2, DollarSign, Briefcase, RefreshCw, Wallet, Plus, Trash2, AlertTriangle } from 'lucide-react';
+import { formatCurrency, formatUkDate, parseUkDate, baseAmt } from '@/lib/financeUtils';
 import { format, isToday, isYesterday, startOfWeek, endOfWeek, subWeeks } from 'date-fns';
 import { toast } from 'sonner';
 import type { useFinanceData } from '@/hooks/useFinanceData';
@@ -257,7 +257,102 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
 
   const billsCount = transactions.filter(tx => tx.is_fixed || (tx as any).fixed_expense_id).length;
   const suggestedCount = transactions.filter(tx => !!suggestBillFor(tx)).length;
-  const reimbursableCount = transactions.filter(tx => tx.is_reimbursable && tx.reimbursement_status !== 'reimbursed').length;
+  const reimbursableTxs = transactions.filter(tx => tx.is_reimbursable && tx.reimbursement_status !== 'reimbursed');
+  const reimbursableCount = reimbursableTxs.length;
+  const reimbursableTotal = reimbursableTxs.reduce((sum, tx) => sum + Math.abs(baseAmt(tx)), 0);
+
+  // Smart Duplicate Detection (catches pending authorization vs Monday settlement duplicates)
+  const [duplicateDialogOpen, setDuplicateDialogOpen] = useState(false);
+  const [cleaningDuplicates, setCleaningDuplicates] = useState(false);
+
+  const duplicatePairs = useMemo(() => {
+    if (!transactions || transactions.length < 2) return [];
+
+    const pairs: Array<{
+      earlier: typeof transactions[0];
+      later: typeof transactions[0];
+    }> = [];
+
+    const seenIds = new Set<string>();
+
+    const cleanMerchant = (str: string) => {
+      return (str || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, '')
+        .replace(/(manchester|manches|london|rusholm|stores|plc|gb|ltd|limited)/g, '');
+    };
+
+    // Sort transactions by posted_at ascending
+    const sorted = [...transactions].sort(
+      (a, b) => new Date(a.posted_at).getTime() - new Date(b.posted_at).getTime()
+    );
+
+    for (let i = 0; i < sorted.length; i++) {
+      const a = sorted[i];
+      if (seenIds.has(a.id)) continue;
+
+      for (let j = i + 1; j < sorted.length; j++) {
+        const b = sorted[j];
+        if (seenIds.has(b.id)) continue;
+
+        // Compare timestamps - max 4 days window (e.g. Friday evening purchase settling Monday/Tuesday)
+        const timeDiff = Math.abs(new Date(b.posted_at).getTime() - new Date(a.posted_at).getTime());
+        if (timeDiff > 4 * 86400 * 1000) break;
+
+        // Must have exact same amount
+        if (Math.abs(a.amount - b.amount) > 0.001) continue;
+
+        // Compare merchant / descriptions
+        const aDesc = cleanMerchant(a.description || a.merchant || '');
+        const bDesc = cleanMerchant(b.description || b.merchant || '');
+
+        const isExactName = aDesc.length > 2 && aDesc === bDesc;
+        const isPrefixMatch = aDesc.length >= 3 && bDesc.length >= 3 && (aDesc.startsWith(bDesc.slice(0, 3)) || bDesc.startsWith(aDesc.slice(0, 3)));
+
+        if (isExactName || isPrefixMatch) {
+          seenIds.add(a.id);
+          seenIds.add(b.id);
+          pairs.push({ earlier: a, later: b });
+        }
+      }
+    }
+
+    return pairs;
+  }, [transactions]);
+
+  const handleKeepOneAndDeleteOther = async (toKeep: any, toDelete: any) => {
+    try {
+      if (toDelete.category_id && !toKeep.category_id) {
+        await updateTransaction(toKeep.id, { category_id: toDelete.category_id });
+      }
+      await deleteTransaction(toDelete.id);
+      toast.success(`Removed duplicate. Kept transaction on ${formatUkDate(toKeep.posted_at, 'dd MMM')}.`);
+    } catch (err) {
+      console.error('Failed to resolve duplicate:', err);
+      toast.error('Failed to delete duplicate');
+    }
+  };
+
+  const handleAutoResolveAllDuplicates = async () => {
+    setCleaningDuplicates(true);
+    try {
+      let count = 0;
+      for (const pair of duplicatePairs) {
+        if (pair.later.category_id && !pair.earlier.category_id) {
+          await updateTransaction(pair.earlier.id, { category_id: pair.later.category_id });
+        }
+        await deleteTransaction(pair.later.id);
+        count++;
+      }
+      toast.success(`Cleaned up ${count} duplicate transactions! Kept original weekend purchase dates.`);
+      setDuplicateDialogOpen(false);
+    } catch (err) {
+      console.error('Failed to auto-clean duplicates:', err);
+      toast.error('Error cleaning duplicates');
+    } finally {
+      setCleaningDuplicates(false);
+    }
+  };
 
   const filtered = transactions.filter(tx => {
     if (filterAccount !== 'all' && tx.account_id !== filterAccount) return false;
@@ -271,8 +366,14 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
     return true;
   });
 
+  const sortedFiltered = useMemo(() => {
+    return [...filtered].sort((a, b) => parseUkDate(b.posted_at).getTime() - parseUkDate(a.posted_at).getTime());
+  }, [filtered]);
+
   const getTxGroupHeader = useCallback((dateStr: string) => {
-    const d = new Date(dateStr);
+    // Parse through parseUkDate to ensure Australian Up Bank timestamps (AEST/AEDT)
+    // are automatically converted into UK local living time (GMT/BST - Europe/London)
+    const d = parseUkDate(dateStr);
     const now = new Date();
 
     if (isToday(d)) {
@@ -308,8 +409,8 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
   const baseCurrency = finance.settings?.base_currency || 'GBP';
 
   const groupedTransactions = useMemo(() => {
-    const paginated = filtered.slice(0, page * PAGE_SIZE);
-    const groups: { key: string; label: string; txs: typeof filtered; totalSpent: number; totalIncome: number }[] = [];
+    const paginated = sortedFiltered.slice(0, page * PAGE_SIZE);
+    const groups: { key: string; label: string; txs: typeof sortedFiltered; totalSpent: number; totalIncome: number }[] = [];
     const map = new Map<string, typeof groups[0]>();
 
     for (const tx of paginated) {
@@ -329,7 +430,7 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
       }
     }
     return groups;
-  }, [filtered, page, getTxGroupHeader]);
+  }, [sortedFiltered, page, getTxGroupHeader]);
 
   const handleCategorize = async () => {
     setCategorizing(true);
@@ -685,6 +786,149 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
         ))}
       </div>
 
+      {/* Duplicate Transactions Alert Banner & Resolver Modal */}
+      {duplicatePairs.length > 0 && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-amber-50/90 dark:bg-amber-950/30 border border-amber-200/90 dark:border-amber-900/50 rounded-2xl text-xs shadow-xs">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-amber-100 dark:bg-amber-900/50 flex items-center justify-center text-amber-600 shrink-0">
+              <AlertTriangle className="w-5 h-5 text-amber-600" />
+            </div>
+            <div>
+              <p className="font-bold text-amber-950 dark:text-amber-100 text-sm">
+                Found {duplicatePairs.length} duplicate transaction{duplicatePairs.length > 1 ? 's' : ''} (e.g. Habibi, Tesco)
+              </p>
+              <p className="text-xs text-amber-800/90 dark:text-amber-300 mt-0.5">
+                Weekend card payments (Saturday/Sunday) were duplicated by bank settlement clearing on Monday. Clean them up with 1 tap.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0 self-start sm:self-auto">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setDuplicateDialogOpen(true)}
+              className="text-xs h-8.5 rounded-xl border-amber-300 bg-white hover:bg-amber-100 text-amber-900 font-semibold"
+            >
+              Review
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleAutoResolveAllDuplicates}
+              disabled={cleaningDuplicates}
+              className="bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs h-8.5 rounded-xl shadow-xs"
+            >
+              {cleaningDuplicates ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : <Sparkles className="w-3.5 h-3.5 mr-1" />}
+              1-Tap Clean Up ({duplicatePairs.length})
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Duplicate Resolution Dialog */}
+      <Dialog open={duplicateDialogOpen} onOpenChange={setDuplicateDialogOpen}>
+        <DialogContent className="sm:max-w-xl max-h-[85vh] flex flex-col p-6">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base font-bold text-slate-900">
+              <AlertTriangle className="w-5 h-5 text-amber-500" />
+              Duplicate Transactions Resolver
+            </DialogTitle>
+            <DialogDescription className="text-xs text-slate-500">
+              When card payments clear over weekends, banks stamp them on the purchase date (Saturday) and again on settlement date (Monday). Choose which entry to keep or resolve all automatically:
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex items-center justify-between py-2 border-b border-slate-100">
+            <span className="text-xs font-semibold text-slate-600">
+              {duplicatePairs.length} duplicate pair{duplicatePairs.length > 1 ? 's' : ''} detected
+            </span>
+            <Button
+              size="sm"
+              onClick={handleAutoResolveAllDuplicates}
+              disabled={cleaningDuplicates}
+              className="bg-[#FF2EB8] hover:bg-[#e5299f] text-white font-bold text-xs h-8 rounded-lg shadow-xs"
+            >
+              {cleaningDuplicates ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : <Sparkles className="w-3.5 h-3.5 mr-1" />}
+              Keep Weekend &amp; Delete Monday Copies ({duplicatePairs.length})
+            </Button>
+          </div>
+
+          <div className="overflow-y-auto space-y-3 py-2 flex-1 pr-1">
+            {duplicatePairs.map((pair, idx) => {
+              const earlierCat = categories.find(c => c.id === pair.earlier.category_id);
+              const laterCat = categories.find(c => c.id === pair.later.category_id);
+              return (
+                <div key={idx} className="p-3.5 rounded-xl border border-slate-200/80 bg-slate-50/50 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-900">
+                      Amount: {formatCurrency(Math.abs(pair.earlier.amount), finance.settings?.base_currency || 'GBP')}
+                    </span>
+                    <Badge variant="outline" className="text-[10px] text-amber-700 bg-amber-50 border-amber-200 font-semibold">
+                      Weekend vs Monday duplicate
+                    </Badge>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                    {/* Earlier: Actual Purchase Date */}
+                    <div className="p-3 rounded-xl border border-purple-200/80 bg-purple-50/40 flex flex-col justify-between">
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-bold text-purple-900">Original Purchase</span>
+                          <span className="text-[9px] font-bold text-purple-700 bg-purple-100 px-1.5 py-0.5 rounded">Recommended</span>
+                        </div>
+                        <p className="font-semibold text-slate-900">{pair.earlier.description}</p>
+                        <p className="text-[11px] text-slate-500 mt-0.5">
+                          {formatUkDate(pair.earlier.posted_at, 'EEEE, d MMMM yyyy')}
+                        </p>
+                        {earlierCat && (
+                          <Badge variant="secondary" className="text-[9px] mt-1.5" style={getCategoryBadgeStyle(earlierCat)}>
+                            {earlierCat.name}
+                          </Badge>
+                        )}
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleKeepOneAndDeleteOther(pair.earlier, pair.later)}
+                        className="mt-2.5 text-xs h-7.5 border-purple-300 hover:bg-purple-100 text-purple-900 font-semibold"
+                      >
+                        Keep this (Delete Monday)
+                      </Button>
+                    </div>
+
+                    {/* Later: Settlement Date */}
+                    <div className="p-3 rounded-xl border border-slate-200 bg-white flex flex-col justify-between">
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-bold text-slate-700">Monday Settlement</span>
+                          <span className="text-[9px] text-slate-400">Clearing</span>
+                        </div>
+                        <p className="font-semibold text-slate-900">{pair.later.description}</p>
+                        <p className="text-[11px] text-slate-500 mt-0.5">
+                          {formatUkDate(pair.later.posted_at, 'EEEE, d MMMM yyyy')}
+                        </p>
+                        {laterCat && (
+                          <Badge variant="secondary" className="text-[9px] mt-1.5" style={getCategoryBadgeStyle(laterCat)}>
+                            {laterCat.name}
+                          </Badge>
+                        )}
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => handleKeepOneAndDeleteOther(pair.later, pair.earlier)}
+                        className="mt-2.5 text-xs h-7.5 hover:bg-slate-100 text-slate-600"
+                      >
+                        Keep Monday instead
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* Transaction List */}
       <div className="space-y-5">
         {filtered.length === 0 ? (
@@ -904,8 +1148,8 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                           </p>
                         </div>
 
-                        {/* Action Icons Toolbar (Comfortable fixed-width container ensuring all 4 action buttons sit cleanly on the right) */}
-                        <div className="w-28 sm:w-32 flex items-center justify-end gap-1.5 shrink-0">
+                        {/* Action Icons Toolbar (Comfortable fixed-width container ensuring all action buttons sit cleanly on the right) */}
+                        <div className="w-32 sm:w-36 flex items-center justify-end gap-1.5 shrink-0">
                           {/* Pool assignment / refund flag */}
                           {tx.amount < 0 && goals.length > 0 ? (
                             <Popover>
@@ -1103,6 +1347,20 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                             title={(tx.is_transfer || isConfirmedTransfer) ? 'Transfer (click to unmark and treat as income/spending)' : 'Mark as transfer'}
                           >
                             <ArrowLeftRight className="w-4 h-4" />
+                          </button>
+
+                          {/* Delete transaction */}
+                          <button
+                            onClick={async () => {
+                              if (window.confirm(`Delete transaction "${tx.description}" (${formatCurrency(tx.amount, finance.settings?.base_currency || 'GBP')})?`)) {
+                                await deleteTransaction(tx.id);
+                                toast.success('Transaction deleted');
+                              }
+                            }}
+                            className="p-1 rounded shrink-0 transition-colors text-slate-300 hover:text-rose-600"
+                            title="Delete transaction"
+                          >
+                            <Trash2 className="w-4 h-4" />
                           </button>
                         </div>
                       </div>

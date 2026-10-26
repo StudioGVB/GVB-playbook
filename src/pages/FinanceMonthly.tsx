@@ -1790,15 +1790,26 @@ export default function FinanceMonthly() {
               {/* Header with Title and View Switcher */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-slate-100">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-2xl bg-rose-50 border border-rose-200/70 flex items-center justify-center text-rose-600 shrink-0">
-                    <Flame className="w-5 h-5 fill-rose-500/20 text-rose-600" />
+                  <div className={cn(
+                    "w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 border transition-colors",
+                    dailyViewMode === 'heatmap'
+                      ? "bg-rose-50 border-rose-200/70 text-rose-600"
+                      : "bg-purple-50 border-purple-200/70 text-purple-600"
+                  )}>
+                    {dailyViewMode === 'heatmap' ? (
+                      <Flame className="w-5 h-5 fill-rose-500/20 text-rose-600" />
+                    ) : (
+                      <BarChart3 className="w-5 h-5 text-purple-600" />
+                    )}
                   </div>
                   <div>
                     <h3 className="text-base sm:text-lg font-display font-bold text-slate-900 flex items-center gap-2">
-                      Monthly Spending Heatmap
+                      {dailyViewMode === 'heatmap' ? 'Monthly Spending Heatmap' : 'Daily Variable Spending Timeline'}
                     </h3>
                     <p className="text-xs text-slate-500">
-                      Red intensity reflects heavier spending days · Click any day to inspect transactions & recategorise · Target: <strong>{fmt(targetDailyVariable)}/day</strong>
+                      {dailyViewMode === 'heatmap'
+                        ? `Red intensity reflects heavier spending days · Click any day to inspect · Target: ${fmt(targetDailyVariable)}/day`
+                        : `Daily variable burn by category · Click any day to inspect · Target: ${fmt(targetDailyVariable)}/day`}
                     </p>
                   </div>
                 </div>
@@ -2100,68 +2111,197 @@ export default function FinanceMonthly() {
               ) : (
                 /* --- VIEW 2: STACKED BAR TIMELINE --- */
                 <div className="space-y-4">
-                  <div className="flex items-center justify-end gap-4 text-xs">
-                    <div className="flex items-center gap-1.5">
-                      <div className="w-2.5 h-2.5 rounded-full bg-purple-600" />
-                      <span className="text-slate-600 font-medium">Essentials</span>
+                  {/* Legend & Target Indicator */}
+                  <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
+                    <div className="flex items-center gap-2 text-slate-500">
+                      <span>
+                        Daily Target: <strong className="text-slate-800">{fmt(targetDailyVariable)}/day</strong>
+                      </span>
+                      <span className="text-[11px] text-slate-400 sm:hidden">· Swipe to view full month →</span>
                     </div>
-                    <div className="flex items-center gap-1.5">
-                      <div className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
-                      <span className="text-slate-600 font-medium">Fun Money</span>
+
+                    <div className="flex flex-wrap items-center gap-3.5">
+                      <div className="flex items-center gap-1.5">
+                        <div className="w-2.5 h-2.5 rounded-xs bg-purple-600 shadow-2xs" />
+                        <span className="text-slate-700 font-medium">Essentials</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <div className="w-2.5 h-2.5 rounded-xs bg-emerald-500 shadow-2xs" />
+                        <span className="text-slate-700 font-medium">Fun Money</span>
+                      </div>
+                      {targetDailyVariable > 0 && (
+                        <div className="flex items-center gap-1.5">
+                          <div className="w-3.5 border-b-2 border-dashed border-amber-500" />
+                          <span className="text-amber-800 font-medium">Target Avg</span>
+                        </div>
+                      )}
                     </div>
                   </div>
 
-                  <div className="flex items-end gap-px h-36 pt-4">
-                    {dailyData.map((day, i) => {
-                      const total = day.essential + day.fun;
-                      const essH = total > 0 ? (day.essential / maxDaily) * 100 : 0;
-                      const funH = total > 0 ? (day.fun / maxDaily) * 100 : 0;
-                      const isToday = monthStart.getMonth() === new Date().getMonth() &&
-                        monthStart.getFullYear() === new Date().getFullYear() &&
-                        i + 1 === new Date().getDate();
-                      const isSelected = selectedDayNum === i + 1;
-                      return (
-                        <div
-                          key={i}
-                          onClick={() => setSelectedDayNum(i + 1)}
-                          className={cn(
-                            "flex-1 flex flex-col items-center justify-end h-full group relative cursor-pointer hover:bg-slate-100/80 rounded-sm p-0.5 transition-all",
-                            isSelected && "bg-pink-50 ring-1 ring-[#FF2EB8]"
-                          )}
-                          title={`Click to view transactions for ${format(monthStart, 'MMM')} ${i + 1}`}
-                        >
-                          {total > 0 && (
-                            <div className="absolute -top-7 bg-slate-900 text-white rounded px-1.5 py-0.5 text-[10px] font-semibold opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10 whitespace-nowrap shadow-xs">
-                              {fmt(total)}
+                  {/* Horizontal Scroll Wrapper - guarantees timeline never cuts off */}
+                  <div className="relative pt-3 pb-1 overflow-x-auto touch-scroll">
+                    <div className="min-w-[680px] w-full">
+                      <TooltipProvider delayDuration={50}>
+                        {/* Bars Area with Target Benchmark Line */}
+                        <div className="relative h-40 flex items-end justify-between gap-1 px-1">
+                          {/* Target guideline across chart */}
+                          {targetDailyVariable > 0 && maxDaily > 0 && (
+                            <div
+                              className="absolute left-0 right-0 border-b border-dashed border-amber-400/90 pointer-events-none z-10 flex items-center"
+                              style={{
+                                bottom: `${Math.min(Math.max((targetDailyVariable / maxDaily) * 100, 4), 95)}%`,
+                              }}
+                            >
+                              <span className="text-[9px] font-bold text-amber-800 bg-amber-50/95 border border-amber-300/80 px-1.5 py-0.2 rounded-sm ml-1 shadow-2xs">
+                                Target {fmt(targetDailyVariable)}/d
+                              </span>
                             </div>
                           )}
-                          <div className="w-full flex flex-col justify-end" style={{ height: '100%' }}>
-                            {funH > 0 && (
-                              <div
-                                className="w-full rounded-t-sm bg-emerald-500 group-hover:brightness-110"
-                                style={{ height: `${funH}%`, minHeight: funH > 0 ? 2 : 0 }}
-                              />
-                            )}
-                            {essH > 0 && (
-                              <div
-                                className="w-full bg-purple-600 group-hover:brightness-110"
-                                style={{
-                                  height: `${essH}%`,
-                                  minHeight: essH > 0 ? 2 : 0,
-                                  borderRadius: funH > 0 ? 0 : '2px 2px 0 0',
-                                }}
-                              />
-                            )}
-                          </div>
-                          <span className={cn(
-                            "text-[9px] mt-1 tabular-nums",
-                            isToday ? "font-black text-[#FF2EB8]" : "text-slate-400"
-                          )}>
-                            {i + 1}
-                          </span>
+
+                          {dailyData.map((day, i) => {
+                            const dayNum = i + 1;
+                            const total = day.essential + day.fun;
+                            const essH = total > 0 ? (day.essential / maxDaily) * 100 : 0;
+                            const funH = total > 0 ? (day.fun / maxDaily) * 100 : 0;
+                            const isToday = monthStart.getMonth() === new Date().getMonth() &&
+                              monthStart.getFullYear() === new Date().getFullYear() &&
+                              dayNum === new Date().getDate();
+                            const isSelected = selectedDayNum === dayNum;
+                            const dayDate = new Date(monthStart.getFullYear(), monthStart.getMonth(), dayNum);
+                            const isWeekend = dayDate.getDay() === 0 || dayDate.getDay() === 6;
+
+                            return (
+                              <Tooltip key={dayNum}>
+                                <TooltipTrigger asChild>
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedDayNum(dayNum)}
+                                    className={cn(
+                                      "flex-1 flex flex-col items-center justify-end h-full group relative focus:outline-none transition-all rounded-md py-1 cursor-pointer",
+                                      isSelected
+                                        ? "bg-pink-50 ring-1.5 ring-[#FF2EB8]"
+                                        : "hover:bg-slate-50"
+                                    )}
+                                    aria-label={`View transactions for ${format(dayDate, 'MMM d')}`}
+                                  >
+                                    {/* Uniform fixed-width bar track (eliminates thickness differences) */}
+                                    <div className="w-2.5 sm:w-3 h-full rounded-t-sm bg-slate-100/90 flex flex-col justify-end overflow-hidden group-hover:bg-slate-200/70 transition-colors">
+                                      {funH > 0 && (
+                                        <div
+                                          className="w-full bg-emerald-500 transition-all duration-200 group-hover:brightness-110"
+                                          style={{ height: `${funH}%`, minHeight: 2 }}
+                                        />
+                                      )}
+                                      {essH > 0 && (
+                                        <div
+                                          className="w-full bg-purple-600 transition-all duration-200 group-hover:brightness-110"
+                                          style={{ height: `${essH}%`, minHeight: 2 }}
+                                        />
+                                      )}
+                                    </div>
+                                  </button>
+                                </TooltipTrigger>
+
+                                <TooltipContent
+                                  side="top"
+                                  sideOffset={8}
+                                  className="bg-slate-900 text-white text-xs p-3 shadow-xl border-slate-800 rounded-xl z-50 pointer-events-none min-w-[170px]"
+                                >
+                                  <div className="space-y-1.5">
+                                    <div className="flex items-center justify-between gap-3 border-b border-slate-800 pb-1.5">
+                                      <span className="font-bold text-slate-200">{format(dayDate, 'EEE, d MMMM')}</span>
+                                      {isToday && (
+                                        <span className="text-[9px] font-black text-[#FF2EB8] uppercase tracking-wider bg-pink-950/60 px-1 py-0.5 rounded">
+                                          Today
+                                        </span>
+                                      )}
+                                    </div>
+
+                                    <div className="flex items-baseline justify-between pt-0.5">
+                                      <span className="text-slate-400 text-[11px]">Total Spent:</span>
+                                      <span className="text-base font-black text-white tabular-nums">
+                                        {fmt(total)}
+                                      </span>
+                                    </div>
+
+                                    <div className="text-[11px] space-y-1 text-slate-300 pt-1 border-t border-slate-800/80">
+                                      <div className="flex items-center justify-between gap-3">
+                                        <span className="text-purple-300 flex items-center gap-1.5">
+                                          <span className="w-2 h-2 rounded-xs bg-purple-500 inline-block" />
+                                          Essentials:
+                                        </span>
+                                        <span className="font-semibold tabular-nums">{fmt(day.essential)}</span>
+                                      </div>
+                                      <div className="flex items-center justify-between gap-3">
+                                        <span className="text-emerald-300 flex items-center gap-1.5">
+                                          <span className="w-2 h-2 rounded-xs bg-emerald-500 inline-block" />
+                                          Fun Money:
+                                        </span>
+                                        <span className="font-semibold tabular-nums">{fmt(day.fun)}</span>
+                                      </div>
+                                    </div>
+
+                                    {targetDailyVariable > 0 && (
+                                      <div className="text-[10px] pt-1.5 border-t border-slate-800 text-slate-400">
+                                        {total > targetDailyVariable ? (
+                                          <span className="text-rose-400 font-semibold flex items-center justify-between">
+                                            <span>Above target:</span>
+                                            <span className="tabular-nums">+{fmt(total - targetDailyVariable)}</span>
+                                          </span>
+                                        ) : total > 0 ? (
+                                          <span className="text-emerald-400 font-semibold flex items-center justify-between">
+                                            <span>Under target:</span>
+                                            <span className="tabular-nums">-{fmt(targetDailyVariable - total)}</span>
+                                          </span>
+                                        ) : (
+                                          <span className="text-slate-400 italic">£0 spend · zero burn day</span>
+                                        )}
+                                      </div>
+                                    )}
+
+                                    <div className="text-[10px] text-slate-400/90 pt-1 text-center italic border-t border-slate-800/60">
+                                      Click bar to open transaction list
+                                    </div>
+                                  </div>
+                                </TooltipContent>
+                              </Tooltip>
+                            );
+                          })}
                         </div>
-                      );
-                    })}
+
+                        {/* Baseline Day Numbers Row */}
+                        <div className="flex items-center justify-between gap-1 px-1 mt-1.5 border-t border-slate-100 pt-1.5">
+                          {dailyData.map((_, i) => {
+                            const dayNum = i + 1;
+                            const isToday = monthStart.getMonth() === new Date().getMonth() &&
+                              monthStart.getFullYear() === new Date().getFullYear() &&
+                              dayNum === new Date().getDate();
+                            const isSelected = selectedDayNum === dayNum;
+                            const dayDate = new Date(monthStart.getFullYear(), monthStart.getMonth(), dayNum);
+                            const isWeekend = dayDate.getDay() === 0 || dayDate.getDay() === 6;
+
+                            return (
+                              <button
+                                key={dayNum}
+                                type="button"
+                                onClick={() => setSelectedDayNum(dayNum)}
+                                className="flex-1 flex justify-center cursor-pointer py-0.5 focus:outline-none"
+                                aria-label={`Select day ${dayNum}`}
+                              >
+                                <span className={cn(
+                                  "text-[9px] sm:text-[10px] tabular-nums font-medium transition-colors leading-none py-1 px-1 rounded-sm",
+                                  isSelected && "bg-[#FF2EB8] text-white font-bold shadow-2xs",
+                                  isToday && !isSelected && "text-[#FF2EB8] font-black ring-1 ring-[#FF2EB8]/40",
+                                  !isSelected && !isToday && (isWeekend ? "text-slate-600 font-semibold" : "text-slate-400")
+                                )}>
+                                  {dayNum}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </TooltipProvider>
+                    </div>
                   </div>
                 </div>
               )}
