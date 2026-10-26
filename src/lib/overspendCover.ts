@@ -17,6 +17,14 @@ export interface CoverMeta {
   last_settled_week?: string;
   settled_version?: number;
   last_settled_stash_delta?: number;
+  /** YYYY-MM of the most recent month-end sweep from Savings Stash into the real Savings pool */
+  last_swept_month?: string;
+  last_month_sweep?: {
+    month: string;
+    amount: number;
+    targetGoalId: string;
+    targetGoalName: string;
+  } | null;
   /** Immutable budget/spend records for closed weeks so past weeks never drift */
   closed_weeks?: Record<string, ClosedWeekRecord>;
   /** goalId -> amount borrowed and not yet repaid */

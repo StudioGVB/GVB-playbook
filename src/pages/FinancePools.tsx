@@ -1512,12 +1512,20 @@ export default function FinancePoolsPage() {
                   })() : (() => {
                     const isStash = (goal as any).is_stash || goal.name.toLowerCase().includes('stash');
                     return (
-                      <div className="flex justify-between">
-                        <span className="text-slate-500 font-semibold">{isStash ? 'Funding Mode:' : 'Proportional Allocation:'}</span>
-                        <span className="font-bold text-slate-800">
-                          {isStash ? 'Week-end Surplus Sweep' : `${goal.percent_allocation || 0}%`}
-                        </span>
-                      </div>
+                      <>
+                        <div className="flex justify-between">
+                          <span className="text-slate-500 font-semibold">{isStash ? 'Funding Mode:' : 'Proportional Allocation:'}</span>
+                          <span className="font-bold text-slate-800">
+                            {isStash ? 'Week-end Surplus Sweep' : `${goal.percent_allocation || 0}%`}
+                          </span>
+                        </div>
+                        {isStash && (
+                          <div className="flex justify-between">
+                            <span className="text-slate-500 font-semibold">Month-End Rule:</span>
+                            <span className="font-bold text-emerald-700">Shifts to Savings Pool</span>
+                          </div>
+                        )}
+                      </>
                     );
                   })()}
                 </div>

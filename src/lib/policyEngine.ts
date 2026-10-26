@@ -161,6 +161,7 @@ export function computeActualSpendingIncome(
   categories: FinanceCategory[],
   now: Date = new Date(),
 ): ActualSpendingIncome {
+  const DAY = 86400000;
   const catById = new Map(categories.map(c => [c.id, c]));
 
   const resolveStreamName = (tx: FinanceTransaction): { streamName: string; kind: 'gamma' | 'venture' | 'other' } | null => {
@@ -174,24 +175,37 @@ export function computeActualSpendingIncome(
     const catLower = catName.toLowerCase();
     const text = `${tx.merchant || ''} ${tx.description || ''}`.toLowerCase();
 
+    if (text.includes('gamma') || catLower.includes('gamma') || catLower.includes('salary')) {
+      return { streamName: 'Gamma Salary', kind: 'gamma' };
+    }
+    if (
+      text.includes('venture') ||
+      text.includes('batchbase') ||
+      text.includes('batch base') ||
+      text.includes('advisory') ||
+      catLower.includes('venture') ||
+      catLower.includes('batchbase') ||
+      catLower.includes('advisory')
+    ) {
+      return { streamName: 'Venture Advisory', kind: 'venture' };
+    }
+    if (text.includes('back pocket') || text.includes('bpg') || catLower.includes('back pocket')) {
+      return { streamName: 'Back Pocket Games', kind: 'other' };
+    }
+    if (text.includes('eleven') || text.includes('11labs') || catLower.includes('eleven')) {
+      return { streamName: 'ElevenLabs', kind: 'other' };
+    }
+    if (text.includes('etsy') || catLower.includes('etsy')) {
+      return { streamName: 'Etsy', kind: 'other' };
+    }
+
     if (isExplicitIncome) {
-      if (catLower.includes('gamma') || catLower.includes('salary')) {
-        return { streamName: catName, kind: 'gamma' };
-      }
-      if (catLower.includes('venture') || catLower.includes('batchbase') || catLower.includes('advisory')) {
-        return { streamName: catName, kind: 'venture' };
-      }
+      // Generic unsorted "Income" category is ignored until tagged to a specific stream
+      if (catLower === 'income') return null;
       return { streamName: catName, kind: 'other' };
     }
 
-    if (text.includes('gamma')) return { streamName: 'Gamma Salary', kind: 'gamma' };
-    if (text.includes('venture') || text.includes('batchbase') || text.includes('batch base') || text.includes('advisory')) {
-      return { streamName: 'Venture Advisory', kind: 'venture' };
-    }
-    if (text.includes('back pocket') || text.includes('bpg')) return { streamName: 'Back Pocket Games', kind: 'other' };
-    if (text.includes('eleven') || text.includes('11labs')) return { streamName: 'ElevenLabs', kind: 'other' };
-    if (text.includes('etsy')) return { streamName: 'Etsy', kind: 'other' };
-    return { streamName: 'Other', kind: 'other' };
+    return null;
   };
 
   const allClassified = transactions
@@ -207,9 +221,10 @@ export function computeActualSpendingIncome(
   let monthItems = allClassified.filter(x => x.date >= curMonthStart && x.date <= curMonthEnd);
   let isLate = false;
   let cycleStart = curMonthStart;
+  let cycleEnd = curMonthEnd;
   let nextPayday = new Date(now.getFullYear(), now.getMonth() + 1, 0);
 
-  // If no Gamma pay has landed yet this month (e.g. before payday), fall back to previous month
+  // If no Gamma pay has landed yet this month (e.g. before payday), fall back to previous month for baseline Gamma + VA
   const hasCurrentMonthGamma = monthItems.some(x => x.kind === 'gamma');
   if (!hasCurrentMonthGamma) {
     const prevMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1, 0, 0, 0, 0);
@@ -221,6 +236,7 @@ export function computeActualSpendingIncome(
       monthItems = prevItems;
       isLate = true;
       cycleStart = prevMonthStart;
+      cycleEnd = prevMonthEnd;
       nextPayday = new Date(now.getFullYear(), now.getMonth(), 0);
     }
   }
@@ -228,23 +244,53 @@ export function computeActualSpendingIncome(
   let gamma = 0;
   let gammaDate: Date | null = null;
   let venture = 0;
-  let total = 0;
   const streamMap = new Map<string, { amount: number; count: number }>();
+
+  const refWeekEnd = endOfWeek(now, { weekStartsOn: 1 });
+  const lastWeekStartOfMonth = startOfWeek(cycleEnd, { weekStartsOn: 1 });
+  const otherItems: OtherIncomeItem[] = [];
+  let otherWeeklyBonus = 0;
 
   for (const item of monthItems) {
     const amt = baseAmt(item.tx);
-    total += amt;
     if (item.kind === 'gamma') {
       gamma += amt;
       if (!gammaDate || item.date > gammaDate) gammaDate = item.date;
     } else if (item.kind === 'venture') {
       venture += amt;
+    } else if (item.kind === 'other') {
+      // Only include extra side-income payments that have landed on or before the week being viewed,
+      // and divide each payment by the number of weeks left in the month from the week it landed.
+      if (item.date <= refWeekEnd) {
+        const txWeekStart = startOfWeek(item.date, { weekStartsOn: 1 });
+        const weeksSpread = Math.max(
+          1,
+          Math.round((lastWeekStartOfMonth.getTime() - txWeekStart.getTime()) / (7 * DAY)) + 1
+        );
+        const perWeek = amt / weeksSpread;
+        otherWeeklyBonus += perWeek;
+        otherItems.push({
+          name: item.streamName || item.tx.merchant || item.tx.description || 'Extra income',
+          amount: amt,
+          date: item.date,
+          weeksSpread,
+          perWeek,
+        });
+      }
     }
-    const existing = streamMap.get(item.streamName) || { amount: 0, count: 0 };
-    existing.amount += amt;
-    existing.count += 1;
-    streamMap.set(item.streamName, existing);
+
+    // Track streams that have landed up to the viewed week (or all baseline streams)
+    if (item.kind !== 'other' || item.date <= refWeekEnd) {
+      const existing = streamMap.get(item.streamName) || { amount: 0, count: 0 };
+      existing.amount += amt;
+      existing.count += 1;
+      streamMap.set(item.streamName, existing);
+    }
   }
+
+  // Baseline monthly income for the waterfall (Fixed Bills -> Variable Essentials -> Saving Goals -> Base Fun)
+  // is strictly Gamma Salary + Venture Advisory. Extra side income is paced weekly via otherWeeklyBonus.
+  const total = gamma + venture;
 
   const streams: IncomeStreamBreakdownItem[] = Array.from(streamMap.entries())
     .map(([name, data]) => ({ name, amount: data.amount, count: data.count }))
@@ -259,8 +305,8 @@ export function computeActualSpendingIncome(
     isLate,
     venture,
     ventureLast4Weeks: venture,
-    otherWeeklyBonus: 0,
-    otherItems: [],
+    otherWeeklyBonus,
+    otherItems,
     streams,
   };
 }

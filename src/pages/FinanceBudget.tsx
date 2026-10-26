@@ -333,6 +333,63 @@ export default function FinanceBudget() {
         if (g) await finance.updateGoal(goalId, { assigned_amount: Math.max(0, (g.assigned_amount || 0) + delta) } as any);
       }
 
+      // Calculate post-settle Stash balance
+      let nextStashAmount = Math.max(
+        0,
+        Math.round(((stashGoal?.assigned_amount || 0) + stashDelta) * 100) / 100
+      );
+
+      // End-of-Month Sweep: if we have entered a new calendar month relative to prevWeekStart
+      // (i.e. prevWeekStart's month has now ended) and we haven't swept that month yet,
+      // shift 100% of any money left in Savings Stash straight into the real "Savings" pool.
+      const prevWeekMonthKey = format(prevWeekStart, 'yyyy-MM');
+      const todayMonthKey = format(today, 'yyyy-MM');
+      let sweptMonthKey = meta.last_swept_month;
+      let lastMonthSweep = meta.last_month_sweep || null;
+
+      if (todayMonthKey > prevWeekMonthKey && meta.last_swept_month !== prevWeekMonthKey) {
+        const realSavingsGoal =
+          finance.goals.find(
+            g =>
+              !(g as any).is_stash &&
+              !(g as any).is_emergency &&
+              !g.name.toLowerCase().includes('stash') &&
+              !g.name.toLowerCase().includes('emergency') &&
+              g.name.trim().toLowerCase() === 'savings'
+          ) ||
+          finance.goals.find(
+            g =>
+              !(g as any).is_stash &&
+              !(g as any).is_emergency &&
+              !g.name.toLowerCase().includes('stash') &&
+              !g.name.toLowerCase().includes('emergency') &&
+              g.name.toLowerCase().includes('saving')
+          );
+
+        if (realSavingsGoal && nextStashAmount > 0.01) {
+          const sweptAmount = nextStashAmount;
+          const oneInBase = finance.convertToBase(1, realSavingsGoal.currency);
+          const nativeAdd = oneInBase === 0 ? sweptAmount : sweptAmount / oneInBase;
+          await finance.updateGoal(realSavingsGoal.id, {
+            assigned_amount: Math.round(((realSavingsGoal.assigned_amount || 0) + nativeAdd) * 100) / 100,
+          } as any);
+          nextStashAmount = 0;
+          sweptMonthKey = prevWeekMonthKey;
+          lastMonthSweep = {
+            month: prevWeekMonthKey,
+            amount: sweptAmount,
+            targetGoalId: realSavingsGoal.id,
+            targetGoalName: realSavingsGoal.name,
+          };
+          toast.success(
+            `End of month! Shifted ${fmt(sweptAmount)} left in Savings Stash straight into your ${realSavingsGoal.name} pool 🎉`,
+            { duration: 9000 }
+          );
+        } else {
+          sweptMonthKey = prevWeekMonthKey;
+        }
+      }
+
       // Stash balance + metadata (settle marker, version, stash delta, closed_weeks lock, borrowed ledger, last cover summary) — always written
       const newMeta: CoverMeta = {
         ...meta,
@@ -340,6 +397,8 @@ export default function FinanceBudget() {
         last_settled_week: prevWeekKey,
         settled_version: SETTLE_VERSION,
         last_settled_stash_delta: recordedStashDelta,
+        last_swept_month: sweptMonthKey,
+        last_month_sweep: lastMonthSweep,
         closed_weeks: {
           ...(meta.closed_weeks || {}),
           [prevWeekKey]: {
@@ -360,14 +419,14 @@ export default function FinanceBudget() {
       };
       if (stashGoal) {
         await finance.updateGoal(stashGoal.id, {
-          assigned_amount: Math.max(0, Math.round(((stashGoal.assigned_amount || 0) + stashDelta) * 100) / 100),
+          assigned_amount: nextStashAmount,
           is_stash: true,
           description: JSON.stringify(newMeta),
         } as any);
       } else {
         await finance.addGoal({
           name: 'Savings Stash', target_amount: 9999, currency: baseCurrency, priority: 3,
-          safety_mode: 'balanced', assigned_amount: Math.max(0, Math.round(stashDelta * 100) / 100), color: '#10b981', is_stash: true,
+          safety_mode: 'balanced', assigned_amount: nextStashAmount, color: '#10b981', is_stash: true,
           description: JSON.stringify(newMeta),
         } as any);
       }
@@ -1082,24 +1141,63 @@ export default function FinanceBudget() {
                 <ChevronDown className="w-4 h-4 text-slate-400" />
               </CollapsibleTrigger>
               <CollapsibleContent className="mt-3 divide-y divide-slate-100">
-                {(() => { const ai = computeActualSpendingIncome(finance.transactions, finance.categories, referenceDateForEngine); return (<>
-                  {row('Monthly income (actual deposits)', `+${fmt(s.monthlyIncome)}`, ai.isLate ? `⚠️ Pay not landed yet — using last month (${format(ai.cycleStart, 'MMM yyyy')}) as a guide` : `${format(ai.cycleStart, 'd MMM')} → ${ai.nextPayday ? format(ai.nextPayday, 'd MMM') : '—'}`, 'text-emerald-600')}
-                  {ai.streams.map((st, i) => (
-                    <div key={i} className="flex justify-between pl-4 py-1 text-[11px] text-slate-500">
-                      <span>{st.name} ({st.count} {st.count === 1 ? 'payment' : 'payments'})</span>
-                      <span className="tabular-nums">{fmt(st.amount)}</span>
-                    </div>
-                  ))}
-                </>); })()}
-                {row('Fixed bills', `−${fmt(s.mandatoryAmount)}`, 'All fixed expenses (including externally-paid)', 'text-rose-600')}
-                {row('Essentials', `−${fmt(essentialsMonthly)}`, 'Higher of your estimate or normal-week average', 'text-rose-600')}
-                {row('Goal savings', `−${fmt(s.goalSavingsAmount)}`, 'Pools with deadlines: remaining ÷ weeks left (capped at remaining balance)', 'text-rose-600')}
-                {row('Fun money (monthly)', `=${fmt(s.funAmount)}`, `÷ 4.33 = ${fmt(snapshot.baseWeeklyFun)}/wk base weekly allowance`)}
-                {row(
-                  'Weekly budget',
-                  fmt(totalWeeklyBudget),
-                  `${fmt(essentialWeeklyBudget)} essentials + ${fmt(snapshot.baseWeeklyFun)} base fun${boostAmount ? ` + ${fmt(boostAmount)} boost` : ''}${snapshot.carryForwardDebt ? ` − ${fmt(snapshot.carryForwardDebt)} carried debt` : ''}`
-                )}
+                {(() => {
+                  const ai = computeActualSpendingIncome(finance.transactions, finance.categories, referenceDateForEngine);
+                  return (
+                    <>
+                      {row(
+                        'Baseline monthly income (Gamma + VA)',
+                        `+${fmt(s.monthlyIncome)}`,
+                        ai.isLate
+                          ? `⚠️ Pay not landed yet — using last month (${format(ai.cycleStart, 'MMM yyyy')}) as a guide`
+                          : `${format(ai.cycleStart, 'd MMM')} → ${ai.nextPayday ? format(ai.nextPayday, 'd MMM') : '—'}`,
+                        'text-emerald-600'
+                      )}
+                      {ai.gamma > 0 && (
+                        <div className="flex justify-between pl-4 py-1 text-[11px] text-slate-500">
+                          <span>Gamma Salary {ai.gammaDate ? `(paid ${format(ai.gammaDate, 'd MMM')})` : ''}</span>
+                          <span className="tabular-nums">{fmt(ai.gamma)}</span>
+                        </div>
+                      )}
+                      {ai.venture > 0 && (
+                        <div className="flex justify-between pl-4 py-1 text-[11px] text-slate-500">
+                          <span>Venture Advisory</span>
+                          <span className="tabular-nums">{fmt(ai.venture)}</span>
+                        </div>
+                      )}
+                      {row('Fixed bills', `−${fmt(s.mandatoryAmount)}`, 'All fixed expenses (including externally-paid)', 'text-rose-600')}
+                      {row('Variable essentials', `−${fmt(essentialsMonthly)}`, 'Higher of your estimate or normal-week average', 'text-rose-600')}
+                      {row('Saving goals', `−${fmt(s.goalSavingsAmount)}`, 'Pools with deadlines: remaining ÷ weeks left (capped at remaining balance)', 'text-rose-600')}
+                      {row('Base fun money (monthly)', `=${fmt(s.funAmount)}`, `÷ 4.33 = ${fmt(snapshot.baseWeeklyFun)}/wk base weekly fun`)}
+                      {ai.otherItems.length > 0 && (
+                        <div className="py-2">
+                          <div className="flex items-start justify-between gap-4">
+                            <div>
+                              <p className="text-sm font-semibold text-slate-800">Extra side income (paced over month)</p>
+                              <p className="text-[11px] text-slate-500">Each extra payment is divided by the weeks left in the month</p>
+                            </div>
+                            <p className="text-sm font-bold tabular-nums text-emerald-600">+{fmt(ai.otherWeeklyBonus)}/wk</p>
+                          </div>
+                          <div className="mt-1 space-y-0.5">
+                            {ai.otherItems.map((o, i) => (
+                              <div key={i} className="flex justify-between pl-4 py-0.5 text-[11px] text-slate-500">
+                                <span>
+                                  {o.name} ({fmt(o.amount)} on {format(o.date, 'd MMM')} ÷ {o.weeksSpread} {o.weeksSpread === 1 ? 'wk' : 'wks'} left)
+                                </span>
+                                <span className="tabular-nums text-emerald-600 font-semibold">+{fmt(o.perWeek)}/wk</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {row(
+                        'Weekly budget',
+                        fmt(totalWeeklyBudget),
+                        `${fmt(essentialWeeklyBudget)} essentials + ${fmt(snapshot.baseWeeklyFun)} base fun${ai.otherWeeklyBonus > 0 ? ` + ${fmt(ai.otherWeeklyBonus)} paced extra income` : ''}${boostAmount ? ` + ${fmt(boostAmount)} boost` : ''}${snapshot.carryForwardDebt ? ` − ${fmt(snapshot.carryForwardDebt)} carried debt` : ''}`
+                      )}
+                    </>
+                  );
+                })()}
               </CollapsibleContent>
             </div>
           </Collapsible>
