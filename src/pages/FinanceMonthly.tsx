@@ -2340,6 +2340,7 @@ export default function FinanceMonthly() {
             variableCategoryBreakdown={variableCategoryBreakdown}
             goals={finance.goals}
             transactions={finance.transactions}
+            accounts={finance.accounts}
             trips={trips}
             boosts={boosts}
             emergencyFloor={assumptions?.emergency_floor || 0}

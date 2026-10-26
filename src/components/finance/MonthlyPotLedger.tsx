@@ -3,26 +3,18 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { formatCurrency, baseAmt } from '@/lib/financeUtils';
-import type { FinanceGoal, FinanceTransaction } from '@/hooks/useFinanceData';
+import type { FinanceGoal, FinanceTransaction, FinanceAccount } from '@/hooks/useFinanceData';
 import type { FinanceTrip } from '@/hooks/useFinanceTrips';
 import type { WeeklyBoost } from '@/hooks/useWeeklyBoosts';
 import {
-  startOfMonth, endOfMonth, addMonths, subMonths,
-  format, isAfter, isBefore
+  startOfMonth, endOfMonth, addMonths,
+  format, isBefore
 } from 'date-fns';
 import {
-  Wallet, ShieldCheck, Globe, Gift, MapPin, Zap,
+  Lock, CheckCircle2, ShoppingCart, PartyPopper,
   PiggyBank, ArrowDownRight, ArrowUpRight, ChevronDown,
-  ChevronUp, Calendar, Lock, CheckCircle2, AlertCircle,
-  Sparkles, DollarSign, Layers, ShoppingCart, PartyPopper,
-  Info
+  ChevronUp, Calendar, Info, Layers, Sparkles
 } from 'lucide-react';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 
 export interface MonthlyPotLedgerProps {
@@ -39,14 +31,15 @@ export interface MonthlyPotLedgerProps {
   variableCategoryBreakdown?: Record<string, number>;
   goals: FinanceGoal[];
   transactions: FinanceTransaction[];
+  accounts?: FinanceAccount[];
   trips?: FinanceTrip[];
   boosts?: WeeklyBoost[];
   emergencyFloor?: number;
   convertToBase: (amount: number, currency: string) => number;
 }
 
-interface PotMonthlyData {
-  goal: FinanceGoal;
+interface PotRowData {
+  id: string;
   name: string;
   emoji: string;
   badge: string;
@@ -72,16 +65,16 @@ interface PotMonthlyData {
 function getPotVisuals(name: string, color?: string | null) {
   const lower = name.toLowerCase();
   if (lower.includes('europe') || lower.includes('euro')) {
-    return { emoji: '✈️', color: color || '#0EA5E9', badge: 'Travel & Trips' };
+    return { emoji: '✈️', color: color || '#0EA5E9', badge: 'Travel' };
   }
   if (lower.includes('visa')) {
-    return { emoji: '🛂', color: color || '#8B5CF6', badge: 'Legal & Immigration' };
+    return { emoji: '🛂', color: color || '#8B5CF6', badge: 'Legal' };
   }
   if (lower.includes('amsterdam')) {
     return { emoji: '🚲', color: color || '#F59E0B', badge: 'City Trip' };
   }
   if (lower.includes('xmas') || lower.includes('christmas')) {
-    return { emoji: '🎄', color: color || '#EF4444', badge: 'Holiday & Seasonal' };
+    return { emoji: '🎄', color: color || '#EF4444', badge: 'Holiday' };
   }
   if (lower.includes('emergency')) {
     return { emoji: '🛡️', color: color || '#10B981', badge: 'Emergency Buffer' };
@@ -89,7 +82,7 @@ function getPotVisuals(name: string, color?: string | null) {
   if (lower.includes('stash')) {
     return { emoji: '⚡', color: color || '#EC4899', badge: 'Shock Absorber' };
   }
-  return { emoji: '🎯', color: color || '#6366F1', badge: 'Savings Pot' };
+  return { emoji: '🎯', color: color || '#6366F1', badge: 'Goal Pot' };
 }
 
 export default function MonthlyPotLedger({
@@ -106,6 +99,7 @@ export default function MonthlyPotLedger({
   variableCategoryBreakdown = {},
   goals,
   transactions,
+  accounts = [],
   trips = [],
   boosts = [],
   emergencyFloor = 0,
@@ -124,10 +118,10 @@ export default function MonthlyPotLedger({
   const [showVariableDetails, setShowVariableDetails] = useState(false);
 
   // -------------------------------------------------------------
-  // Pot Ledger Calculations
+  // Pot Ledger Data Calculation
   // -------------------------------------------------------------
   const potLedgerData = useMemo(() => {
-    const list: PotMonthlyData[] = [];
+    const list: PotRowData[] = [];
 
     // Helper: compute monthly delta for a goal in any given month mDate
     const getMonthDeltaForGoal = (g: FinanceGoal, mDate: Date) => {
@@ -164,7 +158,6 @@ export default function MonthlyPotLedger({
       tripTxs.forEach(t => txMap.set(t.id, t));
       const goalTxs = Array.from(txMap.values());
 
-      // Filter txs strictly within mDate month
       let txInflow = 0;
       let txOutflow = 0;
       const monthTxActivity: {
@@ -244,7 +237,6 @@ export default function MonthlyPotLedger({
         }
       }
 
-      // Total contributed = max of direct deposits/boosts or scheduled monthly savings allocation
       const totalContributed = Math.max(txInflow + boostTotal, planOrPolicyAlloc);
       const totalSpent = txOutflow;
       const netDelta = totalContributed - totalSpent;
@@ -257,7 +249,7 @@ export default function MonthlyPotLedger({
       };
     };
 
-    // Process all goals
+    // Process all goals in database
     for (const g of goals) {
       const isStash = (g as any).is_stash === true || g.name.toLowerCase().includes('stash');
       const isEmergency = (g as any).is_emergency === true || g.name.toLowerCase().includes('emergency');
@@ -269,8 +261,6 @@ export default function MonthlyPotLedger({
       }
 
       const currentAssigned = convertToBase(g.assigned_amount || 0, g.currency);
-
-      // Selected month activity
       const selectedMonthData = getMonthDeltaForGoal(g, selectedMonth);
 
       let startBalance = 0;
@@ -280,7 +270,6 @@ export default function MonthlyPotLedger({
         endBalance = currentAssigned;
         startBalance = Math.max(0, currentAssigned - selectedMonthData.netDelta);
       } else if (isPastMonth) {
-        // Roll backwards: sum deltas from selectedMonth + 1 month up to current month
         let postDeltas = 0;
         let iterMonth = addMonths(startOfMonth(selectedMonth), 1);
         const curStart = startOfMonth(now);
@@ -294,7 +283,6 @@ export default function MonthlyPotLedger({
         endBalance = Math.max(0, currentAssigned - postDeltas);
         startBalance = Math.max(0, endBalance - selectedMonthData.netDelta);
       } else {
-        // Future month: roll forwards from current month
         let preDeltas = 0;
         let iterMonth = startOfMonth(now);
         const selStart = startOfMonth(selectedMonth);
@@ -323,7 +311,7 @@ export default function MonthlyPotLedger({
       }
 
       list.push({
-        goal: g,
+        id: g.id,
         name: g.name,
         emoji: visuals.emoji,
         badge: visuals.badge,
@@ -341,10 +329,43 @@ export default function MonthlyPotLedger({
       });
     }
 
+    // -------------------------------------------------------------
+    // Always include Emergency Fund (even if not an explicit goal row)
+    // -------------------------------------------------------------
+    const hasEmergencyGoal = list.some(p => p.name.toLowerCase().includes('emergency'));
+    if (!hasEmergencyGoal) {
+      const targetEm = emergencyFloor > 0 ? emergencyFloor : 1000;
+      const liquidTotal = accounts
+        .filter(a => a.type === 'checking' || a.type === 'savings')
+        .reduce((s, a) => s + convertToBase(a.balance || 0, a.currency), 0);
+      const assignedOther = goals
+        .filter(g => !(g as any).is_stash)
+        .reduce((s, g) => s + convertToBase(g.assigned_amount || 0, g.currency), 0);
+      const currentEmFunded = Math.min(targetEm, Math.max(0, liquidTotal - assignedOther));
+
+      list.push({
+        id: '__emergency_virtual__',
+        name: 'Emergency Fund',
+        emoji: '🛡️',
+        badge: 'Emergency Buffer',
+        accentColor: '#10B981',
+        targetBase: targetEm,
+        startBalance: currentEmFunded,
+        contributions: 0,
+        spend: 0,
+        netDelta: 0,
+        endBalance: currentEmFunded,
+        progressPct: targetEm > 0 ? Math.min(100, (currentEmFunded / targetEm) * 100) : 100,
+        isCompleted: currentEmFunded >= targetEm,
+        deadlineLabel: 'Ongoing Reserve',
+        activityTransactions: [],
+      });
+    }
+
     // Sort order:
-    // 1. Featured pots mentioned by user (Europe, Visa, Amsterdam, Xmas)
-    // 2. Other goals
-    // 3. Emergency Buffer
+    // 1. Featured pots (Europe, Visa, Amsterdam, Xmas)
+    // 2. Emergency Fund
+    // 3. Other goals
     // 4. Savings Stash
     return list.sort((a, b) => {
       const getPriority = (name: string) => {
@@ -353,13 +374,13 @@ export default function MonthlyPotLedger({
         if (l.includes('visa')) return 2;
         if (l.includes('amsterdam')) return 3;
         if (l.includes('xmas') || l.includes('christmas')) return 4;
-        if (l.includes('emergency')) return 8;
+        if (l.includes('emergency')) return 5;
         if (l.includes('stash')) return 9;
-        return 5;
+        return 6;
       };
       return getPriority(a.name) - getPriority(b.name);
     });
-  }, [goals, selectedMonth, transactions, trips, boosts, isCurrentMonth, isPastMonth, convertToBase, emergencyFloor, incomeTotal, now]);
+  }, [goals, selectedMonth, transactions, trips, boosts, isCurrentMonth, isPastMonth, convertToBase, emergencyFloor, incomeTotal, now, accounts]);
 
   // Total savings allocated across all pots in selected month
   const totalPotsFunded = useMemo(() => {
@@ -373,66 +394,44 @@ export default function MonthlyPotLedger({
   const liquidCashBuffer = incomeTotal - totalAccountedFor;
 
   return (
-    <div className="space-y-6 pt-2">
+    <div className="space-y-4 pt-2">
       {/* ========================================================= */}
-      {/* SECTION HEADER                                            */}
-      {/* ========================================================= */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
-        <div className="flex items-center gap-3">
-          <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-[#FF2EB8] to-[#FF7AD1] flex items-center justify-center text-white shadow-md shrink-0">
-            <Layers className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-lg sm:text-xl font-black text-slate-900 tracking-tight">
-                Monthly Cash Flow & Pot Ledger
-              </h2>
-              <Badge variant="outline" className="border-pink-200 text-[#FF2EB8] bg-pink-50/70 text-[11px] font-bold">
-                {monthLabel}
-              </Badge>
-            </div>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Zero-based breakdown showing exactly where every dollar went, including pot start/end balances and goal progress.
-            </p>
-          </div>
-        </div>
-
-        {/* Quick Month Overview Chips */}
-        <div className="flex flex-wrap items-center gap-2 text-xs">
-          <div className="bg-emerald-50 text-emerald-800 border border-emerald-200/80 px-2.5 py-1 rounded-xl font-bold flex items-center gap-1.5">
-            <ArrowDownRight className="w-3.5 h-3.5 text-emerald-600" />
-            <span>Income Inflow: {fmt(incomeTotal)}</span>
-          </div>
-          <div className="bg-pink-50 text-pink-900 border border-pink-200/80 px-2.5 py-1 rounded-xl font-bold flex items-center gap-1.5">
-            <PiggyBank className="w-3.5 h-3.5 text-[#FF2EB8]" />
-            <span>Saved to Pots: {fmt(totalPotsFunded)}</span>
-          </div>
-        </div>
-      </div>
-
-      {/* ========================================================= */}
-      {/* 1. "WHERE EVERY DOLLAR WENT" WATERFALL BREAKDOWN          */}
+      {/* UNIFIED ZERO-BASED CASH FLOW & POT BREAKDOWN CARD          */}
       {/* ========================================================= */}
       <Card className="rounded-[2rem] border-slate-200/90 shadow-sm overflow-hidden bg-white">
         <CardContent className="p-5 sm:p-7 space-y-6">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
-            <div>
-              <span className="text-[10px] font-black uppercase tracking-wider text-[#FF2EB8]">
-                Zero-Based Cash Flow
-              </span>
-              <h3 className="text-base font-black text-slate-900 tracking-tight">
-                Where Every Dollar Went in {monthLabel}
-              </h3>
+          {/* Header Row */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-[#FF2EB8] to-[#FF7AD1] flex items-center justify-center text-white shadow-md shrink-0">
+                <Layers className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-base sm:text-lg font-black text-slate-900 tracking-tight">
+                    Where Every Dollar Went in {monthLabel}
+                  </h3>
+                  <Badge variant="outline" className="border-pink-200 text-[#FF2EB8] bg-pink-50/70 text-[11px] font-bold">
+                    {potLedgerData.length} Pots
+                  </Badge>
+                </div>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Complete view of income, bills, variable spending, and all savings pots (including emergency).
+                </p>
+              </div>
             </div>
-            <span className="text-xs text-slate-500">
-              Total Accounted: <strong className="text-slate-800">{fmt(totalAccountedFor)}</strong> of {fmt(incomeTotal)}
-            </span>
+
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-slate-500">
+                Accounted: <strong className="text-slate-900 font-bold">{fmt(totalAccountedFor)}</strong> of {fmt(incomeTotal)}
+              </span>
+            </div>
           </div>
 
-          {/* Equation Strip / Distribution Pillars */}
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-            {/* 1. Income Inflow */}
-            <div className="col-span-2 md:col-span-1 rounded-2xl p-4 bg-emerald-500/10 border border-emerald-500/20 flex flex-col justify-between">
+          {/* 5 Cash Flow Pillars */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
+            {/* 1. Total Inflow */}
+            <div className="col-span-2 sm:col-span-1 rounded-2xl p-4 bg-emerald-500/10 border border-emerald-500/20 flex flex-col justify-between">
               <div className="flex items-center justify-between">
                 <span className="text-[10px] font-black uppercase tracking-wider text-emerald-700">1. Total Inflow</span>
                 <span className="text-sm">💰</span>
@@ -502,8 +501,8 @@ export default function MonthlyPotLedger({
               </span>
             </div>
 
-            {/* 5. Savings Pots & Pools */}
-            <div className="col-span-2 md:col-span-1 rounded-2xl p-4 bg-pink-50 border-2 border-pink-200 flex flex-col justify-between shadow-2xs">
+            {/* 5. Savings Pots */}
+            <div className="col-span-2 sm:col-span-1 rounded-2xl p-4 bg-pink-50 border-2 border-pink-200 flex flex-col justify-between shadow-2xs">
               <div className="flex items-center justify-between">
                 <span className="text-[10px] font-black uppercase tracking-wider text-[#FF2EB8]">5. Savings Pots</span>
                 <PiggyBank className="w-4 h-4 text-[#FF2EB8]" />
@@ -514,7 +513,7 @@ export default function MonthlyPotLedger({
               </div>
               <span className="text-[10px] font-bold text-pink-600 mt-2 flex items-center gap-1">
                 <Sparkles className="w-3 h-3 text-[#FF2EB8]" />
-                Goals protected
+                Protected pools
               </span>
             </div>
           </div>
@@ -553,7 +552,164 @@ export default function MonthlyPotLedger({
             </div>
           )}
 
-          {/* Cash Flow Balance Footer Banner */}
+          {/* ========================================================= */}
+          {/* SIMPLE VIEW OF ALL THE POTS (INCLUDING EMERGENCY)         */}
+          {/* ========================================================= */}
+          <div className="space-y-3 pt-2">
+            <div className="flex items-center justify-between">
+              <h4 className="text-xs font-black text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                <PiggyBank className="w-4 h-4 text-[#FF2EB8]" />
+                All Pots Ledger ({monthLabel})
+              </h4>
+              <span className="text-[11px] text-slate-500 font-medium">
+                Click any pot to see transactions
+              </span>
+            </div>
+
+            {/* Clean, Simple Table View */}
+            <div className="border border-slate-200/90 rounded-2xl overflow-hidden shadow-2xs">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50/90 text-slate-600 font-black uppercase text-[10px] tracking-wider border-b border-slate-200">
+                      <th className="py-3 px-3 sm:px-4">Pot / Goal</th>
+                      <th className="py-3 px-2 sm:px-3 text-right">Start of Month</th>
+                      <th className="py-3 px-2 sm:px-3 text-right">Difference</th>
+                      <th className="py-3 px-2 sm:px-3 text-right">End of Month</th>
+                      <th className="py-3 px-3 sm:px-4 text-right">End Goal Target</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {potLedgerData.map(pot => {
+                      const isExpanded = expandedPotId === pot.id;
+                      const hasActivity = pot.activityTransactions.length > 0;
+
+                      return (
+                        <React.Fragment key={pot.id}>
+                          <tr
+                            onClick={() => hasActivity && setExpandedPotId(isExpanded ? null : pot.id)}
+                            className={cn(
+                              "transition-colors",
+                              hasActivity ? "cursor-pointer hover:bg-slate-50/80" : "hover:bg-slate-50/40",
+                              isExpanded && "bg-pink-50/30"
+                            )}
+                          >
+                            {/* Pot Name + Badge */}
+                            <td className="py-3 px-3 sm:px-4">
+                              <div className="flex items-center gap-2.5">
+                                <span className="text-base shrink-0">{pot.emoji}</span>
+                                <div>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="font-bold text-slate-900">{pot.name}</span>
+                                    {pot.isCompleted && (
+                                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0 inline" />
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-1.5 text-[10px] text-slate-500 mt-0.5">
+                                    <span>{pot.badge}</span>
+                                    {pot.deadlineLabel && (
+                                      <>
+                                        <span className="text-slate-300">•</span>
+                                        <span>Target: {pot.deadlineLabel}</span>
+                                      </>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            </td>
+
+                            {/* Start of Month */}
+                            <td className="py-3 px-2 sm:px-3 text-right font-semibold text-slate-700 tabular-nums">
+                              {fmt(pot.startBalance)}
+                            </td>
+
+                            {/* Difference (+ / -) */}
+                            <td className="py-3 px-2 sm:px-3 text-right tabular-nums">
+                              <span className={cn(
+                                "inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full font-bold text-[11px]",
+                                pot.netDelta > 0
+                                  ? "bg-emerald-50 text-emerald-700"
+                                  : pot.netDelta < 0
+                                  ? "bg-amber-50 text-amber-700"
+                                  : "text-slate-400"
+                              )}>
+                                {pot.netDelta > 0 && <ArrowUpRight className="w-3 h-3 text-emerald-600 inline" />}
+                                {pot.netDelta < 0 && <ArrowDownRight className="w-3 h-3 text-amber-600 inline" />}
+                                {pot.netDelta > 0
+                                  ? `+${fmt(pot.netDelta)}`
+                                  : pot.netDelta < 0
+                                  ? `−${fmt(Math.abs(pot.netDelta))}`
+                                  : `£0.00`}
+                              </span>
+                            </td>
+
+                            {/* End of Month */}
+                            <td className="py-3 px-2 sm:px-3 text-right font-black text-slate-950 tabular-nums">
+                              {fmt(pot.endBalance)}
+                            </td>
+
+                            {/* End Goal Target & Progress */}
+                            <td className="py-3 px-3 sm:px-4 text-right">
+                              {pot.targetBase > 0 ? (
+                                <div className="inline-flex flex-col items-end min-w-[100px]">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="font-bold text-slate-900 tabular-nums">{fmt(pot.targetBase)}</span>
+                                    <span className="text-[10px] font-black text-slate-500 tabular-nums">({pot.progressPct.toFixed(0)}%)</span>
+                                  </div>
+                                  <Progress
+                                    value={pot.progressPct}
+                                    className="h-1.5 w-24 bg-slate-100 mt-1"
+                                    style={{ '--progress-background': pot.accentColor } as React.CSSProperties}
+                                  />
+                                </div>
+                              ) : (
+                                <span className="text-[11px] text-slate-500 font-medium">Dynamic Buffer</span>
+                              )}
+                            </td>
+                          </tr>
+
+                          {/* Expandable Activity Row (if toggled) */}
+                          {isExpanded && hasActivity && (
+                            <tr className="bg-slate-50/80">
+                              <td colSpan={5} className="py-2.5 px-4 sm:px-6">
+                                <div className="space-y-1.5 border-l-2 border-[#FF2EB8] pl-3 py-1">
+                                  <span className="text-[10px] font-bold uppercase text-slate-500 tracking-wider block">
+                                    {pot.activityTransactions.length} activity item{pot.activityTransactions.length === 1 ? '' : 's'} in {monthLabel}
+                                  </span>
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                                    {pot.activityTransactions.map((tx, idx) => (
+                                      <div key={tx.id || idx} className="flex items-center justify-between bg-white px-3 py-1.5 rounded-lg border border-slate-200/70 text-xs">
+                                        <div className="flex items-center gap-2 truncate mr-2">
+                                          <span className={cn(
+                                            "w-1.5 h-1.5 rounded-full shrink-0",
+                                            tx.type === 'inflow' ? "bg-emerald-500" : "bg-amber-500"
+                                          )} />
+                                          <span className="truncate text-slate-700 font-medium">{tx.description}</span>
+                                          <span className="text-[10px] text-slate-400 shrink-0">{format(new Date(tx.date), 'd MMM')}</span>
+                                        </div>
+                                        <span className={cn(
+                                          "font-bold tabular-nums shrink-0",
+                                          tx.type === 'inflow' ? "text-emerald-700" : "text-amber-700"
+                                        )}>
+                                          {tx.type === 'inflow' ? `+${fmt(tx.amount)}` : `−${fmt(tx.amount)}`}
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          {/* Liquid Cash Buffer Banner */}
           <div className={cn(
             "rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs",
             liquidCashBuffer >= 0
@@ -580,220 +736,6 @@ export default function MonthlyPotLedger({
           </div>
         </CardContent>
       </Card>
-
-      {/* ========================================================= */}
-      {/* 2. SAVINGS POTS LEDGER (THE CORE SAVINGS REPORT)         */}
-      {/* ========================================================= */}
-      <div className="space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-          <div>
-            <div className="flex items-center gap-2">
-              <PiggyBank className="w-5 h-5 text-[#FF2EB8]" />
-              <h3 className="text-base sm:text-lg font-black text-slate-900 tracking-tight">
-                Savings Pots & Goals Ledger
-              </h3>
-            </div>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Tracks starting balance, monthly change (+contributions / −spent), ending balance, and progress toward your end goal for {monthLabel}.
-            </p>
-          </div>
-          <span className="text-xs font-semibold text-slate-500">
-            {potLedgerData.length} Active Pots
-          </span>
-        </div>
-
-        {/* Pots Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {potLedgerData.map(pot => {
-            const isExpanded = expandedPotId === pot.goal.id;
-            const hasActivity = pot.activityTransactions.length > 0;
-
-            return (
-              <Card
-                key={pot.goal.id}
-                className={cn(
-                  "rounded-2xl border transition-all duration-200 overflow-hidden bg-white shadow-xs hover:shadow-md",
-                  isExpanded ? "border-[#FF2EB8]/60 ring-2 ring-[#FF2EB8]/15" : "border-slate-200/90"
-                )}
-              >
-                <CardContent className="p-4 sm:p-5 space-y-4">
-                  {/* Pot Header */}
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-center gap-3">
-                      <div
-                        className="w-10 h-10 rounded-xl flex items-center justify-center text-lg shadow-2xs shrink-0"
-                        style={{ backgroundColor: `${pot.accentColor}18`, borderColor: `${pot.accentColor}40`, borderWidth: 1 }}
-                      >
-                        <span>{pot.emoji}</span>
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <h4 className="text-sm font-black text-slate-900 tracking-tight">
-                            {pot.name}
-                          </h4>
-                          {pot.isCompleted && (
-                            <Badge className="bg-emerald-500 text-white text-[9px] font-bold py-0 h-4">
-                              <CheckCircle2 className="w-2.5 h-2.5 mr-1 inline" />
-                              Goal Met
-                            </Badge>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-2 mt-0.5">
-                          <span className="text-[10px] font-semibold text-slate-500">{pot.badge}</span>
-                          {pot.deadlineLabel && (
-                            <>
-                              <span className="text-slate-300">•</span>
-                              <span className="text-[10px] text-slate-500 flex items-center gap-1 font-medium">
-                                <Calendar className="w-2.5 h-2.5 text-slate-400" />
-                                Target: {pot.deadlineLabel}
-                              </span>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Net Delta Pill for this month */}
-                    <div className="text-right shrink-0">
-                      <span className={cn(
-                        "inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-black tabular-nums border",
-                        pot.netDelta > 0
-                          ? "bg-emerald-50 text-emerald-800 border-emerald-200"
-                          : pot.netDelta < 0
-                          ? "bg-amber-50 text-amber-800 border-amber-200"
-                          : "bg-slate-50 text-slate-600 border-slate-200"
-                      )}>
-                        {pot.netDelta > 0 && <ArrowUpRight className="w-3.5 h-3.5 text-emerald-600" />}
-                        {pot.netDelta < 0 && <ArrowDownRight className="w-3.5 h-3.5 text-amber-600" />}
-                        {pot.netDelta > 0 ? `+${fmt(pot.netDelta)}` : pot.netDelta < 0 ? `-${fmt(Math.abs(pot.netDelta))}` : `£0.00`}
-                      </span>
-                      <p className="text-[9px] text-slate-400 font-medium mt-0.5">This Month</p>
-                    </div>
-                  </div>
-
-                  {/* 3-Part Balance Metric Card: Start → Month Activity → End */}
-                  <div className="grid grid-cols-3 gap-2 bg-slate-50/80 rounded-xl p-3 border border-slate-200/60">
-                    {/* Start Balance */}
-                    <div>
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block">
-                        Start of Month
-                      </span>
-                      <span className="text-sm sm:text-base font-black text-slate-800 tabular-nums">
-                        {fmt(pot.startBalance)}
-                      </span>
-                    </div>
-
-                    {/* Activity (Difference) */}
-                    <div className="border-x border-slate-200/80 px-2 text-center">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block">
-                        Difference
-                      </span>
-                      <span className={cn(
-                        "text-sm sm:text-base font-black tabular-nums",
-                        pot.netDelta > 0 ? "text-emerald-700" : pot.netDelta < 0 ? "text-amber-700" : "text-slate-600"
-                      )}>
-                        {pot.netDelta > 0 ? `+${fmt(pot.netDelta)}` : pot.netDelta < 0 ? `-${fmt(Math.abs(pot.netDelta))}` : `£0`}
-                      </span>
-                    </div>
-
-                    {/* End Balance */}
-                    <div className="text-right">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block">
-                        End of Month
-                      </span>
-                      <span className="text-sm sm:text-base font-black text-slate-950 tabular-nums">
-                        {fmt(pot.endBalance)}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Progress Toward Goal Target */}
-                  {pot.targetBase > 0 ? (
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-slate-500 font-medium">
-                          Goal Target: <strong className="text-slate-800 font-bold">{fmt(pot.targetBase)}</strong>
-                        </span>
-                        <span className="font-black text-slate-800 tabular-nums">
-                          {pot.progressPct.toFixed(0)}%
-                        </span>
-                      </div>
-                      <Progress
-                        value={pot.progressPct}
-                        className="h-2 bg-slate-100"
-                        style={
-                          {
-                            '--progress-background': pot.accentColor,
-                          } as React.CSSProperties
-                        }
-                      />
-                      <div className="flex items-center justify-between text-[10px] text-slate-400">
-                        <span>
-                          {pot.endBalance >= pot.targetBase
-                            ? 'Goal fully achieved!'
-                            : `${fmt(pot.targetBase - pot.endBalance)} remaining`}
-                        </span>
-                        {pot.contributions > 0 && pot.spend > 0 && (
-                          <span className="text-slate-500">
-                            (+{fmt(pot.contributions)} in, −{fmt(pot.spend)} spent)
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="text-[11px] text-slate-500 flex items-center justify-between pt-1">
-                      <span>Open-ended reserve pot</span>
-                      <span className="font-semibold text-slate-700">Liquid cushion</span>
-                    </div>
-                  )}
-
-                  {/* Activity Details Toggle (if transactions or boosts exist) */}
-                  {hasActivity && (
-                    <div className="border-t border-slate-100 pt-2">
-                      <button
-                        type="button"
-                        onClick={() => setExpandedPotId(isExpanded ? null : pot.goal.id)}
-                        className="w-full text-left text-xs font-bold text-slate-600 hover:text-slate-900 flex items-center justify-between cursor-pointer py-1"
-                      >
-                        <span className="flex items-center gap-1.5">
-                          <Sparkles className="w-3 h-3 text-[#FF2EB8]" />
-                          <span>{pot.activityTransactions.length} activity item{pot.activityTransactions.length === 1 ? '' : 's'} in {monthLabel}</span>
-                        </span>
-                        {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                      </button>
-
-                      {isExpanded && (
-                        <div className="mt-2 space-y-1.5 bg-slate-50/90 rounded-xl p-3 border border-slate-200/60 animate-in fade-in-50 duration-150">
-                          {pot.activityTransactions.map((item, idx) => (
-                            <div key={item.id || idx} className="flex items-center justify-between text-xs py-1 border-b border-slate-200/40 last:border-b-0">
-                              <div className="flex items-center gap-2 truncate mr-2">
-                                <span className={cn(
-                                  "w-1.5 h-1.5 rounded-full shrink-0",
-                                  item.type === 'inflow' ? "bg-emerald-500" : "bg-amber-500"
-                                )} />
-                                <span className="text-slate-700 font-medium truncate">{item.description}</span>
-                                <span className="text-[10px] text-slate-400 shrink-0">
-                                  {format(new Date(item.date), 'd MMM')}
-                                </span>
-                              </div>
-                              <span className={cn(
-                                "font-bold tabular-nums shrink-0",
-                                item.type === 'inflow' ? "text-emerald-700" : "text-amber-700"
-                              )}>
-                                {item.type === 'inflow' ? `+${fmt(item.amount)}` : `−${fmt(item.amount)}`}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
-      </div>
     </div>
   );
 }
