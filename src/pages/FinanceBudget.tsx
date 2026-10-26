@@ -190,36 +190,15 @@ export default function FinanceBudget() {
 
   const currentWeekType = getWeekType(selectedDate);
 
-  // Auto-settle previous week's performance (underspend -> Emergency Fund if incomplete, else Savings Stash)
+  // Auto-settle previous week's performance into Savings Stash
   const settleRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!isCurrentWeek) return;
     if (!snapshot || finance.loading || assumptionsLoading || !assumptions) return;
-    const prevWeekStart = startOfWeek(subDays(weekStart, 1), { weekStartsOn: 1 });
+    const todayWeekStart = startOfWeek(today, { weekStartsOn: 1 });
+    const prevWeekStart = startOfWeek(subDays(todayWeekStart, 1), { weekStartsOn: 1 });
     const prevWeekKey = format(prevWeekStart, 'yyyy-MM-dd');
-    
-    if (settleRef.current === prevWeekKey) return;
-    const localKey = `stash_settled_v3_${prevWeekKey}`;
-    
-    // Check if already settled in database across any device (prevents mobile/desktop duplicate settlements)
-    const isAlreadySettledInDb = (() => {
-      try {
-        if (!stashGoal?.description) return false;
-        const parsed = JSON.parse(stashGoal.description);
-        return parsed?.last_settled_week === prevWeekKey;
-      } catch {
-        return false;
-      }
-    })();
-
-    if (isAlreadySettledInDb || localStorage.getItem(localKey)) {
-      settleRef.current = prevWeekKey;
-      if (isAlreadySettledInDb && !localStorage.getItem(localKey)) {
-        localStorage.setItem(localKey, 'true');
-      }
-      return;
-    }
+    const SETTLE_VERSION = 4;
 
     const prevWeekSpend = computeWeekVariableSpend(finance.transactions, finance.categories, prevWeekStart, trips);
     const prevEssentialSpent = prevWeekSpend.essentialSpent;
@@ -245,32 +224,63 @@ export default function FinanceBudget() {
     // Strictly match last week's budget: last week's Essentials + Base Fun + last week's Boosts
     const totalBudget = prevWeekSnapshot.weeklyEssentialBudget + prevWeekSnapshot.baseWeeklyFun + prevWeekBoost;
     const totalSpent = prevEssentialSpent + prevFunSpent;
-    const netDifference = totalBudget - totalSpent;
+    const netDifference = Math.round((totalBudget - totalSpent) * 100) / 100;
+
+    const meta: CoverMeta = parseCoverMeta(stashGoal?.description);
+    const localKey = `stash_settled_v${SETTLE_VERSION}_${prevWeekKey}`;
+    const isCurrentVersionSettled =
+      meta.last_settled_week === prevWeekKey &&
+      meta.settled_version === SETTLE_VERSION;
+
+    // If already settled under v4 and the stash delta matches current netDifference, skip
+    const expectedStashDelta = netDifference > 0 ? netDifference : 0;
+    const deltaMatches =
+      isCurrentVersionSettled &&
+      Math.abs((meta.last_settled_stash_delta ?? 0) - expectedStashDelta) <= 0.02;
+
+    if (settleRef.current === `${prevWeekKey}_${expectedStashDelta.toFixed(2)}`) return;
+    if (deltaMatches) {
+      settleRef.current = `${prevWeekKey}_${expectedStashDelta.toFixed(2)}`;
+      localStorage.setItem(localKey, 'true');
+      return;
+    }
 
     const doSettle = async () => {
-      const meta: CoverMeta = parseCoverMeta(stashGoal?.description);
-      const thisWeekKey = format(weekStart, 'yyyy-MM-dd');
+      settleRef.current = `${prevWeekKey}_${expectedStashDelta.toFixed(2)}`;
+      const thisWeekKey = format(todayWeekStart, 'yyyy-MM-dd');
       let stashDelta = 0;
-      let emergencyDelta = 0;
       let newBorrowed = { ...(meta.borrowed || {}) };
       let steps: CoverStep[] = [];
       let carryDebt = 0;
       const potDeltas: Record<string, number> = {};
 
-      if (netDifference > 0) {
-        // UNDERSPENT: 1) repay borrowed pots, 2) Emergency Fund if not full, 3) Savings Stash
-        const repay = planUnderspendRepay({ underspend: netDifference, goals: finance.goals as any, meta });
-        steps = repay.steps;
-        newBorrowed = repay.borrowed;
-        for (const s of repay.steps) if (s.goalId) potDeltas[s.goalId] = (potDeltas[s.goalId] || 0) + s.amount;
-
-        let remainder = repay.remainder;
-        const emergencyShortfall = Math.max(0, snapshot.emergencyFloor - finance.totalCashBase());
-        if (remainder > 0 && emergencyShortfall > 0.01) {
-          emergencyDelta = Math.min(remainder, emergencyShortfall);
-          remainder -= emergencyDelta;
+      // If prevWeekKey was previously settled (e.g. under v3 before the spend calculation fix, or with an older transaction set),
+      // reverse its previous stash/pot adjustments before applying the true settlement.
+      if (meta.last_settled_week === prevWeekKey) {
+        if (typeof meta.last_settled_stash_delta === 'number') {
+          stashDelta -= meta.last_settled_stash_delta;
         }
-        stashDelta = remainder;
+        if (meta.last_cover?.week === prevWeekKey && Array.isArray(meta.last_cover.steps)) {
+          for (const prevStep of meta.last_cover.steps) {
+            if (prevStep.source === 'stash' && typeof meta.last_settled_stash_delta !== 'number') {
+              stashDelta += prevStep.amount;
+            } else if (prevStep.source === 'pot' && prevStep.goalId) {
+              potDeltas[prevStep.goalId] = (potDeltas[prevStep.goalId] || 0) + prevStep.amount;
+              newBorrowed[prevStep.goalId] = Math.max(0, Math.round(((newBorrowed[prevStep.goalId] || 0) - prevStep.amount) * 100) / 100);
+              if (newBorrowed[prevStep.goalId] <= 0) delete newBorrowed[prevStep.goalId];
+            } else if (prevStep.source === 'repay' && prevStep.goalId) {
+              potDeltas[prevStep.goalId] = (potDeltas[prevStep.goalId] || 0) - prevStep.amount;
+              newBorrowed[prevStep.goalId] = Math.round(((newBorrowed[prevStep.goalId] || 0) + prevStep.amount) * 100) / 100;
+            }
+          }
+        }
+      }
+
+      let recordedStashDelta = 0;
+      if (netDifference > 0) {
+        // UNDERSPENT: 100% of weekly underspend sweeps straight into Savings Stash
+        stashDelta += netDifference;
+        recordedStashDelta = netDifference;
       } else if (netDifference < 0) {
         // OVERSPENT: Stash -> next week (capped) -> pots lowest priority first -> leftover debt
         const plan = planOverspendCover({
@@ -279,13 +289,16 @@ export default function FinanceBudget() {
           nextWeekFun: snapshot.baseWeeklyFun,
           goals: finance.goals as any,
           trips: trips as any,
-          meta,
+          meta: { ...meta, borrowed: newBorrowed },
           now: new Date(),
         });
         steps = plan.steps;
         carryDebt = plan.nextWeekDeduction + plan.leftoverDebt;
         for (const s of plan.steps) {
-          if (s.source === 'stash') stashDelta -= s.amount;
+          if (s.source === 'stash') {
+            stashDelta -= s.amount;
+            recordedStashDelta -= s.amount;
+          }
           if (s.source === 'pot' && s.goalId) {
             potDeltas[s.goalId] = (potDeltas[s.goalId] || 0) - s.amount;
             newBorrowed[s.goalId] = Math.round(((newBorrowed[s.goalId] || 0) + s.amount) * 100) / 100;
@@ -295,44 +308,32 @@ export default function FinanceBudget() {
 
       // Apply pot changes
       for (const [goalId, delta] of Object.entries(potDeltas)) {
+        if (Math.abs(delta) < 0.01) continue;
         const g = finance.goals.find(x => x.id === goalId);
         if (g) await finance.updateGoal(goalId, { assigned_amount: Math.max(0, (g.assigned_amount || 0) + delta) } as any);
       }
 
-      // Emergency Fund
-      if (emergencyDelta > 0) {
-        if (emergencyGoal) {
-          await finance.updateGoal(emergencyGoal.id, {
-            assigned_amount: (emergencyGoal.assigned_amount || 0) + emergencyDelta,
-            is_emergency: true,
-          } as any);
-        } else {
-          await finance.addGoal({
-            name: 'Emergency Reserve', target_amount: snapshot.emergencyFloor, currency: baseCurrency,
-            priority: 1, safety_mode: 'balanced', assigned_amount: emergencyDelta, color: '#ef6b6b', is_emergency: true,
-          } as any);
-        }
-      }
-
-      // Stash balance + metadata (settle marker, borrowed ledger, last cover summary) — always written
+      // Stash balance + metadata (settle marker, version, stash delta, borrowed ledger, last cover summary) — always written
       const newMeta: CoverMeta = {
         ...meta,
         last_settled_week: prevWeekKey,
+        settled_version: SETTLE_VERSION,
+        last_settled_stash_delta: recordedStashDelta,
         borrowed: newBorrowed,
         last_cover: netDifference < 0
           ? { week: prevWeekKey, overspend: Math.abs(netDifference), steps, leftoverDebt: carryDebt }
-          : (steps.length ? { week: prevWeekKey, overspend: 0, steps, leftoverDebt: 0 } : null),
+          : null,
       };
       if (stashGoal) {
         await finance.updateGoal(stashGoal.id, {
-          assigned_amount: Math.max(0, (stashGoal.assigned_amount || 0) + stashDelta),
+          assigned_amount: Math.max(0, Math.round(((stashGoal.assigned_amount || 0) + stashDelta) * 100) / 100),
           is_stash: true,
           description: JSON.stringify(newMeta),
         } as any);
       } else {
         await finance.addGoal({
           name: 'Savings Stash', target_amount: 9999, currency: baseCurrency, priority: 3,
-          safety_mode: 'balanced', assigned_amount: Math.max(0, stashDelta), color: '#10b981', is_stash: true,
+          safety_mode: 'balanced', assigned_amount: Math.max(0, Math.round(stashDelta * 100) / 100), color: '#10b981', is_stash: true,
           description: JSON.stringify(newMeta),
         } as any);
       }
@@ -346,22 +347,15 @@ export default function FinanceBudget() {
         const left = carryDebt - (steps.find(s => s.source === 'next_week')?.amount || 0);
         toast.warning(`Overspent ${fmt(Math.abs(netDifference))} last week → covered ${parts.join(', ')}${left > 0.01 ? ` · ${fmt(left)} still carried` : ''}`, { duration: 10000 });
       } else if (netDifference > 0) {
-        const repaid = steps.reduce((s, x) => s + x.amount, 0);
-        const bits = [
-          repaid > 0 ? `${fmt(repaid)} repaid to pots` : '',
-          emergencyDelta > 0 ? `${fmt(emergencyDelta)} to Emergency Reserve 🛡️` : '',
-          stashDelta > 0 ? `${fmt(stashDelta)} to Savings Stash 💰` : '',
-        ].filter(Boolean);
-        toast.success(`Underspent ${fmt(netDifference)} last week → ${bits.join(', ')}`);
+        toast.success(`Underspent ${fmt(netDifference)} last week → ${fmt(netDifference)} added to Savings Stash 💰`);
       }
 
-      settleRef.current = prevWeekKey;
       localStorage.setItem(localKey, 'true');
     };
 
     doSettle();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [snapshot, finance.loading, assumptionsLoading, weekStart]);
+  }, [snapshot, finance.loading, assumptionsLoading, today, stashGoal?.id, stashGoal?.description]);
 
   // Fixed expenses normalized to weekly
   const fixedWeeklyItems = useMemo(() => {
@@ -575,8 +569,8 @@ export default function FinanceBudget() {
   const weekNetDifference = totalWeeklyBudget - totalWeeklySpent;
 
   const pulseSegments = [
-    { label: 'Essentials spent', value: Math.min(essentialSpentThisWeek, essentialWeeklyBudget), color: '#0ea5e9' },
-    { label: 'Fun spent', value: Math.min(effectiveFunSpent, snapshot.weeklyFunBudget), color: '#FF2EB8' },
+    { label: 'Essentials spent', value: essentialSpentThisWeek, color: '#0ea5e9' },
+    { label: 'Fun spent', value: effectiveFunSpent, color: '#FF2EB8' },
   ];
   const pulseUsed = pulseSegments.reduce((s, x) => s + x.value, 0);
   const pulseRemaining = Math.max(0, totalWeeklyBudget - pulseUsed);

@@ -3,6 +3,8 @@ import { differenceInCalendarDays } from 'date-fns';
 /** Metadata stored as JSON in the Savings Stash goal's `description` (no DB migration needed). */
 export interface CoverMeta {
   last_settled_week?: string;
+  settled_version?: number;
+  last_settled_stash_delta?: number;
   /** goalId -> amount borrowed and not yet repaid */
   borrowed?: Record<string, number>;
   /** goalIds the user has protected from overspend cover */
