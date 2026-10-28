@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Label } from '@/components/ui/label';
 import { Search, Check, Sparkles, Loader2, X, ArrowLeftRight, Target, Receipt, Undo2, DollarSign, Briefcase, RefreshCw, Wallet, Plus, Trash2 } from 'lucide-react';
 import { formatCurrency, formatUkDate, parseUkDate, baseAmt } from '@/lib/financeUtils';
+import { deduplicateTransactions } from '@/lib/deduplication';
 import { format, isToday, isYesterday, startOfWeek, endOfWeek, subWeeks } from 'date-fns';
 import { toast } from 'sonner';
 import type { useFinanceData } from '@/hooks/useFinanceData';
@@ -88,7 +89,8 @@ function getRowAccent(tx: any, cat: any): string {
 }
 
 export default function FinanceTransactions({ finance, initialAccountFilter, fixedExpenses = [] }: Props) {
-  const { transactions, categories, accounts, goals, updateTransaction, addManualTransaction, deleteTransaction, categorizeTransactions, matchTransfers, addCategory } = finance;
+  const { transactions: rawTransactions, categories, accounts, goals, updateTransaction, addManualTransaction, deleteTransaction, categorizeTransactions, matchTransfers, addCategory } = finance;
+  const transactions = useMemo(() => deduplicateTransactions(rawTransactions).cleaned, [rawTransactions]);
 
   // Precompute keyword list per fixed expense for "suggested bill" hint
   const fixedExpenseKeywords = fixedExpenses.map(e => {

@@ -15,7 +15,7 @@ const KNOWN_MERCHANT_PATTERNS: Array<{ pattern: RegExp; key: string }> = [
   { pattern: /\blidl\b/i, key: 'LIDL' },
   { pattern: /\bgreggs\b/i, key: 'GREGGS' },
   { pattern: /\bprimark\b/i, key: 'PRIMARK' },
-  { pattern: /\b(tfgm|beenetwork|greater manchester|piccadilly)\b/i, key: 'TFGM' },
+  { pattern: /\b(tfgm|beenetwork|bee network|greater manchester|piccadilly)\b/i, key: 'TFGM' },
   { pattern: /\b(tfl|transport for london)\b/i, key: 'TFL' },
   { pattern: /\bthree square\b/i, key: 'THREESQUARE' },
   { pattern: /\bcosta\b/i, key: 'COSTA' },
@@ -26,12 +26,42 @@ const KNOWN_MERCHANT_PATTERNS: Array<{ pattern: RegExp; key: string }> = [
   { pattern: /\basda\b/i, key: 'ASDA' },
   { pattern: /\b(m&s|marks and spencer|marks & spencer)\b/i, key: 'MAND_S' },
   { pattern: /\bboots\b/i, key: 'BOOTS' },
-  { pattern: /\b(uber|ubereats)\b/i, key: 'UBER' },
+  { pattern: /\bsuperdrug\b/i, key: 'SUPERDRUG' },
+  { pattern: /\b(uber\s*eats|ubereats)\b/i, key: 'UBEREATS' },
+  { pattern: /\buber\b/i, key: 'UBER' },
+  { pattern: /\bbolt\b/i, key: 'BOLT' },
   { pattern: /\bdeliveroo\b/i, key: 'DELIVEROO' },
+  { pattern: /\b(just\s*eat|justeat)\b/i, key: 'JUSTEAT' },
   { pattern: /\bmcdonald/i, key: 'MCDONALDS' },
+  { pattern: /\bkfc\b/i, key: 'KFC' },
+  { pattern: /\bnando/i, key: 'NANDOS' },
+  { pattern: /\bwetherspoon/i, key: 'WETHERSPOONS' },
+  { pattern: /\bpret\b/i, key: 'PRET' },
+  { pattern: /\bstarbucks\b/i, key: 'STARBUCKS' },
+  { pattern: /\b(caff[eè]\s*nero|nero)\b/i, key: 'CAFFENERO' },
+  { pattern: /\bwaitrose\b/i, key: 'WAITROSE' },
+  { pattern: /\bmorrison/i, key: 'MORRISONS' },
+  { pattern: /\b(co-op|coop|co op|cooperative)\b/i, key: 'COOP' },
+  { pattern: /\biceland\b/i, key: 'ICELAND' },
   { pattern: /\b(apple\.com|itunes|apple store)\b/i, key: 'APPLE' },
   { pattern: /\bspotify\b/i, key: 'SPOTIFY' },
   { pattern: /\bnetflix\b/i, key: 'NETFLIX' },
+  { pattern: /\b(elevenlabs|11labs|eleven labs)\b/i, key: 'ELEVENLABS' },
+  { pattern: /\bgamma\b/i, key: 'GAMMA' },
+  { pattern: /\b(batchbase|batch base|venture advisory)\b/i, key: 'BATCHBASE' },
+  { pattern: /\betsy\b/i, key: 'ETSY' },
+  { pattern: /\bback pocket\b/i, key: 'BACKPOCKET' },
+  { pattern: /\b(trainline|national rail|northern rail|avanti|lner|transpennine)\b/i, key: 'TRAINLINE' },
+  { pattern: /\bryanair\b/i, key: 'RYANAIR' },
+  { pattern: /\beasyjet\b/i, key: 'EASYJET' },
+  { pattern: /\bairbnb\b/i, key: 'AIRBNB' },
+  { pattern: /\bbooking\.com\b/i, key: 'BOOKING' },
+  { pattern: /\b(whsmith|wh smith)\b/i, key: 'WHSMITH' },
+  { pattern: /\buniqlo\b/i, key: 'UNIQLO' },
+  { pattern: /\bzara\b/i, key: 'ZARA' },
+  { pattern: /\basos\b/i, key: 'ASOS' },
+  { pattern: /\bvinted\b/i, key: 'VINTED' },
+  { pattern: /\bebay\b/i, key: 'EBAY' },
 ];
 
 export function getCanonicalMerchantKey(text: string): string | null {
@@ -43,12 +73,21 @@ export function getCanonicalMerchantKey(text: string): string | null {
 }
 
 export function cleanMerchantString(s: string): string {
-  return (s || '')
+  const rawTokens = (s || '')
     .toUpperCase()
     .replace(/[^A-Z0-9 ]/g, ' ')
-    .replace(/\b(LTD|PLC|INC|CORP|CO|UK|GB|MANCHESTER|LONDON|MANCHES|MCHESTE|STORE|STORES|CARD|PURCHASE|PAYMENT|COM|COUK)\b/g, '')
+    .replace(
+      /\b(LTD|LIMITED|PLC|INC|CORP|CO|UK|GB|GBR|AUS|AU|MANCHESTER|LONDON|MANCHES|MCHESTE|SALFORD|STOCKPORT|LEEDS|LIVERPOOL|BIRMINGHAM|STORE|STORES|EXPRESS|SUPERSTORE|METRO|LOCAL|CARD|PURCHASE|PAYMENT|CONTACTLESS|POS|VISA|MASTERCARD|APPLE|GOOGLE|PAY|SQ|SUMUP|ZETTLE|IZ|NYX|PAYPAL|PP|STRIPE|WWW|HTTP|HTTPS|COM|COUK|ORG|NET|THE|AND|FOR|AT|IN|ON|TO|FROM|REF|TXN)\b/g,
+      ' '
+    )
+    .replace(/\b\d+\b/g, ' ')
     .replace(/\s+/g, ' ')
-    .trim();
+    .trim()
+    .split(' ')
+    .filter(Boolean);
+
+  // Deduplicate repeated tokens (e.g. when both description and merchant are "Habibi")
+  return Array.from(new Set(rawTokens)).join(' ');
 }
 
 export function areMerchantsMatching(
@@ -68,7 +107,12 @@ export function areMerchantsMatching(
   // 2. Cleaned merchant strings
   const cleanA = cleanMerchantString(textA);
   const cleanB = cleanMerchantString(textB);
-  if (!cleanA || !cleanB) return false;
+  if (!cleanA || !cleanB) {
+    // Fallback if cleaning stripped all words (e.g. pure Apple Pay / PayPal / Transfer string)
+    const rawNormA = textA.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const rawNormB = textB.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    return rawNormA.length >= 3 && rawNormA === rawNormB;
+  }
 
   // Exact match on cleaned
   if (cleanA === cleanB) return true;
@@ -76,14 +120,14 @@ export function areMerchantsMatching(
   // Substring match if long enough
   const compactA = cleanA.replace(/\s+/g, '');
   const compactB = cleanB.replace(/\s+/g, '');
-  if (compactA.length >= 4 && compactB.length >= 4) {
+  if (compactA.length >= 3 && compactB.length >= 3) {
     if (compactA.includes(compactB) || compactB.includes(compactA)) return true;
-    if (compactA.slice(0, 6) === compactB.slice(0, 6) && compactA.length >= 6) return true;
+    if (compactA.slice(0, 5) === compactB.slice(0, 5) && compactA.length >= 5 && compactB.length >= 5) return true;
   }
 
-  // Significant word intersection (words >= 4 chars)
-  const wordsA = cleanA.split(' ').filter(w => w.length >= 4);
-  const wordsB = cleanB.split(' ').filter(w => w.length >= 4);
+  // Significant word intersection (words >= 3 chars)
+  const wordsA = cleanA.split(' ').filter(w => w.length >= 3);
+  const wordsB = cleanB.split(' ').filter(w => w.length >= 3);
   for (const w of wordsA) {
     if (wordsB.includes(w)) return true;
   }
@@ -92,10 +136,15 @@ export function areMerchantsMatching(
 }
 
 export function isDuplicatePair(a: any, b: any): { isDuplicate: boolean; keeper: any; duplicate: any } {
-  // Amount must match down to the penny
+  // Amount must match down to the penny (check both native amount and base_amount if same currency)
   const amtA = Number(a.amount) || 0;
   const amtB = Number(b.amount) || 0;
-  if (Math.abs(Math.abs(amtA) - Math.abs(amtB)) > 0.005) {
+  const baseA = Number(a.base_amount ?? amtA) || 0;
+  const baseB = Number(b.base_amount ?? amtB) || 0;
+
+  const nativeMatches = Math.abs(Math.abs(amtA) - Math.abs(amtB)) <= 0.01;
+  const baseMatches = Math.abs(Math.abs(baseA) - Math.abs(baseB)) <= 0.01;
+  if (!nativeMatches && !baseMatches) {
     return { isDuplicate: false, keeper: null, duplicate: null };
   }
 
@@ -104,17 +153,15 @@ export function isDuplicatePair(a: any, b: any): { isDuplicate: boolean; keeper:
     return { isDuplicate: false, keeper: null, duplicate: null };
   }
 
-  // Account match: if both specify account_id, must match (or both GBP)
-  if (a.account_id && b.account_id && a.account_id !== b.account_id) {
+  // Currency check: if both specify currency, require same currency unless baseMatches
+  const curA = (a.currency || 'GBP').toUpperCase();
+  const curB = (b.currency || 'GBP').toUpperCase();
+  if (curA !== curB && !baseMatches) {
     return { isDuplicate: false, keeper: null, duplicate: null };
   }
 
-  // Must match merchant
-  const descA = a.description || '';
-  const merchA = a.merchant || '';
-  const descB = b.description || '';
-  const merchB = b.merchant || '';
-  if (!areMerchantsMatching(descA, merchA, descB, merchB)) {
+  // Never deduplicate cross-account transfers
+  if ((a.is_transfer || b.is_transfer) && a.account_id !== b.account_id) {
     return { isDuplicate: false, keeper: null, duplicate: null };
   }
 
@@ -123,60 +170,43 @@ export function isDuplicatePair(a: any, b: any): { isDuplicate: boolean; keeper:
   const dateB = parseUkDate(b.posted_at);
   const diffDays = Math.abs(differenceInCalendarDays(dateA, dateB));
 
-  // Determine earlier vs later
-  const [earlier, later] = dateA <= dateB ? [a, b] : [b, a];
-  const earlierDate = dateA <= dateB ? dateA : dateB;
-  const laterDate = dateA <= dateB ? dateB : dateA;
-
-  // Never deduplicate internal transfers
-  if (a.is_transfer || b.is_transfer) {
+  // Only consider transactions within 4 calendar days of each other
+  if (diffDays > 4) {
     return { isDuplicate: false, keeper: null, duplicate: null };
   }
 
-  // Never deduplicate fixed recurring bills across different days
-  if (a.is_fixed && b.is_fixed && diffDays > 0) {
+  // Must match merchant / description
+  const descA = a.description || '';
+  const merchA = a.merchant || '';
+  const descB = b.description || '';
+  const merchB = b.merchant || '';
+  if (!areMerchantsMatching(descA, merchA, descB, merchB)) {
     return { isDuplicate: false, keeper: null, duplicate: null };
   }
 
-  const key = getCanonicalMerchantKey(`${descA} ${merchA}`) || getCanonicalMerchantKey(`${descB} ${merchB}`);
-
-  const extA = String(a.external_transaction_id || '');
-  const extB = String(b.external_transaction_id || '');
-  const bothAreDistinctApiTx =
-    ((extA.startsWith('tx_') && extB.startsWith('tx_')) ||
-     (extA.length > 20 && extB.length > 20 && !extA.includes('|') && !extB.includes('|'))) &&
-    extA !== extB;
-  const timeDiffMinutes = Math.abs(dateA.getTime() - dateB.getTime()) / (1000 * 60);
-
-  // Condition 1: Same calendar day (unless both are verified distinct bank API events > 5 mins apart)
-  const isSameDay = diffDays === 0 && (!bothAreDistinctApiTx || timeDiffMinutes <= 5);
-
-  // Condition 2: Weekend to Monday/Tuesday clearing (Saturday/Sunday or Friday evening purchase clearing on Monday/Tuesday)
-  const dayEarlier = earlierDate.getDay(); // 6 = Sat, 0 = Sun, 5 = Fri
-  const dayLater = laterDate.getDay();    // 1 = Mon, 2 = Tue
-  const isWeekendPurchase = dayEarlier === 6 || dayEarlier === 0 || (dayEarlier === 5 && earlierDate.getHours() >= 18);
-  const isMondayTuesdayClearing = dayLater === 1 || dayLater === 2;
-  const isWeekendClearing = isWeekendPurchase && isMondayTuesdayClearing && diffDays <= 4;
-
-  // Condition 3: CSV import vs API sync
-  const hasCsv = extA.includes('|') || extB.includes('|');
-  const hasApi = extA.startsWith('tx_') || extB.startsWith('tx_') || (!extA.includes('|') && extA.length > 10) || (!extB.includes('|') && extB.length > 10);
-  const isCsvVsApi = hasCsv && hasApi && diffDays <= 4;
-
-  // Condition 4: Amazon orders (auth vs capture can happen across 0-4 days)
-  const isAmazonOrder = key === 'AMAZON' && diffDays <= 4;
-
-  // Condition 5: Near-identical description within 48h
-  const cleanA = cleanMerchantString(`${descA} ${merchA}`);
-  const cleanB = cleanMerchantString(`${descB} ${merchB}`);
-  const isCloseTimeIdentical = cleanA === cleanB && diffDays <= 2 && (!bothAreDistinctApiTx || timeDiffMinutes <= 5);
-
-  if (isSameDay || isWeekendClearing || isCsvVsApi || isAmazonOrder || isCloseTimeIdentical) {
-    // Keep earlier (actual transaction date), delete later (settlement/duplicate)
-    return { isDuplicate: true, keeper: earlier, duplicate: later };
+  // Determine earlier (keeper = actual purchase date) vs later (duplicate = settlement / re-sync)
+  // If on the same timestamp, prefer the row that already has a category_id or API external_transaction_id
+  let earlier = a;
+  let later = b;
+  if (dateA.getTime() < dateB.getTime()) {
+    earlier = a;
+    later = b;
+  } else if (dateB.getTime() < dateA.getTime()) {
+    earlier = b;
+    later = a;
+  } else {
+    const scoreA = (a.category_id ? 2 : 0) + (a.external_transaction_id && !String(a.external_transaction_id).includes('|') ? 1 : 0);
+    const scoreB = (b.category_id ? 2 : 0) + (b.external_transaction_id && !String(b.external_transaction_id).includes('|') ? 1 : 0);
+    if (scoreB > scoreA) {
+      earlier = b;
+      later = a;
+    }
   }
 
-  return { isDuplicate: false, keeper: null, duplicate: null };
+  // Any two transactions with the exact same amount, same sign, and matching merchant
+  // within 0–4 calendar days (same-day sync duplicates, weekday/weekend card clearing,
+  // CSV vs API duplicates, or pending-to-settled duplicates) are treated as duplicates.
+  return { isDuplicate: true, keeper: earlier, duplicate: later };
 }
 
 export function deduplicateTransactions<T extends any>(transactions: T[]): DeduplicationResult<T> {
@@ -218,6 +248,18 @@ export function deduplicateTransactions<T extends any>(transactions: T[]): Dedup
           categoryTransfers[keeper.id] = duplicate.category_id;
         }
 
+        // Preserve goal / trip / fixed bill / reimbursable metadata on keeper
+        if (duplicate.goal_id && !keeper.goal_id) keeper.goal_id = duplicate.goal_id;
+        if (duplicate.trip_id && !keeper.trip_id) keeper.trip_id = duplicate.trip_id;
+        if (duplicate.is_travel_spend && !keeper.is_travel_spend) keeper.is_travel_spend = duplicate.is_travel_spend;
+        if (duplicate.fixed_expense_id && !keeper.fixed_expense_id) keeper.fixed_expense_id = duplicate.fixed_expense_id;
+        if (duplicate.is_fixed && !keeper.is_fixed) keeper.is_fixed = duplicate.is_fixed;
+        if (duplicate.is_reimbursable && !keeper.is_reimbursable) {
+          keeper.is_reimbursable = duplicate.is_reimbursable;
+          keeper.reimbursement_status = duplicate.reimbursement_status;
+        }
+        if (duplicate.merchant && !keeper.merchant) keeper.merchant = duplicate.merchant;
+
         // Preserve API external_transaction_id on keeper
         const dupExt = duplicate.external_transaction_id;
         const keepExt = keeper.external_transaction_id;
@@ -226,8 +268,11 @@ export function deduplicateTransactions<T extends any>(transactions: T[]): Dedup
           externalIdTransfers[keeper.id] = dupExt;
         }
 
-        // 1-to-1 match found for `a`, move to next `a`
-        break;
+        // Only break out of the inner loop if the outer item `a` itself was marked as the duplicate.
+        // When `a` is the keeper, continue scanning `j` so 3+ copies (a, b, c) are all caught!
+        if (duplicate.id === a.id) {
+          break;
+        }
       }
     }
   }

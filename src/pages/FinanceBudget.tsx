@@ -10,6 +10,7 @@ import { useWeeklyBoosts } from '@/hooks/useWeeklyBoosts';
 import { useWeekTypes } from '@/hooks/useWeekTypes';
 import { useFinanceTrips } from '@/hooks/useFinanceTrips';
 import { computePolicySnapshot, computeActualSpendingIncome, computeWeekVariableSpend } from '@/lib/policyEngine';
+import { deduplicateTransactions } from '@/lib/deduplication';
 import { parseCoverMeta, planOverspendCover, planUnderspendRepay, type CoverMeta, type CoverStep } from '@/lib/overspendCover';
 import { formatCurrency, baseAmt, parseUkDate } from '@/lib/financeUtils';
 import { subDays, startOfDay, startOfWeek, endOfWeek, differenceInDays, format, addWeeks, subWeeks, isSameWeek, addDays } from 'date-fns';
@@ -470,7 +471,7 @@ export default function FinanceBudget() {
   // Categorize transactions from last 28 days + unified weekly variable spend
   const { essentials, funCategories, allVariableCategories, essentialSpentThisWeek, funSpentThisWeek, thisWeekByCategory, thisWeekTxns, dailySpendingStacked } = useMemo(() => {
     const cutoff = startOfDay(subDays(weekEnd, 28));
-    const { transactions } = finance;
+    const { cleaned: transactions } = deduplicateTransactions(finance.transactions);
 
     const weekSummary = computeWeekVariableSpend(transactions, finance.categories, weekStart, trips);
 

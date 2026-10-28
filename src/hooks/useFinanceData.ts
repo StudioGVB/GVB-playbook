@@ -426,9 +426,15 @@ export function useFinanceDataState() {
 
         setTransactions(cleanedEnriched as any);
 
-        // Run async cleanup in background without blocking render
+        // Run async cleanup in background without blocking render (chunked to avoid URL length limits)
         if (duplicatesToDelete.length > 0) {
-          supabase.from('finance_transactions').delete().in('id', duplicatesToDelete).then(() => {
+          const CHUNK_SIZE = 100;
+          const deleteChunks: Promise<any>[] = [];
+          for (let i = 0; i < duplicatesToDelete.length; i += CHUNK_SIZE) {
+            const chunk = duplicatesToDelete.slice(i, i + CHUNK_SIZE);
+            deleteChunks.push(supabase.from('finance_transactions').delete().in('id', chunk));
+          }
+          Promise.all(deleteChunks).then(() => {
             console.log(`[self-healing] Purged ${duplicatesToDelete.length} duplicate transactions`);
           }).catch(console.error);
         }
