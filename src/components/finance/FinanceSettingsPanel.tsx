@@ -816,7 +816,7 @@ export default function FinanceSettingsPanel({ finance }: Props) {
                       ) : (
                         <Badge variant="outline" className="text-slate-500 text-[10px]">Not verified</Badge>
                       )}
-                      {(settings as any)?.bank_tokens?.monzo_refresh ? (
+                      {(settings as any)?.bank_tokens?.monzo_refresh || localStorage.getItem('gvb_monzo_refresh_token') ? (
                         <Badge className="bg-blue-100 text-blue-800 border-blue-300 font-bold text-[10px]">
                           Permanent OAuth Active
                         </Badge>

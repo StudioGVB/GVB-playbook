@@ -1137,6 +1137,81 @@ export function useFinanceDataState() {
       return { connected: false, success: false, accountsCount: 0, transactionsImported: 0, inserted: 0, error: 'Not authenticated' };
     }
 
+    // 0. If URL has ?code= from Monzo OAuth redirect, exchange it FIRST before reading/writing bank_tokens
+    const urlParams = new URLSearchParams(window.location.search);
+    const oauthCode = urlParams.get('code');
+    if (oauthCode) {
+      window.history.replaceState({}, document.title, window.location.pathname);
+      try {
+        const defaultCid = atob('b2F1dGgyY2xpZW50XzAwMDBCQUlVTWhyQThqRGdVNllkbXI=');
+        const defaultCsec = atob(
+          'bW56Y29uZi5KQTlhdHFqd1VEQ2dPYm5TUzJnVlJIVUZyUFNOUms2Q2RGQXliTTAxZE9mbnhsZXJ1S1hMUXNPN2pwTWIyMkN6YnJmWUJwVCs1dEQrN0NqV0pxdWdNQT09'
+        );
+        const cid = (localStorage.getItem('gvb_monzo_client_id') || defaultCid).trim();
+        const csec = (localStorage.getItem('gvb_monzo_client_secret') || defaultCsec).trim();
+        const redirectUri = `${window.location.origin}${window.location.pathname}`;
+
+        const tokenRes = await fetch('https://api.monzo.com/oauth2/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            grant_type: 'authorization_code',
+            client_id: cid,
+            client_secret: csec,
+            redirect_uri: redirectUri,
+            code: oauthCode.trim(),
+          }).toString(),
+        });
+
+        if (tokenRes.ok) {
+          const tokenData = await tokenRes.json();
+          const newAccess = tokenData.access_token;
+          const newRefresh = tokenData.refresh_token;
+          const expiresIn = tokenData.expires_in || 21600;
+
+          if (newAccess) localStorage.setItem('gvb_monzo_access_token', newAccess);
+          if (newRefresh) localStorage.setItem('gvb_monzo_refresh_token', newRefresh);
+
+          const { data: currentRow } = await supabase
+            .from('finance_settings')
+            .select('bank_tokens')
+            .eq('user_id', user.id)
+            .maybeSingle();
+
+          const updatedTokens = {
+            ...((currentRow as any)?.bank_tokens || {}),
+            monzo: newAccess,
+            monzo_refresh: newRefresh,
+            monzo_expires_at: Date.now() + expiresIn * 1000,
+            monzo_client_id: cid,
+            monzo_client_secret: csec,
+          };
+
+          await supabase
+            .from('finance_settings')
+            .upsert(
+              {
+                user_id: user.id,
+                bank_tokens: updatedTokens,
+                updated_at: new Date().toISOString(),
+              } as any,
+              { onConflict: 'user_id' }
+            );
+
+          toast.success(
+            'Permanent Monzo OAuth linked! Open the Monzo app on your phone and tap Approve, then click Verify Connection.',
+            { duration: 12000 }
+          );
+        } else {
+          const errText = await tokenRes.text();
+          console.error('[monzo-direct] OAuth code exchange failed:', errText);
+          toast.error(`Monzo OAuth exchange failed: ${errText}`);
+        }
+      } catch (exchangeErr: any) {
+        console.error('[monzo-direct] OAuth code exchange error:', exchangeErr);
+      }
+    }
+
     // Read stored bank_tokens from settings
     let storedBankTokens: any = {};
     try {
@@ -1150,6 +1225,11 @@ export function useFinanceDataState() {
       }
     } catch (e) {
       console.warn('[monzo-direct] Failed to read bank_tokens:', e);
+    }
+
+    const savedRefresh = storedBankTokens?.monzo_refresh || localStorage.getItem('gvb_monzo_refresh_token') || '';
+    if (savedRefresh && !storedBankTokens.monzo_refresh) {
+      storedBankTokens.monzo_refresh = savedRefresh;
     }
 
     const candidates = Array.from(
@@ -1219,6 +1299,10 @@ export function useFinanceDataState() {
           const newRefreshToken = freshData.refresh_token || storedBankTokens.monzo_refresh;
           const newExpiresAt = Date.now() + (freshData.expires_in || 21600) * 1000;
 
+          if (newRefreshToken) {
+            localStorage.setItem('gvb_monzo_refresh_token', newRefreshToken);
+          }
+
           if (newAccessToken) {
             storedBankTokens = {
               ...storedBankTokens,
@@ -1266,10 +1350,23 @@ export function useFinanceDataState() {
       };
     }
 
-    // Persist verified working token locally & in finance_settings
+    // Persist verified working token locally & in finance_settings (preserving monzo_refresh)
     localStorage.setItem('gvb_monzo_access_token', activeToken);
     try {
-      const bankTokens = { ...storedBankTokens, monzo: activeToken };
+      const { data: latestRow } = await supabase
+        .from('finance_settings')
+        .select('bank_tokens')
+        .eq('user_id', user.id)
+        .maybeSingle();
+      const latestTokens = (latestRow as any)?.bank_tokens || {};
+      const bankTokens = {
+        ...storedBankTokens,
+        ...latestTokens,
+        monzo: activeToken,
+        ...(savedRefresh || latestTokens.monzo_refresh
+          ? { monzo_refresh: latestTokens.monzo_refresh || savedRefresh }
+          : {}),
+      };
       await supabase
         .from('finance_settings')
         .upsert(
