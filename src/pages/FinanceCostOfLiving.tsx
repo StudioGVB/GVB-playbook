@@ -180,7 +180,7 @@ export default function FinanceCostOfLiving() {
       : 0;
 
     for (const g of (finance.goals || [])) {
-      if ((g as any).is_stash) continue;
+      if ((g as any).is_stash || g.name.toLowerCase().includes('stash')) continue;
       if (g.start_date && new Date(g.start_date) > now) continue;
 
       const targetBase = finance.convertToBase(g.target_amount || 0, g.currency);

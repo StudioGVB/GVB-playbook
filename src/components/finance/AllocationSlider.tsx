@@ -27,7 +27,7 @@ export default function AllocationSlider({
 }) {
   const allocatable = useMemo(
     () => goals.filter(g => {
-      if ((g as any).is_stash) return false;
+      if ((g as any).is_stash || /stash/i.test(g.name)) return false;
       const targetBase = convertToBase ? convertToBase(g.target_amount || 0, g.currency) : (g.target_amount || 0);
       const assignedBase = convertToBase ? convertToBase(g.assigned_amount || 0, g.currency) : (g.assigned_amount || 0);
       return (targetBase - assignedBase) > 0.01;

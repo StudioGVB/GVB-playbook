@@ -99,7 +99,7 @@ export default function MonthlyPotPlanner({
   // Allocatable goal pots (excluding savings stash)
   const allocatablePots = useMemo(() => {
     return goals
-      .filter(g => !(g as any).is_stash)
+      .filter(g => !(g as any).is_stash && !g.name.toLowerCase().includes('stash'))
       .sort((a, b) => (a.priority ?? 99) - (b.priority ?? 99) || a.name.localeCompare(b.name));
   }, [goals]);
 

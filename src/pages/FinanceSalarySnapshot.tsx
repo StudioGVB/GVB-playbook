@@ -171,7 +171,7 @@ export default function FinanceSalarySnapshot() {
 
   // ---------- SAVINGS ALLOCATION ----------
   const goalRows = useMemo(() => {
-    const visible = finance.goals.filter(g => !(g as any).is_stash);
+    const visible = finance.goals.filter(g => !(g as any).is_stash && !g.name.toLowerCase().includes('stash'));
     const totalPct = visible.reduce((s, g) => s + (g.percent_allocation || 0), 0);
     return visible
       .map(g => {
