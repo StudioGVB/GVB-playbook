@@ -409,13 +409,13 @@ export default function FinancePoolsPage() {
   const livingPoolReserved = Math.min(livingPoolCash, monthlyLivingTarget);
   const unallocatedSurplusCash = Math.max(0, livingPoolCash - monthlyLivingTarget);
 
-  // Build pool options for the move dialog
+  // Build pool options for the move dialog — Living Pool reserve (monthlyLivingTarget) is untouchable; only surplus above it is movable
   const poolOptions: { id: PoolId; label: string; available: number; cap?: number }[] = useMemo(() => {
     const opts: { id: PoolId; label: string; available: number; cap?: number }[] = [];
     opts.push({
       id: LIVING_POOL,
-      label: 'Living & Monthly Budget Pool',
-      available: livingPoolCash,
+      label: 'Living Pool Surplus (above Ring-Fenced Month Budget)',
+      available: unallocatedSurplusCash,
     });
     if (unallocatedSurplusCash > 0.01) {
       opts.push({
@@ -1294,12 +1294,13 @@ export default function FinancePoolsPage() {
 
 
 
-        {/* Living & Monthly Budget Pool */}
+        {/* Living & Monthly Budget Pool (Untouchable Ring-Fenced Reserve) */}
         {(() => {
           const isLivingCovered = livingPoolCash >= monthlyLivingTarget - 0.01;
           const isSurvivalCovered = livingPoolCash >= effectiveFixedMonthly + essentialVariable - 0.01;
           const livingShortfall = Math.max(0, monthlyLivingTarget - livingPoolCash);
           const livingPct = monthlyLivingTarget > 0 ? Math.min(100, (livingPoolCash / monthlyLivingTarget) * 100) : 100;
+          const targetMonthLabel = detectedPaycheck?.targetMonthName || format(new Date(), 'MMMM yyyy');
 
           let cardStyle = 'bg-sky-50/80 border-sky-300 shadow-[4px_4px_0px_0px_rgba(14,165,233,0.15)]';
           let iconStyle = 'bg-sky-500 text-white';
@@ -1322,23 +1323,23 @@ export default function FinancePoolsPage() {
                 <div className="flex items-start justify-between gap-2 mb-2">
                   <div className="flex items-center gap-3">
                     <div className={`w-10 h-10 rounded-xl ${iconStyle} flex items-center justify-center flex-shrink-0 shadow-xs`}>
-                      <Wallet className="w-5 h-5" />
+                      <Lock className="w-5 h-5" />
                     </div>
                     <div>
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <h3 className="text-sm font-bold text-slate-900">Living & Monthly Budget</h3>
-                        <Badge variant="outline" className="text-[9px] px-1.5 py-0 text-slate-600 border-slate-200 bg-white/70">
-                          Bills + Weekly Budget
+                        <Badge variant="outline" className="text-[9px] px-1.5 py-0 text-sky-800 border-sky-300 bg-sky-100/80 font-bold">
+                          🔒 Ring-Fenced ({targetMonthLabel})
                         </Badge>
                       </div>
                       <p className="text-[11px] text-slate-500 mt-0.5 leading-tight">
-                        Holds cash for Fixed Bills, Essentials & Weekly Fun Money
+                        Untouchable reserve for {targetMonthLabel} Bills, Essentials & Weekly Budget
                       </p>
                     </div>
                   </div>
                   {isLivingCovered ? (
                     <Badge className={`${badgeStyle} border font-display font-bold text-[10px] px-2 py-0.5 rounded-full shrink-0`}>
-                      ✓ Month Funded
+                      ✓ {targetMonthLabel} Funded
                     </Badge>
                   ) : (
                     <Badge className={`${badgeStyle} border font-display font-bold text-[10px] px-2 py-0.5 rounded-full shrink-0`}>
@@ -1351,10 +1352,10 @@ export default function FinancePoolsPage() {
                   <div className="flex items-baseline justify-between flex-wrap gap-1 mb-2">
                     <div>
                       <span className="text-2xl font-display font-black text-slate-900 tracking-tight">
-                        {fmt(livingPoolCash)}
+                        {fmt(livingPoolReserved)}
                       </span>
                       <span className="text-xs text-slate-500 ml-1 font-semibold">
-                        / {fmt(monthlyLivingTarget)} mo target
+                        / {fmt(monthlyLivingTarget)} locked for {targetMonthLabel}
                       </span>
                     </div>
                     <span className="text-xs font-bold tabular-nums text-sky-700">
@@ -1370,7 +1371,7 @@ export default function FinancePoolsPage() {
                   </div>
                 </div>
 
-                {/* Breakdown of what lives inside this pool */}
+                {/* Breakdown of what lives inside this untouchable pool */}
                 <div className="text-xs space-y-1.5 border-t border-slate-200/60 pt-3 mt-3">
                   <div className="flex justify-between">
                     <span className="text-slate-500 font-semibold">1. Fixed Bills Reserve:</span>
@@ -1390,12 +1391,17 @@ export default function FinancePoolsPage() {
                       {fmt(monthlyFunAllowance)}/mo ({fmt(snapshot?.baseWeeklyFun ?? 0)}/wk)
                     </span>
                   </div>
-                  {unallocatedSurplusCash > 0.01 && (
+                  {unallocatedSurplusCash > 0.01 ? (
                     <div className="flex justify-between pt-1 border-t border-slate-200/50">
-                      <span className="text-emerald-700 font-bold">Surplus Above Month Budget:</span>
+                      <span className="text-emerald-700 font-bold">Unlocked Surplus Above Living:</span>
                       <span className="font-extrabold text-emerald-700">
                         +{fmt(unallocatedSurplusCash)}
                       </span>
+                    </div>
+                  ) : (
+                    <div className="flex justify-between pt-1 border-t border-slate-200/50">
+                      <span className="text-slate-500 font-semibold">Protection Status:</span>
+                      <span className="font-bold text-emerald-700">🔒 Locked for Living (Untouchable)</span>
                     </div>
                   )}
                 </div>
@@ -1431,21 +1437,6 @@ export default function FinancePoolsPage() {
                     }}
                   >
                     <Plus className="w-3.5 h-3.5" /> Top up from Pool
-                  </Button>
-                )}
-                {livingPoolCash > 0 && (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-8 text-xs font-semibold gap-1 text-slate-600 hover:text-slate-900 transition-colors"
-                    onClick={() => {
-                      setMoveFrom(LIVING_POOL);
-                      setMoveTo('');
-                      setMoveAmount('');
-                      setMoveOpen(true);
-                    }}
-                  >
-                    <ArrowRightLeft className="w-3 h-3" /> Move out
                   </Button>
                 )}
               </div>
