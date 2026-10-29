@@ -251,7 +251,7 @@ export function useFinanceDataState() {
         supabase.from('finance_transactions').select('*').order('posted_at', { ascending: false }).limit(5000),
         supabase.from('finance_goals').select('*').order('priority'),
         supabase.from('finance_goal_plans').select('*').order('created_at', { ascending: false }),
-        supabase.from('finance_settings').select('*').eq('user_id', user.id).maybeSingle(),
+        supabase.from('finance_settings').select('id, user_id, base_currency, fx_rates, user_timezone, created_at, updated_at').eq('user_id', user.id).maybeSingle(),
         supabase.from('finance_import_logs').select('*').order('created_at', { ascending: false }),
         supabase.from('income_source_tags' as any).select('*').order('created_at'),
       ]);
@@ -1129,9 +1129,6 @@ export function useFinanceDataState() {
     }
   };
 
-  const LATEST_MONZO_PLAYGROUND_TOKEN =
-    'eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJlYiI6Imh5clFXZXlIdTZTNHpLNEtuUVI3IiwianRpIjoiYWNjdG9rXzAwMDBCQnV3Z0YxRElMQk5zSUUyYU0iLCJ0eXAiOiJhdCIsInYiOiI2In0.s-MGMHy8exhZ0afpT2WMIFCeHr84HSdR6hlWXoo-MMz0qb9lzLyhck4WwQ-t3ZRjTdBQPQ9-d3Zf5HtXRz_DZQ';
-
   const syncMonzoDirect = async (
     overrideToken?: string,
     opts?: { silent?: boolean; skipAutoCategorize?: boolean }
@@ -1140,13 +1137,27 @@ export function useFinanceDataState() {
       return { connected: false, success: false, accountsCount: 0, transactionsImported: 0, inserted: 0, error: 'Not authenticated' };
     }
 
+    // Read stored bank_tokens from settings
+    let storedBankTokens: any = {};
+    try {
+      const { data: settingsRow } = await supabase
+        .from('finance_settings')
+        .select('bank_tokens')
+        .eq('user_id', user.id)
+        .maybeSingle();
+      if ((settingsRow as any)?.bank_tokens) {
+        storedBankTokens = (settingsRow as any).bank_tokens;
+      }
+    } catch (e) {
+      console.warn('[monzo-direct] Failed to read bank_tokens:', e);
+    }
+
     const candidates = Array.from(
       new Set(
         [
           overrideToken?.replace(/\s+/g, ''),
           localStorage.getItem('gvb_monzo_access_token')?.replace(/\s+/g, ''),
-          (settings as any)?.bank_tokens?.monzo?.replace(/\s+/g, ''),
-          LATEST_MONZO_PLAYGROUND_TOKEN,
+          storedBankTokens?.monzo?.replace(/\s+/g, ''),
         ].filter((t): t is string => Boolean(t && t.length > 20))
       )
     );
@@ -1192,12 +1203,7 @@ export function useFinanceDataState() {
     // Persist verified working token locally & in finance_settings
     localStorage.setItem('gvb_monzo_access_token', activeToken);
     try {
-      const { data: settingsRow } = await supabase
-        .from('finance_settings')
-        .select('bank_tokens')
-        .eq('user_id', user.id)
-        .maybeSingle();
-      const bankTokens = { ...((settingsRow as any)?.bank_tokens || {}), monzo: activeToken };
+      const bankTokens = { ...storedBankTokens, monzo: activeToken };
       await supabase
         .from('finance_settings')
         .upsert(
