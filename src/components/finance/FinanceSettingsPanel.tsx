@@ -532,11 +532,11 @@ export default function FinanceSettingsPanel({ finance }: Props) {
           );
 
         localStorage.setItem('gvb_monzo_access_token', accessToken);
+        await finance.refetch();
         toast.success(
           'Permanent Monzo OAuth linked! Open the Monzo app on your phone and tap Approve, then click Verify Connection.',
-          { id: toastId, duration: 10000 }
+          { id: toastId, duration: 12000 }
         );
-        await connectMonzo(accessToken);
       } catch (err: any) {
         toast.error(`OAuth callback error: ${err.message}`, { id: toastId });
       }

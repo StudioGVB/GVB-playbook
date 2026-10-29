@@ -1156,8 +1156,8 @@ export function useFinanceDataState() {
       new Set(
         [
           overrideToken?.replace(/\s+/g, ''),
-          localStorage.getItem('gvb_monzo_access_token')?.replace(/\s+/g, ''),
           storedBankTokens?.monzo?.replace(/\s+/g, ''),
+          localStorage.getItem('gvb_monzo_access_token')?.replace(/\s+/g, ''),
         ].filter((t): t is string => Boolean(t && t.length > 20))
       )
     );
@@ -1183,14 +1183,17 @@ export function useFinanceDataState() {
             monzoAccounts = openAccs;
             break;
           }
+        } else if (res.status === 403 && candidate === storedBankTokens?.monzo?.replace(/\s+/g, '')) {
+          // 403 on the freshly issued OAuth token means Monzo is waiting for phone app SCA approval — do not fall back or rotate yet
+          break;
         }
       } catch (err) {
         console.warn('[monzo-direct] candidate token check failed:', err);
       }
     }
 
-    // If access token expired and a permanent OAuth refresh_token is stored, rotate directly via Monzo OAuth2
-    if ((!activeToken || monzoAccounts.length === 0) && storedBankTokens?.monzo_refresh) {
+    // If access token expired (401) and a permanent OAuth refresh_token is stored, rotate directly via Monzo OAuth2
+    if ((!activeToken || monzoAccounts.length === 0) && lastStatus !== 403 && storedBankTokens?.monzo_refresh) {
       try {
         const defaultCid = atob('b2F1dGgyY2xpZW50XzAwMDBCQUlVTWhyQThqRGdVNllkbXI=');
         const defaultCsec = atob(
@@ -1254,7 +1257,12 @@ export function useFinanceDataState() {
         accountsCount: 0,
         transactionsImported: 0,
         inserted: 0,
-        error: lastStatus === 401 ? 'Monzo token is invalid or expired' : 'Could not connect to Monzo API',
+        error:
+          lastStatus === 403
+            ? 'Open the Monzo app on your phone and tap Approve to finish linking, then click Verify Connection.'
+            : lastStatus === 401
+              ? 'Monzo token is invalid or expired'
+              : 'Could not connect to Monzo API',
       };
     }
 
