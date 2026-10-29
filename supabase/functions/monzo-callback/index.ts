@@ -1,8 +1,8 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.90.1'
 
-const MONZO_CLIENT_ID = Deno.env.get('MONZO_CLIENT_ID') || 'oauth2client_0000BAg6n5qTpwiJJM1EbT';
-const MONZO_CLIENT_SECRET = Deno.env.get('MONZO_CLIENT_SECRET') || 'mnzpub.TmKVgB70uuz6BQszP2UlKHy04vtMYBYkYJKFI2GwR5jdfhdu0b+4HNxQUH16P7tXWsW5KgohMpOxzhFMaWBjmg==';
+const MONZO_CLIENT_ID = Deno.env.get('MONZO_CLIENT_ID') || '';
+const MONZO_CLIENT_SECRET = Deno.env.get('MONZO_CLIENT_SECRET') || '';
 const REDIRECT_URI = 'https://wlaydyjeilhinngtnnbd.supabase.co/functions/v1/monzo-callback';
 
 serve(async (req) => {
@@ -12,6 +12,11 @@ serve(async (req) => {
 
   if (!code) {
     return new Response('Missing authorization code from Monzo', { status: 400 });
+  }
+
+  if (!MONZO_CLIENT_ID || !MONZO_CLIENT_SECRET) {
+    console.error('Monzo credentials not configured in environment secrets');
+    return new Response('Monzo configuration error: missing credentials', { status: 500 });
   }
 
   try {

@@ -3,10 +3,25 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.90.1'
 
 serve(async (req) => {
   try {
+    const authHeader = req.headers.get('Authorization')
     const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
+    const anonKey = Deno.env.get('SUPABASE_ANON_KEY') || ''
+    const cronSecret = Deno.env.get('CRON_SECRET')
+
+    const isAuthorized =
+      (serviceRoleKey && authHeader === `Bearer ${serviceRoleKey}`) ||
+      (anonKey && authHeader === `Bearer ${anonKey}`) ||
+      (cronSecret && authHeader === `Bearer ${cronSecret}`)
+
+    if (!isAuthorized) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401, headers: { 'Content-Type': 'application/json' },
+      })
+    }
+
     const fallbackToken = Deno.env.get('MONZO_ACCESS_TOKEN')
-    const MONZO_CLIENT_ID = Deno.env.get('MONZO_CLIENT_ID') || 'oauth2client_0000BAg6n5qTpwiJJM1EbT'
-    const MONZO_CLIENT_SECRET = Deno.env.get('MONZO_CLIENT_SECRET') || 'mnzpub.TmKVgB70uuz6BQszP2UlKHy04vtMYBYkYJKFI2GwR5jdfhdu0b+4HNxQUH16P7tXWsW5KgohMpOxzhFMaWBjmg=='
+    const MONZO_CLIENT_ID = Deno.env.get('MONZO_CLIENT_ID') || ''
+    const MONZO_CLIENT_SECRET = Deno.env.get('MONZO_CLIENT_SECRET') || ''
 
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL')!,

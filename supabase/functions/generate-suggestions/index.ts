@@ -1,4 +1,5 @@
 import OpenAI from 'https://esm.sh/openai@4.20.1'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.90.1'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -38,6 +39,26 @@ Deno.serve(async (req) => {
   }
 
   try {
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader?.startsWith('Bearer ')) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_ANON_KEY')!,
+      { global: { headers: { Authorization: authHeader } } }
+    );
+
+    const { data: userData, error: authError } = await supabase.auth.getUser();
+    if (authError || !userData?.user) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
     const openai = new OpenAI({ apiKey: Deno.env.get('OPENAI_API_KEY') });
     const { 
       projectSlug, 

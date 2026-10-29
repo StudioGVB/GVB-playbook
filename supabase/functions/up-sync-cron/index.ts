@@ -5,9 +5,21 @@ const UP_API_BASE = 'https://api.up.com.au/api/v1'
 
 serve(async (req) => {
   try {
-    // Simple shared-secret check: accept anon key or service role key
-    // pg_cron sends the anon key in the Authorization header
+    const authHeader = req.headers.get('Authorization')
     const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
+    const anonKey = Deno.env.get('SUPABASE_ANON_KEY') || ''
+    const cronSecret = Deno.env.get('CRON_SECRET')
+
+    const isAuthorized =
+      (serviceRoleKey && authHeader === `Bearer ${serviceRoleKey}`) ||
+      (anonKey && authHeader === `Bearer ${anonKey}`) ||
+      (cronSecret && authHeader === `Bearer ${cronSecret}`)
+
+    if (!isAuthorized) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401, headers: { 'Content-Type': 'application/json' },
+      })
+    }
 
     const upToken = Deno.env.get('UP_ACCESS_TOKEN')
     if (!upToken) {

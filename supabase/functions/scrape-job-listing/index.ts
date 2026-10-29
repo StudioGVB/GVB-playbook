@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.90.1";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -26,6 +27,26 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const supabase = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_ANON_KEY")!,
+      { global: { headers: { Authorization: authHeader } } }
+    );
+
+    const { data: userData, error: authError } = await supabase.auth.getUser();
+    if (authError || !userData?.user) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const { url } = await req.json();
     if (!url) {
       return new Response(JSON.stringify({ error: "URL is required" }), {
@@ -36,6 +57,41 @@ serve(async (req) => {
     let formattedUrl = url.trim();
     if (!formattedUrl.startsWith('http://') && !formattedUrl.startsWith('https://')) {
       formattedUrl = `https://${formattedUrl}`;
+    }
+
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(formattedUrl);
+    } catch {
+      return new Response(JSON.stringify({ error: "Invalid URL provided" }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (parsedUrl.protocol !== "https:" && parsedUrl.protocol !== "http:") {
+      return new Response(JSON.stringify({ error: "Only http and https protocols are supported" }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const host = parsedUrl.hostname.toLowerCase();
+    const isPrivateOrInternal =
+      host === "localhost" ||
+      host.endsWith(".local") ||
+      host.endsWith(".internal") ||
+      host === "127.0.0.1" ||
+      host === "::1" ||
+      host === "0.0.0.0" ||
+      host.startsWith("10.") ||
+      host.startsWith("192.168.") ||
+      /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(host) ||
+      host.startsWith("169.254.") ||
+      host === "metadata.google.internal";
+
+    if (isPrivateOrInternal) {
+      return new Response(JSON.stringify({ error: "Restricted URL target" }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     console.log("Scraping job listing:", formattedUrl);

@@ -62,19 +62,20 @@ serve(async (req) => {
     // Auto-refresh token if expired or about to expire
     if (refreshToken && (Date.now() >= tokenExpiresAt - 300000 || !rawToken)) {
       try {
-        const MONZO_CLIENT_ID = Deno.env.get('MONZO_CLIENT_ID') || 'oauth2client_0000BAg6n5qTpwiJJM1EbT'
-        const MONZO_CLIENT_SECRET = Deno.env.get('MONZO_CLIENT_SECRET') || 'mnzpub.TmKVgB70uuz6BQszP2UlKHy04vtMYBYkYJKFI2GwR5jdfhdu0b+4HNxQUH16P7tXWsW5KgohMpOxzhFMaWBjmg=='
+        const MONZO_CLIENT_ID = Deno.env.get('MONZO_CLIENT_ID')
+        const MONZO_CLIENT_SECRET = Deno.env.get('MONZO_CLIENT_SECRET')
 
-        const refreshRes = await fetch('https://api.monzo.com/oauth2/token', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: new URLSearchParams({
-            grant_type: 'refresh_token',
-            client_id: MONZO_CLIENT_ID,
-            client_secret: MONZO_CLIENT_SECRET,
-            refresh_token: refreshToken,
-          }).toString(),
-        })
+        if (MONZO_CLIENT_ID && MONZO_CLIENT_SECRET) {
+          const refreshRes = await fetch('https://api.monzo.com/oauth2/token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({
+              grant_type: 'refresh_token',
+              client_id: MONZO_CLIENT_ID,
+              client_secret: MONZO_CLIENT_SECRET,
+              refresh_token: refreshToken,
+            }).toString(),
+          })
 
         if (refreshRes.ok) {
           const freshData = await refreshRes.json()
