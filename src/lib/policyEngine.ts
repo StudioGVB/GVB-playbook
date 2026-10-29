@@ -229,34 +229,57 @@ export function computeActualSpendingIncome(
   let cycleEnd = curMonthEnd;
   let nextPayday = new Date(now.getFullYear(), now.getMonth() + 1, 0);
 
-  // If no Gamma pay has landed yet this month (e.g. before payday), fall back to previous month for baseline Gamma + VA
-  const hasCurrentMonthGamma = monthItems.some(x => x.kind === 'gamma');
+  // If no Gamma pay has landed yet this month (e.g. in November when November's payday was Oct 29),
+  // carry forward the previous month's latest Gamma paycheck + any deposits since that payday,
+  // while keeping all current-month Venture & side-income deposits.
+  const hasCurrentMonthGamma = monthItems.some(x => x.kind === 'gamma' && baseAmt(x.tx) >= 1000);
   if (!hasCurrentMonthGamma) {
     const prevMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1, 0, 0, 0, 0);
     const prevMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
     const prevItems = allClassified.filter(x => x.date >= prevMonthStart && x.date <= prevMonthEnd);
-    const curSum = monthItems.reduce((s, x) => s + baseAmt(x.tx), 0);
-    const prevSum = prevItems.reduce((s, x) => s + baseAmt(x.tx), 0);
-    if (prevItems.length > 0 && (prevItems.some(x => x.kind === 'gamma') || prevSum > curSum)) {
-      monthItems = prevItems;
-      isLate = true;
-      cycleStart = prevMonthStart;
-      cycleEnd = prevMonthEnd;
-      nextPayday = new Date(now.getFullYear(), now.getMonth(), 0);
+    const prevGammaItems = prevItems
+      .filter(x => x.kind === 'gamma' && baseAmt(x.tx) >= 1000)
+      .sort((a, b) => b.date.getTime() - a.date.getTime());
+
+    if (prevGammaItems.length > 0) {
+      const latestPrevGamma = prevGammaItems[0];
+      // If previous month's Gamma salary landed on/after the 24th (funding current month),
+      // combine that paycheck (and any post-payday items) with current month's deposits
+      if (latestPrevGamma.date.getDate() >= 24) {
+        const postPaydayPrevItems = prevItems.filter(
+          x => x.tx.id === latestPrevGamma.tx.id || (x.kind !== 'gamma' && x.date > latestPrevGamma.date)
+        );
+        monthItems = [...postPaydayPrevItems, ...monthItems];
+        cycleStart = latestPrevGamma.date;
+      } else {
+        monthItems = prevItems;
+        isLate = true;
+        cycleStart = prevMonthStart;
+        cycleEnd = prevMonthEnd;
+        nextPayday = new Date(now.getFullYear(), now.getMonth(), 0);
+      }
     }
   }
 
-  // If multiple monthly Gamma salary deposits (>= £1,000) land in the same calendar month
-  // (e.g., Oct 1 for October + Oct 29 early payday for November), keep only the latest single
-  // monthly Gamma paycheck so the monthly budget cycle never double-counts 2x salary.
+  // If a late-month Gamma salary (>= 24th, e.g. Oct 29 for November) has landed in the current month,
+  // it starts the new pay cycle: exclude earlier deposits from Oct 1–28 so old October income
+  // (+£1,000) doesn't get added on top of the new November paycheck and inflate Fun Money.
   const gammaSalaryItems = monthItems
     .filter(x => x.kind === 'gamma' && baseAmt(x.tx) >= 1000)
     .sort((a, b) => b.date.getTime() - a.date.getTime());
-  if (gammaSalaryItems.length > 1) {
-    const keepGammaTxId = gammaSalaryItems[0].tx.id;
-    monthItems = monthItems.filter(
-      x => !(x.kind === 'gamma' && baseAmt(x.tx) >= 1000 && x.tx.id !== keepGammaTxId)
-    );
+  if (gammaSalaryItems.length > 0) {
+    const latestGamma = gammaSalaryItems[0];
+    if (latestGamma.date.getDate() >= 24) {
+      cycleStart = latestGamma.date;
+      monthItems = monthItems.filter(
+        x => x.tx.id === latestGamma.tx.id || (x.kind !== 'gamma' && x.date > latestGamma.date)
+      );
+    } else if (gammaSalaryItems.length > 1) {
+      const keepGammaTxId = latestGamma.tx.id;
+      monthItems = monthItems.filter(
+        x => !(x.kind === 'gamma' && baseAmt(x.tx) >= 1000 && x.tx.id !== keepGammaTxId)
+      );
+    }
   }
 
   let gamma = 0;
@@ -883,7 +906,7 @@ export function computeRequiredGoalSavingsMonthly(
   const anchorNow = startOfWeek(now, { weekStartsOn: 1 });
   let poolSavingsMonthly = 0;
   for (const g of (goals || [])) {
-    if ((g as any)?.is_stash) continue;
+    if ((g as any)?.is_stash || (g.name || '').toLowerCase().includes('stash')) continue;
     if ((g as any)?.is_emergency === true || (g.name || '').toLowerCase().includes('emergency')) continue;
     if (g.start_date && new Date(g.start_date) > anchorNow) continue;
     const targetBase = convertToBase ? convertToBase(g.target_amount || 0, g.currency) : (g.target_amount || 0);
