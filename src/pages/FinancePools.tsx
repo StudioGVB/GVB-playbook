@@ -389,16 +389,39 @@ export default function FinancePoolsPage() {
   const emergencyShortfallAmt = Math.max(0, emergencyFloor - currentEmergencyFunded);
   const isEmergencyFull = emergencyShortfallAmt <= 0.01;
 
+  // Living & Monthly Budget Pool math (accounts for every dollar between Emergency Reserve and Savings Goals)
+  const effectiveFixedMonthly = fixedMonthlyTotalAll || fixedMonthlyTotal;
+  const monthlyFunAllowance = (snapshot?.baseWeeklyFun ?? 0) * 4.33;
+  const monthlyLivingTarget = effectiveFixedMonthly + essentialVariable + monthlyFunAllowance;
+
+  // Stacked bar segments
+  const goalSegments = finance.goals
+    .filter(g => (g.assigned_amount || 0) > 0)
+    .map(g => ({
+      label: g.name,
+      amount: finance.convertToBase(g.assigned_amount || 0, g.currency),
+      color: g.color || '#4558ff',
+    }));
+  const assignedGoalsTotal = goalSegments.reduce((s, seg) => s + seg.amount, 0);
+
+  const unassignedCashAmount = Math.max(0, totalCash - assignedOtherGoalsTotal - currentEmergencyFunded);
+  const livingPoolCash = unassignedCashAmount;
+  const livingPoolReserved = Math.min(livingPoolCash, monthlyLivingTarget);
+  const unallocatedSurplusCash = Math.max(0, livingPoolCash - monthlyLivingTarget);
+
   // Build pool options for the move dialog
   const poolOptions: { id: PoolId; label: string; available: number; cap?: number }[] = useMemo(() => {
     const opts: { id: PoolId; label: string; available: number; cap?: number }[] = [];
-    opts.push({ id: UNALLOCATED, label: 'Unallocated Spendable Cash', available: funMoney });
-    // Living Pool (free savings)
-    if (livingRemainder > funMoney + 0.01) {
+    opts.push({
+      id: LIVING_POOL,
+      label: 'Living & Monthly Budget Pool',
+      available: livingPoolCash,
+    });
+    if (unallocatedSurplusCash > 0.01) {
       opts.push({
-        id: LIVING_POOL,
-        label: 'Savings (Living Pool)',
-        available: livingRemainder,
+        id: UNALLOCATED,
+        label: 'Unallocated Surplus (above Living Budget)',
+        available: unallocatedSurplusCash,
       });
     }
 
@@ -422,19 +445,7 @@ export default function FinancePoolsPage() {
       });
     });
     return opts;
-  }, [finance.goals, funMoney, livingRemainder, emergencyGoal, emergencyGoalAssigned, currentEmergencyFunded, emergencyFloor, finance.convertToBase]);
-
-  // Stacked bar segments
-  const goalSegments = finance.goals
-    .filter(g => (g.assigned_amount || 0) > 0)
-    .map(g => ({
-      label: g.name,
-      amount: finance.convertToBase(g.assigned_amount || 0, g.currency),
-      color: g.color || '#4558ff',
-    }));
-  const assignedGoalsTotal = goalSegments.reduce((s, seg) => s + seg.amount, 0);
-
-  const unassignedCashAmount = Math.max(0, totalCash - assignedOtherGoalsTotal - currentEmergencyFunded);
+  }, [finance.goals, livingPoolCash, unallocatedSurplusCash, emergencyGoal, emergencyGoalAssigned, currentEmergencyFunded, emergencyFloor, finance.convertToBase]);
 
   const emergencyMonthsCovered = actualMonthlySurvival > 0 ? (currentEmergencyFunded / actualMonthlySurvival) : 0;
   const isEmergencyShort = emergencyShortfallAmt > 0.01;
@@ -442,8 +453,9 @@ export default function FinancePoolsPage() {
 
   const segments = [
     ...(currentEmergencyFunded > 0 ? [{ label: 'Emergency Reserve', amount: currentEmergencyFunded, color: emergencySegColor }] : []),
+    ...(livingPoolReserved > 0.01 ? [{ label: 'Living & Budget Pool', amount: livingPoolReserved, color: '#0ea5e9' }] : []),
     ...otherGoalSegments,
-    ...(unassignedCashAmount > 0.01 ? [{ label: 'Unallocated Cash', amount: unassignedCashAmount, color: '#FFB8E6' }] : []),
+    ...(unallocatedSurplusCash > 0.01 ? [{ label: 'Unallocated Surplus', amount: unallocatedSurplusCash, color: '#FFB8E6' }] : []),
   ];
   const totalForBar = Math.max(totalCash, segments.reduce((s, seg) => s + seg.amount, 0)) || 1;
 
@@ -1281,6 +1293,165 @@ export default function FinancePoolsPage() {
         })()}
 
 
+
+        {/* Living & Monthly Budget Pool */}
+        {(() => {
+          const isLivingCovered = livingPoolCash >= monthlyLivingTarget - 0.01;
+          const isSurvivalCovered = livingPoolCash >= effectiveFixedMonthly + essentialVariable - 0.01;
+          const livingShortfall = Math.max(0, monthlyLivingTarget - livingPoolCash);
+          const livingPct = monthlyLivingTarget > 0 ? Math.min(100, (livingPoolCash / monthlyLivingTarget) * 100) : 100;
+
+          let cardStyle = 'bg-sky-50/80 border-sky-300 shadow-[4px_4px_0px_0px_rgba(14,165,233,0.15)]';
+          let iconStyle = 'bg-sky-500 text-white';
+          let barStyle = 'bg-sky-500';
+          let badgeStyle = 'bg-sky-100 text-sky-800 border-sky-300';
+
+          if (isLivingCovered) {
+            cardStyle = 'bg-emerald-50/80 border-emerald-300 shadow-[4px_4px_0px_0px_rgba(16,185,129,0.15)]';
+            barStyle = 'bg-emerald-500';
+            badgeStyle = 'bg-emerald-100 text-emerald-800 border-emerald-300';
+          } else if (!isSurvivalCovered) {
+            cardStyle = 'bg-amber-50/80 border-amber-300 shadow-[4px_4px_0px_0px_rgba(245,158,11,0.15)]';
+            barStyle = 'bg-amber-500';
+            badgeStyle = 'bg-amber-100 text-amber-800 border-amber-300';
+          }
+
+          return (
+            <div className={`${cardStyle} rounded-2xl border-2 p-5 transition-all flex flex-col justify-between hover:scale-[1.01]`}>
+              <div>
+                <div className="flex items-start justify-between gap-2 mb-2">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-10 h-10 rounded-xl ${iconStyle} flex items-center justify-center flex-shrink-0 shadow-xs`}>
+                      <Wallet className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <h3 className="text-sm font-bold text-slate-900">Living & Monthly Budget</h3>
+                        <Badge variant="outline" className="text-[9px] px-1.5 py-0 text-slate-600 border-slate-200 bg-white/70">
+                          Bills + Weekly Budget
+                        </Badge>
+                      </div>
+                      <p className="text-[11px] text-slate-500 mt-0.5 leading-tight">
+                        Holds cash for Fixed Bills, Essentials & Weekly Fun Money
+                      </p>
+                    </div>
+                  </div>
+                  {isLivingCovered ? (
+                    <Badge className={`${badgeStyle} border font-display font-bold text-[10px] px-2 py-0.5 rounded-full shrink-0`}>
+                      ✓ Month Funded
+                    </Badge>
+                  ) : (
+                    <Badge className={`${badgeStyle} border font-display font-bold text-[10px] px-2 py-0.5 rounded-full shrink-0`}>
+                      {fmt(livingShortfall)} to full month
+                    </Badge>
+                  )}
+                </div>
+
+                <div className="mt-3">
+                  <div className="flex items-baseline justify-between flex-wrap gap-1 mb-2">
+                    <div>
+                      <span className="text-2xl font-display font-black text-slate-900 tracking-tight">
+                        {fmt(livingPoolCash)}
+                      </span>
+                      <span className="text-xs text-slate-500 ml-1 font-semibold">
+                        / {fmt(monthlyLivingTarget)} mo target
+                      </span>
+                    </div>
+                    <span className="text-xs font-bold tabular-nums text-sky-700">
+                      {livingPct.toFixed(0)}%
+                    </span>
+                  </div>
+
+                  <div className="w-full bg-slate-200/60 rounded-full h-2 overflow-hidden">
+                    <div
+                      className={`h-full transition-all rounded-full ${barStyle}`}
+                      style={{ width: `${livingPct}%` }}
+                    />
+                  </div>
+                </div>
+
+                {/* Breakdown of what lives inside this pool */}
+                <div className="text-xs space-y-1.5 border-t border-slate-200/60 pt-3 mt-3">
+                  <div className="flex justify-between">
+                    <span className="text-slate-500 font-semibold">1. Fixed Bills Reserve:</span>
+                    <span className="font-bold text-slate-800">
+                      {fmt(effectiveFixedMonthly)}/mo ({fmt(effectiveFixedMonthly / 4.33)}/wk)
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500 font-semibold">2. Variable Essentials:</span>
+                    <span className="font-bold text-slate-800">
+                      {fmt(essentialVariable)}/mo ({fmt(essentialVariable / 4.33)}/wk)
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500 font-semibold">3. Fun Money Allowance:</span>
+                    <span className="font-extrabold text-pink-600">
+                      {fmt(monthlyFunAllowance)}/mo ({fmt(snapshot?.baseWeeklyFun ?? 0)}/wk)
+                    </span>
+                  </div>
+                  {unallocatedSurplusCash > 0.01 && (
+                    <div className="flex justify-between pt-1 border-t border-slate-200/50">
+                      <span className="text-emerald-700 font-bold">Surplus Above Month Budget:</span>
+                      <span className="font-extrabold text-emerald-700">
+                        +{fmt(unallocatedSurplusCash)}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex gap-2 pt-3 mt-2 w-full">
+                {unallocatedSurplusCash > 0.01 ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-8 text-xs font-bold gap-1.5 flex-1 border-emerald-300 bg-white/90 text-emerald-800 hover:bg-emerald-50 transition-colors"
+                    onClick={() => {
+                      setMoveFrom(UNALLOCATED);
+                      const firstGoal = sortedNonEmergencyGoals[0]?.id || '';
+                      setMoveTo(firstGoal);
+                      setMoveAmount(String(Math.floor(unallocatedSurplusCash)));
+                      setMoveOpen(true);
+                    }}
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-emerald-600" /> Allocate {fmt(unallocatedSurplusCash)} Surplus
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-8 text-xs font-semibold gap-1.5 flex-1 border-slate-200/80 bg-white/80 hover:bg-white transition-colors"
+                    onClick={() => {
+                      const defaultSource = poolOptions.find(p => p.available > 0 && p.id !== LIVING_POOL)?.id || '';
+                      setMoveFrom(defaultSource);
+                      setMoveTo(LIVING_POOL);
+                      setMoveAmount('');
+                      setMoveOpen(true);
+                    }}
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Top up from Pool
+                  </Button>
+                )}
+                {livingPoolCash > 0 && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-8 text-xs font-semibold gap-1 text-slate-600 hover:text-slate-900 transition-colors"
+                    onClick={() => {
+                      setMoveFrom(LIVING_POOL);
+                      setMoveTo('');
+                      setMoveAmount('');
+                      setMoveOpen(true);
+                    }}
+                  >
+                    <ArrowRightLeft className="w-3 h-3" /> Move out
+                  </Button>
+                )}
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Goal Pool Cards */}
         {sortedNonEmergencyGoals.map(goal => {
