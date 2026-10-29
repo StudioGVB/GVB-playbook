@@ -175,16 +175,26 @@ export default function FinanceMonthly() {
     const catTotals = new Map<string, number>();
     const paidFixedTxns: Array<{ id: string; name: string; amount: number; date: Date; fixedExpenseId?: string | null }> = [];
 
+    let gammaSalaryCounted = false;
     for (const tx of monthTxns) {
       const cat = catMap.get(tx.category_id || '');
       const rawText = `${tx.merchant || ''} ${tx.description || ''}`.toLowerCase();
+      const catNameLower = (cat?.name || '').toLowerCase();
       const isIncomeCategory = cat?.type === 'income';
       const isGabriellaIncome = rawText.includes('gabriella') && tx.amount > 0 && !tx.transfer_group_id && !tx.is_transfer;
       const isIncomeKeyword = rawText.includes('batchbase') || rawText.includes('batch base') || rawText.includes('payroll') || rawText.includes('salary') || rawText.includes('venture') || rawText.includes('etsy') || isGabriellaIncome;
 
       if (tx.amount > 0 && (!tx.is_transfer || isIncomeCategory || isIncomeKeyword)) {
         if (!tx.is_reimbursable && (cat?.type !== 'transfer' || isIncomeKeyword)) {
-          incomeTotal += baseAmt(tx);
+          const txAmt = baseAmt(tx);
+          const isMonthlyGammaSalary =
+            txAmt >= 1000 &&
+            (rawText.includes('gamma') || rawText.includes('salary') || catNameLower.includes('gamma') || catNameLower.includes('salary'));
+          if (isMonthlyGammaSalary) {
+            if (gammaSalaryCounted) continue;
+            gammaSalaryCounted = true;
+          }
+          incomeTotal += txAmt;
           continue;
         }
       }

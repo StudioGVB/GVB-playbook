@@ -205,7 +205,6 @@ export default function FinancePoolsPage() {
   }, [assumptions, finance.accounts, finance.transactions, finance.categories, finance.goals, finance.convertToBase, finance.loading, fixedMonthlyTotal, fixedMonthlyTotalAll, wtMap]);
 
   const totalCash = snapshot?.totalLiquidCash ?? 0;
-  const emergencyFloor = snapshot?.emergencyFloor ?? 0;
   const weeksUntilIncome = snapshot?.weeksUntilIncome ?? 0;
   const isDrawdown = snapshot?.isDrawdownMode ?? false;
 
@@ -218,8 +217,36 @@ export default function FinancePoolsPage() {
   const weeklyFromRemainder = snapshot?.baseWeeklyFun ?? 0;
 
   const essentialVariable = snapshot?.computedEssentialVariable ?? (assumptions as any)?.estimated_essential_variable ?? 0;
-  const bufferMonths = assumptions?.buffer_months ?? 3;
+  const rawBufferMonths = assumptions?.buffer_months ?? 1;
   const actualMonthlySurvival = snapshot?.emergencySurvivalMonthly ?? snapshot?.survivalCostMonthly ?? (fixedMonthlyTotal + essentialVariable);
+
+  // Living & Monthly Budget Pool target (Priority #1: must be ring-fenced before Emergency Fund ladder upgrades)
+  const effectiveFixedMonthly = fixedMonthlyTotalAll || fixedMonthlyTotal;
+  const monthlyFunAllowance = (snapshot?.baseWeeklyFun ?? 0) * 4.33;
+  const monthlyLivingTarget = effectiveFixedMonthly + essentialVariable + monthlyFunAllowance;
+
+  const nonEmergencyGoalTotalEarly = useMemo(() => {
+    return finance.goals
+      .filter(g => !(g as any).is_emergency && !g.name.toLowerCase().includes('emergency'))
+      .reduce((s, g) => s + finance.convertToBase(g.assigned_amount || 0, g.currency), 0);
+  }, [finance.goals, finance.convertToBase]);
+
+  // Max emergency months affordable AFTER reserving next month's Living & Monthly Budget Pool and active Goal Pools
+  const costPerEmergencyMonth = actualMonthlySurvival * 1.2;
+  const cashAvailableForEmergencyAfterLiving = Math.max(0, totalCash - nonEmergencyGoalTotalEarly - monthlyLivingTarget);
+  const maxAffordableBufferMonths = costPerEmergencyMonth > 0
+    ? Math.max(1, Math.floor((cashAvailableForEmergencyAfterLiving + 0.01) / costPerEmergencyMonth))
+    : 1;
+  const bufferMonths = Math.min(rawBufferMonths, maxAffordableBufferMonths);
+  const emergencyFloor = bufferMonths * costPerEmergencyMonth;
+
+  // Auto-sync buffer_months down if a prior ladder upgrade encroached on the Living & Monthly Budget Pool
+  useEffect(() => {
+    if (!assumptions || finance.loading || !updateAssumptions) return;
+    if (totalCash > 0 && rawBufferMonths > maxAffordableBufferMonths) {
+      updateAssumptions({ buffer_months: maxAffordableBufferMonths });
+    }
+  }, [assumptions, finance.loading, totalCash, rawBufferMonths, maxAffordableBufferMonths, updateAssumptions]);
 
   const [ladderDialogOpen, setLadderDialogOpen] = useState(false);
   const [ladderBannerDismissed, setLadderBannerDismissed] = useState(false);
@@ -236,8 +263,9 @@ export default function FinancePoolsPage() {
       totalLiquidCash: totalCash,
       goals: finance.goals,
       convertToBase: finance.convertToBase,
+      monthlyLivingReserve: monthlyLivingTarget,
     });
-  }, [bufferMonths, targetMonthsVal, actualMonthlySurvival, totalCash, finance.goals, finance.convertToBase]);
+  }, [bufferMonths, targetMonthsVal, actualMonthlySurvival, totalCash, finance.goals, finance.convertToBase, monthlyLivingTarget]);
 
   const handleLevelUpEmergencyMonth = async () => {
     if (!updateAssumptions) return;
@@ -383,16 +411,15 @@ export default function FinancePoolsPage() {
   const assignedOtherGoalsTotal = otherGoalSegments.reduce((s, seg) => s + seg.amount, 0);
   const unassignedCash = Math.max(0, totalCash - assignedOtherGoalsTotal);
 
-  // Cash for emergency includes explicitly assigned emergency funds + unassigned headroom
-  const cashForEmergency = Math.max(emergencyGoalAssigned, unassignedCash);
+  // Ring-fence Living & Monthly Budget Pool FIRST so next month's living is never starved
+  const livingPoolReserved = Math.min(unassignedCash, monthlyLivingTarget);
+  const cashAfterLivingReserve = Math.max(0, unassignedCash - livingPoolReserved);
+
+  // Cash for emergency includes explicitly assigned emergency funds + remaining cash after Living Pool reserve
+  const cashForEmergency = Math.max(emergencyGoalAssigned, cashAfterLivingReserve);
   const currentEmergencyFunded = Math.min(emergencyFloor, cashForEmergency);
   const emergencyShortfallAmt = Math.max(0, emergencyFloor - currentEmergencyFunded);
   const isEmergencyFull = emergencyShortfallAmt <= 0.01;
-
-  // Living & Monthly Budget Pool math (accounts for every dollar between Emergency Reserve and Savings Goals)
-  const effectiveFixedMonthly = fixedMonthlyTotalAll || fixedMonthlyTotal;
-  const monthlyFunAllowance = (snapshot?.baseWeeklyFun ?? 0) * 4.33;
-  const monthlyLivingTarget = effectiveFixedMonthly + essentialVariable + monthlyFunAllowance;
 
   // Stacked bar segments
   const goalSegments = finance.goals
@@ -404,10 +431,9 @@ export default function FinancePoolsPage() {
     }));
   const assignedGoalsTotal = goalSegments.reduce((s, seg) => s + seg.amount, 0);
 
-  const unassignedCashAmount = Math.max(0, totalCash - assignedOtherGoalsTotal - currentEmergencyFunded);
+  const unallocatedSurplusCash = Math.max(0, unassignedCash - livingPoolReserved - currentEmergencyFunded);
+  const unassignedCashAmount = livingPoolReserved + unallocatedSurplusCash;
   const livingPoolCash = unassignedCashAmount;
-  const livingPoolReserved = Math.min(livingPoolCash, monthlyLivingTarget);
-  const unallocatedSurplusCash = Math.max(0, livingPoolCash - monthlyLivingTarget);
 
   // Build pool options for the move dialog — Living Pool reserve (monthlyLivingTarget) is untouchable; only surplus above it is movable
   const poolOptions: { id: PoolId; label: string; available: number; cap?: number }[] = useMemo(() => {

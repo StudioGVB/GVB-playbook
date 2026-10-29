@@ -51,6 +51,7 @@ export function computeEmergencyLadder(params: {
   totalLiquidCash: number;
   goals: FinanceGoal[];
   convertToBase: (amount: number, currency?: string) => number;
+  monthlyLivingReserve?: number;
   now?: Date;
 }): EmergencyLadderState {
   const {
@@ -60,6 +61,7 @@ export function computeEmergencyLadder(params: {
     totalLiquidCash = 0,
     goals = [],
     convertToBase,
+    monthlyLivingReserve = 0,
     now = new Date(),
   } = params;
 
@@ -142,8 +144,8 @@ export function computeEmergencyLadder(params: {
   const totalWeeklyCommittedToPots = activeCompetingPots.reduce((sum, p) => sum + p.weeklyPace, 0);
   const totalMonthlyCommittedToPots = totalWeeklyCommittedToPots * 4.33;
 
-  // Liquid cash remaining after covering current active floor AND existing assigned goal cash
-  const unallocatedCash = Math.max(0, totalLiquidCash - currentFloor - totalGoalAssigned);
+  // Liquid cash remaining after covering current active floor, existing assigned goal cash, AND next month's Living & Monthly Budget reserve
+  const unallocatedCash = Math.max(0, totalLiquidCash - currentFloor - totalGoalAssigned - monthlyLivingReserve);
   const canAffordNextMonthNow = unallocatedCash >= additionalCostForNextMonth;
   const shortfallForNextMonth = Math.max(0, additionalCostForNextMonth - unallocatedCash);
   const isBlockedByActivePots = activeCompetingPots.length > 0 && !canAffordNextMonthNow;

@@ -212,7 +212,8 @@ export function computeActualSpendingIncome(
     return null;
   };
 
-  const allClassified = transactions
+  const { cleaned: dedupedTxs } = deduplicateTransactions(transactions);
+  const allClassified = dedupedTxs
     .map(tx => {
       const info = resolveStreamName(tx);
       return info ? { tx, ...info, date: parseUkDate(tx.posted_at) } : null;
@@ -243,6 +244,19 @@ export function computeActualSpendingIncome(
       cycleEnd = prevMonthEnd;
       nextPayday = new Date(now.getFullYear(), now.getMonth(), 0);
     }
+  }
+
+  // If multiple monthly Gamma salary deposits (>= £1,000) land in the same calendar month
+  // (e.g., Oct 1 for October + Oct 29 early payday for November), keep only the latest single
+  // monthly Gamma paycheck so the monthly budget cycle never double-counts 2x salary.
+  const gammaSalaryItems = monthItems
+    .filter(x => x.kind === 'gamma' && baseAmt(x.tx) >= 1000)
+    .sort((a, b) => b.date.getTime() - a.date.getTime());
+  if (gammaSalaryItems.length > 1) {
+    const keepGammaTxId = gammaSalaryItems[0].tx.id;
+    monthItems = monthItems.filter(
+      x => !(x.kind === 'gamma' && baseAmt(x.tx) >= 1000 && x.tx.id !== keepGammaTxId)
+    );
   }
 
   let gamma = 0;
