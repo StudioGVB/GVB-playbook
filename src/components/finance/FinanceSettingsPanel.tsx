@@ -622,7 +622,7 @@ export default function FinanceSettingsPanel({ finance }: Props) {
               <CardContent className="p-5 sm:p-6 space-y-4">
                 <div className="flex items-start justify-between flex-wrap gap-3">
                   <div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <h3 className="font-display font-bold text-base text-slate-900">Monzo (UK Banking)</h3>
                       {isMonzoConnected ? (
                         <Badge className="bg-emerald-100 text-emerald-800 border-emerald-300 font-bold text-[10px]">
@@ -631,9 +631,18 @@ export default function FinanceSettingsPanel({ finance }: Props) {
                       ) : (
                         <Badge variant="outline" className="text-slate-500 text-[10px]">Not verified</Badge>
                       )}
+                      {(settings as any)?.bank_tokens?.monzo_refresh ? (
+                        <Badge className="bg-blue-100 text-blue-800 border-blue-300 font-bold text-[10px]">
+                          Permanent OAuth Active
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="bg-amber-50 text-amber-800 border-amber-300 text-[10px]">
+                          24h Playground Token
+                        </Badge>
+                      )}
                     </div>
                     <p className="text-xs text-slate-500 mt-1">
-                      {monzoAccount?.last_synced_at ? `Last synced: ${new Date(monzoAccount.last_synced_at).toLocaleString()}` : 'Connects using Developer Token or direct token entry.'}
+                      {monzoAccount?.last_synced_at ? `Last synced: ${new Date(monzoAccount.last_synced_at).toLocaleString()}` : 'Connects via Permanent Monzo OAuth or direct token.'}
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
@@ -648,9 +657,27 @@ export default function FinanceSettingsPanel({ finance }: Props) {
                   </div>
                 </div>
 
-                <div className="bg-slate-50/80 rounded-xl p-3 text-xs text-slate-600 space-y-2 border border-slate-200/60">
-                  <p><strong>Setup Option A:</strong> Add your Monzo access token as a Cloud Secret named <code className="bg-white px-1.5 py-0.5 rounded border border-slate-200 text-[11px] font-mono">MONZO_ACCESS_TOKEN</code>.</p>
-                  <div className="pt-1 flex items-center gap-2">
+                <div className="bg-slate-50/80 rounded-xl p-3 text-xs text-slate-600 space-y-2.5 border border-slate-200/60">
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <p className="text-[11px] text-slate-600">
+                      <strong>Permanent Sync (Recommended):</strong> Authorize your custom Monzo OAuth client (<code className="bg-white px-1 py-0.5 rounded border text-[10px] font-mono">oauth2client_0000BAg6n5qTpwiJJM1EbT</code>) so tokens auto-renew forever.
+                    </p>
+                    <Button
+                      size="sm"
+                      type="button"
+                      className="h-8 text-xs font-bold bg-[#FF4D6D] hover:bg-[#FF4D6D]/90 text-white shrink-0"
+                      onClick={async () => {
+                        const { data } = await supabase.auth.getSession();
+                        const userId = data.session?.user.id || '';
+                        const clientId = 'oauth2client_0000BAg6n5qTpwiJJM1EbT';
+                        const redirectUri = encodeURIComponent('https://wlaydyjeilhinngtnnbd.supabase.co/functions/v1/monzo-callback');
+                        window.location.href = `https://auth.monzo.com/?client_id=${clientId}&redirect_uri=${redirectUri}&response_type=code&state=${userId}`;
+                      }}
+                    >
+                      Authorize Permanent Monzo OAuth
+                    </Button>
+                  </div>
+                  <div className="pt-1 flex items-center gap-2 border-t border-slate-200/60">
                     <Input
                       type="password"
                       placeholder="Or paste Monzo Access Token directly here"
@@ -658,7 +685,7 @@ export default function FinanceSettingsPanel({ finance }: Props) {
                       onChange={e => setMonzoToken(e.target.value)}
                       className="text-xs h-8 bg-white"
                     />
-                    <Button size="sm" onClick={handleMonzoConnectManual} className="h-8 text-xs font-semibold shrink-0">
+                    <Button size="sm" variant="outline" onClick={handleMonzoConnectManual} className="h-8 text-xs font-semibold shrink-0">
                       Save Token
                     </Button>
                   </div>

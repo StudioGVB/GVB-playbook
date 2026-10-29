@@ -251,7 +251,7 @@ export function useFinanceDataState() {
         supabase.from('finance_transactions').select('*').order('posted_at', { ascending: false }).limit(5000),
         supabase.from('finance_goals').select('*').order('priority'),
         supabase.from('finance_goal_plans').select('*').order('created_at', { ascending: false }),
-        supabase.from('finance_settings').select('id, user_id, base_currency, fx_rates, user_timezone, created_at, updated_at').eq('user_id', user.id).maybeSingle(),
+        supabase.from('finance_settings').select('id, user_id, base_currency, fx_rates, user_timezone, bank_tokens, created_at, updated_at').eq('user_id', user.id).maybeSingle(),
         supabase.from('finance_import_logs').select('*').order('created_at', { ascending: false }),
         supabase.from('income_source_tags' as any).select('*').order('created_at'),
       ]);
@@ -1186,6 +1186,49 @@ export function useFinanceDataState() {
         }
       } catch (err) {
         console.warn('[monzo-direct] candidate token check failed:', err);
+      }
+    }
+
+    // If access token expired and a permanent OAuth refresh_token is stored, trigger server-side rotation via monzo-sync
+    if ((!activeToken || monzoAccounts.length === 0) && storedBankTokens?.monzo_refresh) {
+      try {
+        const session = await supabase.auth.getSession();
+        if (session.data.session) {
+          await fetch(`${SUPABASE_URL}/functions/v1/monzo-sync`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${session.data.session.access_token}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({}),
+          });
+          const { data: refreshedRow } = await supabase
+            .from('finance_settings')
+            .select('bank_tokens')
+            .eq('user_id', user.id)
+            .maybeSingle();
+          const refreshedToken = (refreshedRow as any)?.bank_tokens?.monzo?.replace(/\s+/g, '');
+          if (refreshedToken) {
+            storedBankTokens = (refreshedRow as any).bank_tokens;
+            const accRes = await fetch('https://api.monzo.com/accounts', {
+              headers: {
+                Authorization: `Bearer ${refreshedToken}`,
+                Accept: 'application/json',
+              },
+            });
+            lastStatus = accRes.status;
+            if (accRes.ok) {
+              const accData = await accRes.json();
+              const openAccs = (accData.accounts || []).filter((a: any) => !a.closed);
+              if (openAccs.length > 0) {
+                activeToken = refreshedToken;
+                monzoAccounts = openAccs;
+              }
+            }
+          }
+        }
+      } catch (refreshErr) {
+        console.warn('[monzo-direct] OAuth refresh fallback failed:', refreshErr);
       }
     }
 

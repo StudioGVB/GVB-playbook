@@ -49,8 +49,8 @@ serve(async (req) => {
           .eq('user_id', userId)
           .maybeSingle()
 
-        if (settingsData?.bank_tokens?.monzo) {
-          rawToken = settingsData.bank_tokens.monzo
+        if (settingsData?.bank_tokens) {
+          rawToken = settingsData.bank_tokens.monzo || ''
           refreshToken = settingsData.bank_tokens.monzo_refresh || ''
           tokenExpiresAt = settingsData.bank_tokens.monzo_expires_at || 0
         }
@@ -77,29 +77,30 @@ serve(async (req) => {
             }).toString(),
           })
 
-        if (refreshRes.ok) {
-          const freshData = await refreshRes.json()
-          rawToken = freshData.access_token
-          const newRefresh = freshData.refresh_token || refreshToken
-          const newExpires = Date.now() + ((freshData.expires_in || 21600) * 1000)
+          if (refreshRes.ok) {
+            const freshData = await refreshRes.json()
+            rawToken = freshData.access_token
+            const newRefresh = freshData.refresh_token || refreshToken
+            const newExpires = Date.now() + ((freshData.expires_in || 21600) * 1000)
 
-          // Save fresh tokens
-          const { data: settingsData } = await supabase
-            .from('finance_settings')
-            .select('bank_tokens')
-            .eq('user_id', userId)
-            .maybeSingle()
+            // Save fresh tokens
+            const { data: settingsData } = await supabase
+              .from('finance_settings')
+              .select('bank_tokens')
+              .eq('user_id', userId)
+              .maybeSingle()
 
-          const bankTokens = settingsData?.bank_tokens || {}
-          bankTokens.monzo = rawToken
-          bankTokens.monzo_refresh = newRefresh
-          bankTokens.monzo_expires_at = newExpires
+            const bankTokens = settingsData?.bank_tokens || {}
+            bankTokens.monzo = rawToken
+            bankTokens.monzo_refresh = newRefresh
+            bankTokens.monzo_expires_at = newExpires
 
-          await supabase.from('finance_settings').upsert({
-            user_id: userId,
-            bank_tokens: bankTokens,
-            updated_at: new Date().toISOString(),
-          }, { onConflict: 'user_id' })
+            await supabase.from('finance_settings').upsert({
+              user_id: userId,
+              bank_tokens: bankTokens,
+              updated_at: new Date().toISOString(),
+            }, { onConflict: 'user_id' })
+          }
         }
       } catch (refErr) {
         console.error('Failed to refresh Monzo token:', refErr)
