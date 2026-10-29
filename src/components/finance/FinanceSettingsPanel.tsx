@@ -144,6 +144,10 @@ export default function FinanceSettingsPanel({ finance }: Props) {
   const [monzoSyncing, setMonzoSyncing] = useState(false);
   const [monzoStatus, setMonzoStatus] = useState<{ connected: boolean; error?: string } | null>(null);
   const [monzoToken, setMonzoToken] = useState('');
+  const [monzoClientId, setMonzoClientId] = useState(() => localStorage.getItem('gvb_monzo_client_id') || '');
+  const [monzoClientSecret, setMonzoClientSecret] = useState(() => localStorage.getItem('gvb_monzo_client_secret') || '');
+  const [monzoEmail, setMonzoEmail] = useState(() => localStorage.getItem('gvb_monzo_email') || '');
+  const [monzoSendingLink, setMonzoSendingLink] = useState(false);
 
   // Password Update
   const [newPassword, setNewPassword] = useState('');
@@ -455,13 +459,27 @@ export default function FinanceSettingsPanel({ finance }: Props) {
     (async () => {
       const toastId = toast.loading('Completing permanent Monzo OAuth connection...');
       try {
+        const { data: settingsRow } = await supabase
+          .from('finance_settings')
+          .select('bank_tokens')
+          .eq('user_id', user.id)
+          .maybeSingle();
+
+        const storedTokens = (settingsRow as any)?.bank_tokens || (settings as any)?.bank_tokens || {};
         const defaultCid = atob('b2F1dGgyY2xpZW50XzAwMDBCQUlVTWhyQThqRGdVNllkbXI=');
         const defaultCsec = atob(
           'bW56Y29uZi5KQTlhdHFqd1VEQ2dPYm5TUzJnVlJIVUZyUFNOUms2Q2RGQXliTTAxZE9mbnhsZXJ1S1hMUXNPN2pwTWIyMkN6YnJmWUJwVCs1dEQrN0NqV0pxdWdNQT09'
         );
-        const existingTokens = (settings as any)?.bank_tokens || {};
-        const clientId = existingTokens.monzo_client_id || defaultCid;
-        const clientSecret = existingTokens.monzo_client_secret || defaultCsec;
+        const clientId = (
+          localStorage.getItem('gvb_monzo_client_id') ||
+          storedTokens.monzo_client_id ||
+          defaultCid
+        ).trim();
+        const clientSecret = (
+          localStorage.getItem('gvb_monzo_client_secret') ||
+          storedTokens.monzo_client_secret ||
+          defaultCsec
+        ).trim();
         const redirectUri = `${window.location.origin}/finance/settings`;
 
         const tokenRes = await fetch('https://api.monzo.com/oauth2/token', {
@@ -487,14 +505,8 @@ export default function FinanceSettingsPanel({ finance }: Props) {
         const refreshToken = tokenData.refresh_token;
         const expiresIn = tokenData.expires_in || 21600;
 
-        const { data: settingsRow } = await supabase
-          .from('finance_settings')
-          .select('bank_tokens')
-          .eq('user_id', user.id)
-          .maybeSingle();
-
         const bankTokens = {
-          ...((settingsRow as any)?.bank_tokens || {}),
+          ...storedTokens,
           monzo: accessToken,
           monzo_refresh: refreshToken,
           monzo_expires_at: Date.now() + expiresIn * 1000,
@@ -525,31 +537,94 @@ export default function FinanceSettingsPanel({ finance }: Props) {
     })();
   }, [user]);
 
-  const handleMonzoConnectManual = async () => {
-    const val = monzoToken.trim();
-    if (!val) { toast.error('Please enter a Monzo access token'); return; }
-    if (val.startsWith('mnzconf.') || val.startsWith('mnzpub.')) {
+  const handleSendMonzoMagicLink = async () => {
+    const cid = monzoClientId.trim();
+    const csec = monzoClientSecret.trim();
+    const email = monzoEmail.trim();
+    if (!cid || !cid.startsWith('oauth2client_')) {
+      toast.error('Please paste your new Client ID (starts with oauth2client_)');
+      return;
+    }
+    if (!csec || !csec.startsWith('mnzconf.')) {
+      toast.error('Please paste your Confidential Client Secret (starts with mnzconf.)');
+      return;
+    }
+    if (!email || !email.includes('@')) {
+      toast.error('Please enter the email address connected to your Monzo account');
+      return;
+    }
+
+    setMonzoSendingLink(true);
+    try {
+      localStorage.setItem('gvb_monzo_client_id', cid);
+      localStorage.setItem('gvb_monzo_client_secret', csec);
+      localStorage.setItem('gvb_monzo_email', email);
+
       if (user) {
         const { data: settingsRow } = await supabase
           .from('finance_settings')
           .select('bank_tokens')
           .eq('user_id', user.id)
           .maybeSingle();
-        const defaultCid = atob('b2F1dGgyY2xpZW50XzAwMDBCQUlVTWhyQThqRGdVNllkbXI=');
         const bankTokens = {
           ...((settingsRow as any)?.bank_tokens || {}),
-          monzo_client_id: defaultCid,
-          monzo_client_secret: val,
+          monzo_client_id: cid,
+          monzo_client_secret: csec,
         };
         await supabase.from('finance_settings').upsert(
           { user_id: user.id, bank_tokens: bankTokens, updated_at: new Date().toISOString() } as any,
           { onConflict: 'user_id' }
         );
-        setMonzoToken('');
-        toast.success('Saved Monzo Client Secret! Now click "Authorize Permanent Monzo OAuth" above.');
       }
-      return;
+
+      const redirectUri = `${window.location.origin}/finance/settings`;
+      const res = await fetch('https://internal-api.monzo.com/oauth2/authorize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          email,
+          client_id: cid,
+          response_type: 'code',
+          redirect_uri: redirectUri,
+          state: user?.id || 'monzo_oauth',
+          code_challenge_method: '',
+          code_challenge: '',
+          scope: '',
+        }).toString(),
+      });
+
+      if (res.ok) {
+        toast.success(
+          `Magic link sent to ${email}! Open your email and click the Monzo login button — it will bring you right back here.`,
+          { duration: 10000 }
+        );
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        const msg = errData.message || `Status ${res.status}`;
+        if (msg.includes('Mismatched redirect_uri')) {
+          toast.error(
+            `Monzo rejected Redirect URI: You must click "+ New OAuth Client" in Monzo and set Redirect URL to ${redirectUri} when creating it (Monzo does not save edits to old clients).`,
+            { duration: 10000 }
+          );
+        } else if (msg.includes('Client not published')) {
+          toast.error(
+            `Email mismatch: "${email}" is not the email address registered on your personal Monzo account. Enter your Monzo account email.`,
+            { duration: 10000 }
+          );
+        } else {
+          toast.error(`Monzo error: ${msg}`);
+        }
+      }
+    } catch (err: any) {
+      toast.error(`Failed to request magic link: ${err.message}`);
+    } finally {
+      setMonzoSendingLink(false);
     }
+  };
+
+  const handleMonzoConnectManual = async () => {
+    const val = monzoToken.trim();
+    if (!val) { toast.error('Please enter a Monzo access token'); return; }
     try {
       const res = await connectMonzo(val);
       if (res?.error) toast.error(res.error);
@@ -761,46 +836,66 @@ export default function FinanceSettingsPanel({ finance }: Props) {
                   </div>
                 </div>
 
-                <div className="bg-slate-50/80 rounded-xl p-3 text-xs text-slate-600 space-y-2.5 border border-slate-200/60">
-                  <div className="flex items-center justify-between gap-3 flex-wrap">
-                    <div className="space-y-1">
-                      <p className="text-[11px] text-slate-600">
-                        <strong>Permanent Sync (Recommended):</strong> Authorize your Confidential OAuth client (<code className="bg-white px-1 py-0.5 rounded border text-[10px] font-mono">oauth2client_0000BAIUMhrA8jDgU6Ydmr</code>) so tokens auto-renew forever.
-                      </p>
-                      <p className="text-[11px] text-slate-500">
-                        In Monzo Developer Portal → <strong>Redirect URL</strong>, set:{' '}
-                        <code
-                          onClick={() => {
-                            navigator.clipboard.writeText(`${window.location.origin}/finance/settings`);
-                            toast.success('Copied Redirect URL to clipboard!');
-                          }}
-                          className="bg-white px-1.5 py-0.5 rounded border text-[10px] font-mono text-pink-600 cursor-pointer hover:bg-pink-50"
-                          title="Click to copy"
-                        >
-                          https://gvb-playbook.vercel.app/finance/settings
-                        </code>{' '}
-                        (click to copy), save in Monzo, then click Authorize:
-                      </p>
-                    </div>
+                <div className="bg-slate-50/80 rounded-xl p-3.5 text-xs text-slate-600 space-y-3 border border-slate-200/60">
+                  <div className="space-y-1">
+                    <p className="text-[11px] text-slate-700 font-semibold">
+                      Permanent OAuth Setup (bypasses Monzo's "Woops! Network error" page):
+                    </p>
+                    <p className="text-[11px] text-slate-500">
+                      1. In <a href="https://developers.monzo.com/apps" target="_blank" rel="noreferrer" className="underline text-pink-600 font-medium">developers.monzo.com/apps</a>, click the green <strong>+ New OAuth Client</strong> button (Monzo locks Redirect URLs on old clients). Set <strong>Confidential: Confidential</strong> and set <strong>Redirect URL</strong> to:{' '}
+                      <code
+                        onClick={() => {
+                          navigator.clipboard.writeText(`${window.location.origin}/finance/settings`);
+                          toast.success('Copied Redirect URL to clipboard!');
+                        }}
+                        className="bg-white px-1.5 py-0.5 rounded border text-[10px] font-mono text-pink-600 cursor-pointer hover:bg-pink-50"
+                        title="Click to copy"
+                      >
+                        https://gvb-playbook.vercel.app/finance/settings
+                      </code>{' '}
+                      (click to copy).
+                    </p>
+                    <p className="text-[11px] text-slate-500">
+                      2. Paste the new <strong>Client ID</strong>, <strong>Client Secret</strong>, and your <strong>Monzo Email</strong> below, then click <strong>Send Magic Link</strong>:
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <Input
+                      placeholder="New Client ID (oauth2client_...)"
+                      value={monzoClientId}
+                      onChange={e => setMonzoClientId(e.target.value)}
+                      className="text-xs h-8 bg-white font-mono"
+                    />
+                    <Input
+                      type="password"
+                      placeholder="Client Secret (mnzconf...)"
+                      value={monzoClientSecret}
+                      onChange={e => setMonzoClientSecret(e.target.value)}
+                      className="text-xs h-8 bg-white font-mono"
+                    />
+                    <Input
+                      type="email"
+                      placeholder="Your Monzo Account Email"
+                      value={monzoEmail}
+                      onChange={e => setMonzoEmail(e.target.value)}
+                      className="text-xs h-8 bg-white"
+                    />
+                  </div>
+                  <div className="flex justify-end">
                     <Button
                       size="sm"
                       type="button"
-                      className="h-8 text-xs font-bold bg-[#FF4D6D] hover:bg-[#FF4D6D]/90 text-white shrink-0"
-                      onClick={async () => {
-                        const { data } = await supabase.auth.getSession();
-                        const userId = data.session?.user.id || 'monzo_oauth';
-                        const clientId = atob('b2F1dGgyY2xpZW50XzAwMDBCQUlVTWhyQThqRGdVNllkbXI=');
-                        const redirectUri = encodeURIComponent(`${window.location.origin}/finance/settings`);
-                        window.location.href = `https://auth.monzo.com/?client_id=${clientId}&redirect_uri=${redirectUri}&response_type=code&state=${userId}`;
-                      }}
+                      disabled={monzoSendingLink}
+                      className="h-8 text-xs font-bold bg-[#FF4D6D] hover:bg-[#FF4D6D]/90 text-white"
+                      onClick={handleSendMonzoMagicLink}
                     >
-                      Authorize Permanent Monzo OAuth
+                      {monzoSendingLink ? <><Loader2 className="h-3 w-3 animate-spin mr-1" /> Sending Magic Link...</> : 'Send Magic Link & Connect Permanently'}
                     </Button>
                   </div>
-                  <div className="pt-1 flex items-center gap-2 border-t border-slate-200/60">
+                  <div className="pt-2 flex items-center gap-2 border-t border-slate-200/60">
                     <Input
                       type="password"
-                      placeholder="Optional: paste manual Access Token (eyJ...) or Client Secret (mnzconf...)"
+                      placeholder="Or paste 24h Playground Access Token (eyJ...)"
                       value={monzoToken}
                       onChange={e => setMonzoToken(e.target.value)}
                       className="text-xs h-8 bg-white"
