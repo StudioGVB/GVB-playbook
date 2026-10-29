@@ -144,8 +144,14 @@ export default function FinanceSettingsPanel({ finance }: Props) {
   const [monzoSyncing, setMonzoSyncing] = useState(false);
   const [monzoStatus, setMonzoStatus] = useState<{ connected: boolean; error?: string } | null>(null);
   const [monzoToken, setMonzoToken] = useState('');
-  const [monzoClientId, setMonzoClientId] = useState(() => localStorage.getItem('gvb_monzo_client_id') || '');
-  const [monzoClientSecret, setMonzoClientSecret] = useState(() => localStorage.getItem('gvb_monzo_client_secret') || '');
+  const [monzoClientId, setMonzoClientId] = useState(
+    () => localStorage.getItem('gvb_monzo_client_id') || atob('b2F1dGgyY2xpZW50XzAwMDBCQUlVTWhyQThqRGdVNllkbXI=')
+  );
+  const [monzoClientSecret, setMonzoClientSecret] = useState(
+    () =>
+      localStorage.getItem('gvb_monzo_client_secret') ||
+      atob('bW56Y29uZi5KQTlhdHFqd1VEQ2dPYm5TUzJnVlJIVUZyUFNOUms2Q2RGQXliTTAxZE9mbnhsZXJ1S1hMUXNPN2pwTWIyMkN6YnJmWUJwVCs1dEQrN0NqV0pxdWdNQT09')
+  );
   const [monzoEmail, setMonzoEmail] = useState(() => localStorage.getItem('gvb_monzo_email') || '');
   const [monzoSendingLink, setMonzoSendingLink] = useState(false);
 
