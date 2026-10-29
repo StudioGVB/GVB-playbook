@@ -175,7 +175,11 @@ export function computeActualSpendingIncome(
     const catLower = catName.toLowerCase();
     const text = `${tx.merchant || ''} ${tx.description || ''}`.toLowerCase();
 
-    if (text.includes('gamma') || catLower.includes('gamma') || catLower.includes('salary')) {
+    if (
+      (text.includes('gamma') && (!text.includes('gamma network') || Math.abs(baseAmt(tx)) >= 500)) ||
+      catLower.includes('gamma') ||
+      catLower.includes('salary')
+    ) {
       return { streamName: 'Gamma Salary', kind: 'gamma' };
     }
     if (

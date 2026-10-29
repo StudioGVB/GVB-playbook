@@ -256,7 +256,20 @@ export function useFinanceDataState() {
         supabase.from('income_source_tags' as any).select('*').order('created_at'),
       ]);
 
-      const accountsData = (accRes.data || []) as any as FinanceAccount[];
+      const accountsData = ((accRes.data || []) as any as FinanceAccount[]).map(acc => {
+        if (acc.provider === 'monzo') {
+          const rawName = (acc.account_name || '').trim();
+          if (rawName.startsWith('user_0000')) {
+            supabase.from('finance_accounts').update({ account_name: 'Monzo Personal' }).eq('id', acc.id).then(() => {}).catch(console.error);
+            return { ...acc, account_name: 'Monzo Personal' };
+          }
+          if (rawName.toLowerCase().startsWith('joint account between user_')) {
+            supabase.from('finance_accounts').update({ account_name: 'Monzo Joint Account' }).eq('id', acc.id).then(() => {}).catch(console.error);
+            return { ...acc, account_name: 'Monzo Joint Account' };
+          }
+        }
+        return acc;
+      });
       const excludedAccountIds = new Set(accountsData.filter(a => a.exclude_from_totals).map(a => a.id));
       if (accRes.data) setAccounts(accountsData);
       if (catRes.data) {
@@ -341,8 +354,11 @@ export function useFinanceDataState() {
         const ventureCat = (catRes.data || []).find((c: any) =>
           c.type === 'income' && (c.name.toLowerCase().includes('venture') || c.name.toLowerCase().includes('batchbase'))
         );
+        const gammaCat = (catRes.data || []).find((c: any) =>
+          c.type === 'income' && c.name.toLowerCase().includes('gamma')
+        );
 
-        // Self-healing for Gabriella Blyth / Batchbase transactions & purging fake Travel Savings mirror transactions
+        // Self-healing for Gabriella Blyth / Batchbase / Gamma Salary transactions & purging fake Travel Savings mirror transactions
         const TRAVEL_SAVINGS_ACCOUNT_ID = '070104ff-80bf-4b70-a19a-23afce14be9b';
         const healingByCat: Record<string, string[]> = {};
         const transferFlagFixIds: string[] = [];
@@ -371,15 +387,44 @@ export function useFinanceDataState() {
             const fullDesc = `${desc} ${merch} ${msg} ${tags.join(' ')}`;
             const numAmt = Number(t.amount) || 0;
 
+            // Self-heal Gamma Salary payments (e.g. Monzo "10012726" with merchant "Gamma", >= £500)
+            const isGammaSalary = numAmt >= 500 && (fullDesc.includes('gamma') || desc === '10012726');
+            if (isGammaSalary) {
+              const cleanGammaDesc = /^\d+$/.test((t.description || '').trim())
+                ? `Gamma (${(t.description || '').trim()})`
+                : t.description;
+              const targetCatId = !t.category_id && gammaCat ? gammaCat.id : t.category_id;
+              const needsDbHeal =
+                t.is_transfer ||
+                t.transfer_status ||
+                t.transfer_side ||
+                (!t.category_id && gammaCat) ||
+                cleanGammaDesc !== t.description;
+              if (needsDbHeal) {
+                supabase.from('finance_transactions').update({
+                  description: cleanGammaDesc,
+                  merchant: t.merchant || 'Gamma',
+                  is_transfer: false,
+                  transfer_side: null,
+                  transfer_status: null,
+                  category_id: targetCatId,
+                }).eq('id', t.id).then(() => {}).catch(console.error);
+              }
+              return {
+                ...t,
+                description: cleanGammaDesc,
+                merchant: t.merchant || 'Gamma',
+                is_transfer: false,
+                transfer_side: null,
+                transfer_status: null,
+                category_id: targetCatId,
+                base_amount: toBase(numAmt, t.currency),
+              };
+            }
+
             const isBatchbase = fullDesc.includes('batchbase') || fullDesc.includes('batch base') || tags.includes('batchbase') || tags.includes('batch');
             const isGabriella = fullDesc.includes('gabriella') || fullDesc.includes('gabriella blyth');
             const isVentureText = fullDesc.includes('venture') || fullDesc.includes('advisory');
-            const isWeeklyPaycheck = numAmt > 0 && (
-              (numAmt >= 60 && numAmt <= 90) ||
-              (numAmt >= 120 && numAmt <= 180) ||
-              Math.abs(numAmt - 72.8) < 0.5 ||
-              Math.abs(numAmt - 140) < 1.0
-            );
 
             // Incoming money from Gabriella Blyth without a matched outgoing transfer leg is personal income, never an internal transfer
             // Only explicit Batchbase/Venture text is VA. Ambiguous "Gabriella" deposits go to the generic Income bucket until sorted.
@@ -590,6 +635,7 @@ export function useFinanceDataState() {
         await prepareUpTransactionsForSync();
         const wiseToken = localStorage.getItem('gvb_wise_api_token') || undefined;
         await Promise.allSettled([
+          syncMonzoDirect(undefined, { silent: true }),
           fetch(`${SUPABASE_URL}/functions/v1/up-sync`, { method: 'POST', headers, body: JSON.stringify({}) }),
           fetch(`${SUPABASE_URL}/functions/v1/wise-sync`, { method: 'POST', headers, body: JSON.stringify({ token: wiseToken }) }),
         ]);
@@ -600,6 +646,7 @@ export function useFinanceDataState() {
         console.warn('[auto-sync] Background bank sync skipped:', err);
       }
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, fetchAll, prepareUpTransactionsForSync]);
 
   // -- Mutations --
@@ -1082,9 +1129,338 @@ export function useFinanceDataState() {
     }
   };
 
+  const LATEST_MONZO_PLAYGROUND_TOKEN =
+    'eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJlYiI6Imh5clFXZXlIdTZTNHpLNEtuUVI3IiwianRpIjoiYWNjdG9rXzAwMDBCQnV3Z0YxRElMQk5zSUUyYU0iLCJ0eXAiOiJhdCIsInYiOiI2In0.s-MGMHy8exhZ0afpT2WMIFCeHr84HSdR6hlWXoo-MMz0qb9lzLyhck4WwQ-t3ZRjTdBQPQ9-d3Zf5HtXRz_DZQ';
+
+  const syncMonzoDirect = async (
+    overrideToken?: string,
+    opts?: { silent?: boolean; skipAutoCategorize?: boolean }
+  ): Promise<{ connected: boolean; success: boolean; accountsCount: number; transactionsImported: number; inserted: number; error?: string }> => {
+    if (!user) {
+      return { connected: false, success: false, accountsCount: 0, transactionsImported: 0, inserted: 0, error: 'Not authenticated' };
+    }
+
+    const candidates = Array.from(
+      new Set(
+        [
+          overrideToken?.replace(/\s+/g, ''),
+          localStorage.getItem('gvb_monzo_access_token')?.replace(/\s+/g, ''),
+          (settings as any)?.bank_tokens?.monzo?.replace(/\s+/g, ''),
+          LATEST_MONZO_PLAYGROUND_TOKEN,
+        ].filter((t): t is string => Boolean(t && t.length > 20))
+      )
+    );
+
+    let activeToken: string | null = null;
+    let monzoAccounts: any[] = [];
+    let lastStatus = 0;
+
+    for (const candidate of candidates) {
+      try {
+        const res = await fetch('https://api.monzo.com/accounts', {
+          headers: {
+            Authorization: `Bearer ${candidate}`,
+            Accept: 'application/json',
+          },
+        });
+        lastStatus = res.status;
+        if (res.ok) {
+          const data = await res.json();
+          const openAccs = (data.accounts || []).filter((a: any) => !a.closed);
+          if (openAccs.length > 0) {
+            activeToken = candidate;
+            monzoAccounts = openAccs;
+            break;
+          }
+        }
+      } catch (err) {
+        console.warn('[monzo-direct] candidate token check failed:', err);
+      }
+    }
+
+    if (!activeToken || monzoAccounts.length === 0) {
+      return {
+        connected: false,
+        success: false,
+        accountsCount: 0,
+        transactionsImported: 0,
+        inserted: 0,
+        error: lastStatus === 401 ? 'Monzo token is invalid or expired' : 'Could not connect to Monzo API',
+      };
+    }
+
+    // Persist verified working token locally & in finance_settings
+    localStorage.setItem('gvb_monzo_access_token', activeToken);
+    try {
+      const { data: settingsRow } = await supabase
+        .from('finance_settings')
+        .select('bank_tokens')
+        .eq('user_id', user.id)
+        .maybeSingle();
+      const bankTokens = { ...((settingsRow as any)?.bank_tokens || {}), monzo: activeToken };
+      await supabase
+        .from('finance_settings')
+        .upsert(
+          {
+            user_id: user.id,
+            bank_tokens: bankTokens,
+            updated_at: new Date().toISOString(),
+          } as any,
+          { onConflict: 'user_id' }
+        );
+    } catch (e) {
+      console.warn('[monzo-direct] Failed to persist token to finance_settings:', e);
+    }
+
+    // Fetch existing Monzo accounts & categories in DB
+    const [{ data: existingDbAccounts }, { data: dbCategories }] = await Promise.all([
+      supabase.from('finance_accounts').select('*').eq('user_id', user.id).eq('provider', 'monzo'),
+      supabase.from('finance_categories').select('*').eq('user_id', user.id),
+    ]);
+
+    const catList = (dbCategories || categories || []) as FinanceCategory[];
+    const gammaCat = catList.find(c => c.type === 'income' && c.name.toLowerCase().includes('gamma'));
+
+    const extToDbId: Record<string, string> = {};
+    const nowIso = new Date().toISOString();
+
+    for (const acc of monzoAccounts) {
+      let balanceVal = 0;
+      try {
+        const balRes = await fetch(`https://api.monzo.com/balance?account_id=${acc.id}`, {
+          headers: {
+            Authorization: `Bearer ${activeToken}`,
+            Accept: 'application/json',
+          },
+        });
+        if (balRes.ok) {
+          const balData = await balRes.json();
+          balanceVal = (balData.balance || 0) / 100;
+        }
+      } catch (e) {
+        console.warn('[monzo-direct] Balance fetch failed for', acc.id, e);
+      }
+
+      const isJoint = acc.type === 'uk_retail_joint' || acc.owner_type === 'joint';
+      const defaultCleanName = isJoint ? 'Monzo Joint Account' : 'Monzo Personal';
+
+      const existingMatch =
+        (existingDbAccounts || []).find((a: any) => a.external_account_id === String(acc.id)) ||
+        (!isJoint ? (existingDbAccounts || []).find((a: any) => !a.external_account_id) : undefined);
+
+      if (existingMatch) {
+        const existingName = (existingMatch.account_name || '').trim();
+        const isRawMonzoIdName =
+          existingName.startsWith('user_0000') ||
+          existingName.toLowerCase().startsWith('joint account between user_');
+        const finalName = isRawMonzoIdName || !existingName ? defaultCleanName : existingName;
+
+        await supabase
+          .from('finance_accounts')
+          .update({
+            account_name: finalName,
+            balance: balanceVal,
+            currency: acc.currency || 'GBP',
+            external_account_id: String(acc.id),
+            last_synced_at: nowIso,
+            source_type: 'bank',
+          })
+          .eq('id', existingMatch.id);
+        extToDbId[String(acc.id)] = existingMatch.id;
+      } else {
+        const { data: insertedAcc } = await supabase
+          .from('finance_accounts')
+          .upsert(
+            {
+              user_id: user.id,
+              provider: 'monzo',
+              account_name: defaultCleanName,
+              currency: acc.currency || 'GBP',
+              balance: balanceVal,
+              external_account_id: String(acc.id),
+              last_synced_at: nowIso,
+              source_type: 'bank',
+            },
+            { onConflict: 'user_id,external_account_id' }
+          )
+          .select('id')
+          .maybeSingle();
+
+        if (insertedAcc?.id) {
+          extToDbId[String(acc.id)] = insertedAcc.id;
+        }
+      }
+    }
+
+    // Fetch transactions for each Monzo account
+    let transactionsImported = 0;
+    const dbAccountIds = Object.values(extToDbId);
+    const { data: existingTxs } = dbAccountIds.length > 0
+      ? await supabase
+          .from('finance_transactions')
+          .select('id, account_id, external_transaction_id, transaction_fingerprint, category_id, is_transfer, goal_id, is_fixed, is_reimbursable, reimbursement_status, amount, description, merchant, posted_at')
+          .eq('user_id', user.id)
+          .in('account_id', dbAccountIds)
+          .order('posted_at', { ascending: false })
+          .limit(5000)
+      : { data: [] as any[] };
+
+    const existingByExtKey = new Map<string, any>();
+    for (const row of existingTxs || []) {
+      if (row.external_transaction_id) {
+        existingByExtKey.set(`${row.account_id}:${row.external_transaction_id}`, row);
+      }
+    }
+
+    for (const acc of monzoAccounts) {
+      const dbAccountId = extToDbId[String(acc.id)];
+      if (!dbAccountId) continue;
+
+      let txs: any[] = [];
+      try {
+        const txRes = await fetch(
+          `https://api.monzo.com/transactions?account_id=${acc.id}&limit=100&expand[]=merchant`,
+          {
+            headers: {
+              Authorization: `Bearer ${activeToken}`,
+              Accept: 'application/json',
+            },
+          }
+        );
+        if (txRes.ok) {
+          const txData = await txRes.json();
+          txs = txData.transactions || [];
+        } else {
+          const since = new Date();
+          since.setDate(since.getDate() - 89);
+          const sinceStr = since.toISOString().split('.')[0] + 'Z';
+          const retryRes = await fetch(
+            `https://api.monzo.com/transactions?account_id=${acc.id}&since=${sinceStr}&limit=100&expand[]=merchant`,
+            {
+              headers: {
+                Authorization: `Bearer ${activeToken}`,
+                Accept: 'application/json',
+              },
+            }
+          );
+          if (retryRes.ok) {
+            const retryData = await retryRes.json();
+            txs = retryData.transactions || [];
+          }
+        }
+      } catch (e) {
+        console.warn('[monzo-direct] Transactions fetch failed for', acc.id, e);
+      }
+
+      const rowsToUpsert: any[] = [];
+      for (const tx of txs) {
+        if (tx.decline_reason) continue; // Skip declined card attempts
+        const rawAmount = (tx.amount || 0) / 100;
+        if (rawAmount === 0) continue;
+
+        const postedAt = tx.created || tx.settled || nowIso;
+        const merchantName =
+          typeof tx.merchant === 'object' && tx.merchant?.name
+            ? tx.merchant.name
+            : tx.counterparty?.name || null;
+        const rawDesc = (tx.description || 'Monzo transaction').trim();
+        const description =
+          /^\d+$/.test(rawDesc) && merchantName ? `${merchantName} (${rawDesc})` : rawDesc;
+        const merchant = merchantName || rawDesc || null;
+
+        const fingerprint = await computeTxFingerprint({
+          user_id: user.id,
+          account_id: dbAccountId,
+          posted_at: postedAt,
+          amount: rawAmount,
+          description,
+        });
+        const externalTxId = tx.id ? String(tx.id) : fingerprint;
+        const extKey = `${dbAccountId}:${externalTxId}`;
+        const existing = existingByExtKey.get(extKey);
+
+        const fullText = `${description} ${merchant || ''} ${tx.counterparty?.name || ''}`.toLowerCase();
+        const isGammaSalary = rawAmount >= 500 && fullText.includes('gamma');
+        const isGammaReimb = rawAmount > 0 && rawAmount < 500 && fullText.includes('gamma network');
+        const isOutgoingTransfer =
+          rawAmount < 0 && (tx.category === 'transfers' || fullText.includes('gabriella'));
+
+        const defaultCatId =
+          isGammaSalary && gammaCat
+            ? gammaCat.id
+            : autoCategorizeTx(`${description} ${merchant || ''}`, catList);
+
+        rowsToUpsert.push({
+          user_id: user.id,
+          account_id: dbAccountId,
+          external_transaction_id: externalTxId,
+          posted_at: postedAt,
+          description,
+          merchant,
+          amount: rawAmount,
+          currency: tx.currency || 'GBP',
+          category_id: existing?.category_id ?? defaultCatId ?? null,
+          is_transfer: isGammaSalary
+            ? false
+            : existing?.is_transfer !== undefined && existing?.is_transfer !== null
+              ? existing.is_transfer
+              : isOutgoingTransfer,
+          transfer_side: isGammaSalary
+            ? null
+            : isOutgoingTransfer
+              ? 'out'
+              : existing?.transfer_side ?? null,
+          transfer_status: isGammaSalary
+            ? null
+            : isOutgoingTransfer
+              ? 'auto_confirmed'
+              : existing?.transfer_status ?? null,
+          goal_id: existing?.goal_id ?? null,
+          is_fixed: existing?.is_fixed ?? false,
+          is_reimbursable: existing?.is_reimbursable ?? isGammaReimb,
+          reimbursement_status: existing?.reimbursement_status ?? (isGammaReimb ? 'reimbursed' : null),
+          transaction_fingerprint: fingerprint,
+          raw: {
+            category: tx.category || null,
+            merchantId: tx.merchant?.id || null,
+            scheme: tx.scheme || null,
+          },
+        });
+      }
+
+      if (rowsToUpsert.length > 0) {
+        const { data: upserted, error: upsertErr } = await supabase
+          .from('finance_transactions')
+          .upsert(rowsToUpsert, {
+            onConflict: 'account_id,external_transaction_id',
+            ignoreDuplicates: false,
+          })
+          .select('id');
+        if (!upsertErr && upserted) {
+          transactionsImported += upserted.length;
+        }
+      }
+    }
+
+    return {
+      connected: true,
+      success: true,
+      accountsCount: monzoAccounts.length,
+      transactionsImported,
+      inserted: transactionsImported,
+    };
+  };
+
   const checkMonzoStatus = async (): Promise<{ connected: boolean; error?: string; accountsCount?: number }> => {
     if (!user) return { connected: false, error: 'not_authenticated' };
     try {
+      const directRes = await syncMonzoDirect(undefined, { silent: true });
+      if (directRes.connected) {
+        toast.success(`Verified — ${directRes.accountsCount} Monzo account(s) connected & synced!`);
+        await fetchAll();
+        return { connected: true, accountsCount: directRes.accountsCount };
+      }
+
       const session = await supabase.auth.getSession();
       if (!session.data.session) return { connected: false, error: 'not_authenticated' };
 
@@ -1101,12 +1477,8 @@ export function useFinanceDataState() {
       if (data.connected) {
         toast.success(`Verified — ${data.accountsCount} Monzo account(s) found.`);
         fetchAll();
-      } else if (data.error === 'missing_secret') {
-        toast.error('MONZO_ACCESS_TOKEN not set in Cloud Secrets');
-      } else if (data.error === 'invalid_token') {
-        toast.error('MONZO_ACCESS_TOKEN is invalid or expired');
       } else {
-        toast.error(data.message || 'Connection check failed');
+        toast.error(data.message || directRes.error || 'Connection check failed');
       }
       return data;
     } catch (err) {
@@ -1116,9 +1488,18 @@ export function useFinanceDataState() {
     }
   };
 
-  const connectMonzo = async (token: string): Promise<boolean> => {
+  const connectMonzo = async (token?: string): Promise<any> => {
     if (!user) return false;
     try {
+      const directRes = await syncMonzoDirect(token);
+      if (directRes.success) {
+        toast.success(
+          `Monzo connected! Synced ${directRes.accountsCount} account(s) & ${directRes.transactionsImported} transaction(s).`
+        );
+        await fetchAll();
+        return directRes;
+      }
+
       const session = await supabase.auth.getSession();
       if (!session.data.session) return false;
 
@@ -1135,9 +1516,9 @@ export function useFinanceDataState() {
       if (response.ok && data.success) {
         toast.success('Monzo account connected successfully!');
         fetchAll();
-        return true;
+        return { success: true, connected: true, accountsCount: data.accountsSynced || 1 };
       } else {
-        toast.error(data.error || 'Failed to connect Monzo');
+        toast.error(data.error || directRes.error || 'Failed to connect Monzo');
         return false;
       }
     } catch (err) {
@@ -1147,13 +1528,23 @@ export function useFinanceDataState() {
     }
   };
 
-  const syncMonzoTransactions = async (token?: string, opts?: { skipAutoCategorize?: boolean }) => {
-    if (!user) return;
+  const syncMonzoTransactions = async (token?: string, opts?: { skipAutoCategorize?: boolean }): Promise<any> => {
+    if (!user) return { error: 'Not authenticated' };
     try {
+      const directRes = await syncMonzoDirect(token, opts);
+      if (directRes.success) {
+        toast.success(`Synced Monzo accounts: imported ${directRes.transactionsImported} transactions`);
+        if (!opts?.skipAutoCategorize) {
+          await categorizeTransactions();
+        }
+        await fetchAll();
+        return directRes;
+      }
+
       const session = await supabase.auth.getSession();
       if (!session.data.session) {
         toast.error('Not authenticated');
-        return;
+        return { error: 'Not authenticated' };
       }
 
       const response = await fetch(`${SUPABASE_URL}/functions/v1/monzo-sync`, {
@@ -1167,8 +1558,8 @@ export function useFinanceDataState() {
 
       const data = await response.json();
       if (!response.ok) {
-        toast.error(data.error || 'Sync failed');
-        return;
+        toast.error(data.error || directRes.error || 'Sync failed');
+        return { error: data.error || directRes.error || 'Sync failed' };
       }
 
       toast.success(`Synced Monzo accounts: imported ${data.transactionsImported} transactions`);
@@ -1178,9 +1569,11 @@ export function useFinanceDataState() {
       }
       
       await fetchAll();
+      return { ...data, inserted: data.transactionsImported || 0 };
     } catch (err) {
       console.error('Monzo sync error:', err);
       toast.error('Network error during sync');
+      return { error: 'Network error during sync' };
     }
   };
 

@@ -34,30 +34,31 @@ serve(async (req) => {
 
     const userId = userData.user.id
 
-    let rawToken = Deno.env.get('MONZO_ACCESS_TOKEN')
+    let rawToken = ''
+
+    try {
+      const { data: settingsData } = await supabase
+        .from('finance_settings')
+        .select('bank_tokens')
+        .eq('user_id', userId)
+        .maybeSingle()
+
+      if (settingsData?.bank_tokens?.monzo) {
+        rawToken = settingsData.bank_tokens.monzo
+      }
+    } catch (err) {
+      console.error('Failed to read Monzo token from database settings:', err)
+    }
 
     if (!rawToken) {
-      // Query finance_settings table
-      try {
-        const { data: settingsData } = await supabase
-          .from('finance_settings')
-          .select('bank_tokens')
-          .eq('user_id', userId)
-          .maybeSingle()
-
-        if (settingsData?.bank_tokens?.monzo) {
-          rawToken = settingsData.bank_tokens.monzo
-        }
-      } catch (err) {
-        console.error('Failed to read Monzo token from database settings:', err)
-      }
+      rawToken = Deno.env.get('MONZO_ACCESS_TOKEN') || ''
     }
 
     if (!rawToken) {
       return new Response(JSON.stringify({
         connected: false,
         error: 'missing_secret',
-        message: 'MONZO_ACCESS_TOKEN not configured in Cloud Secrets.',
+        message: 'MONZO_ACCESS_TOKEN not configured.',
       }), {
         status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })
@@ -94,7 +95,7 @@ serve(async (req) => {
     }
 
     const accountsData = await accountsRes.json()
-    const accounts = accountsData.accounts || []
+    const accounts = (accountsData.accounts || []).filter((a: any) => !a.closed)
 
     // 2. Fetch balances & upsert accounts
     const accountRows = []
@@ -112,10 +113,13 @@ serve(async (req) => {
         balanceVal = (balData.balance || 0) / 100
       }
 
+      const isJoint = acc.type === 'uk_retail_joint' || acc.owner_type === 'joint'
+      const cleanName = isJoint ? 'Monzo Joint Account' : 'Monzo Personal'
+
       accountRows.push({
         user_id: userId,
         provider: 'monzo',
-        account_name: acc.description || `Monzo ${acc.type || 'Account'}`,
+        account_name: cleanName,
         currency: acc.currency || 'GBP',
         balance: balanceVal,
         external_account_id: String(acc.id),

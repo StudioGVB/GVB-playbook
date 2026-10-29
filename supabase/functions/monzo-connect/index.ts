@@ -93,10 +93,13 @@ serve(async (req) => {
         balanceVal = (balData.balance || 0) / 100
       }
 
+      const isJoint = acc.type === 'uk_retail_joint' || acc.owner_type === 'joint'
+      const cleanName = isJoint ? 'Monzo Joint Account' : 'Monzo Personal'
+
       accountRows.push({
         user_id: userId,
         provider: 'monzo',
-        account_name: acc.description || `Monzo ${acc.type || 'Account'}`,
+        account_name: cleanName,
         currency: acc.currency || 'GBP',
         balance: balanceVal,
         external_account_id: String(acc.id),

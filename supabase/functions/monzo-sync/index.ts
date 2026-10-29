@@ -159,10 +159,13 @@ serve(async (req) => {
         balanceVal = (balData.balance || 0) / 100
       }
 
+      const isJoint = acc.type === 'uk_retail_joint' || acc.owner_type === 'joint'
+      const cleanName = isJoint ? 'Monzo Joint Account' : 'Monzo Personal'
+
       accountRows.push({
         user_id: userId,
         provider: 'monzo',
-        account_name: acc.description || `Monzo ${acc.type || 'Account'}`,
+        account_name: cleanName,
         currency: acc.currency || 'GBP',
         balance: balanceVal,
         external_account_id: String(acc.id),
@@ -288,6 +291,13 @@ serve(async (req) => {
       return false
     }
 
+    // Fetch categories to link Gamma Salary directly
+    const { data: userCats } = await supabase
+      .from('finance_categories')
+      .select('id, name, type')
+      .eq('user_id', userId)
+    const gammaCat = (userCats || []).find((c: any) => c.type === 'income' && c.name.toLowerCase().includes('gamma'))
+
     // 5. Transform transactions
     const txBatch = await Promise.all(allTransactions.map(async ({ tx, dbAccountId }) => {
       // Amount in pence, convert to main unit
@@ -296,14 +306,21 @@ serve(async (req) => {
       // Prioritize tx.created (when the purchase actually took place, e.g. Saturday night)
       // over tx.settled (when Mastercard cleared the funds 1-3 business days later, e.g. Monday morning)
       const postedAt = tx.created || tx.settled || new Date().toISOString()
-      const description = tx.description || 'Monzo transaction'
-      const merchant = tx.merchant?.name || tx.description || null
+      const merchantName = (typeof tx.merchant === 'object' && tx.merchant?.name)
+        ? tx.merchant.name
+        : (tx.counterparty?.name || null)
+      const rawDesc = tx.description || 'Monzo transaction'
+      const description = (/^\d+$/.test(rawDesc.trim()) && merchantName)
+        ? `${merchantName} (${rawDesc.trim()})`
+        : rawDesc
+      const merchant = merchantName || rawDesc || null
       
       const fingerprint = await computeFingerprint(userId, dbAccountId, postedAt, rawAmount, description)
       const externalTxId = tx.id ? String(tx.id) : fingerprint
 
-      // Auto-flag GAMMA salary as income/transfers
-      const isSalary = description.toUpperCase().includes('GAMMA') && rawAmount > 0
+      const fullText = `${description} ${merchant || ''} ${tx.counterparty?.name || ''}`.toLowerCase()
+      const isGammaSalary = rawAmount >= 500 && fullText.includes('gamma')
+      const isOutgoingTransfer = rawAmount < 0 && (tx.category === 'transfers' || fullText.includes('gabriella'))
 
       return {
         user_id: userId,
@@ -314,10 +331,10 @@ serve(async (req) => {
         merchant,
         amount: rawAmount,
         currency: tx.currency || 'GBP',
-        category_id: null as string | null,
-        is_transfer: isSalary,
-        transfer_side: isSalary ? 'in' : null,
-        transfer_status: isSalary ? 'auto_confirmed' : null,
+        category_id: isGammaSalary && gammaCat ? gammaCat.id : (null as string | null),
+        is_transfer: isOutgoingTransfer,
+        transfer_side: isOutgoingTransfer ? 'out' : null,
+        transfer_status: isOutgoingTransfer ? 'auto_confirmed' : null,
         goal_id: null as string | null,
         is_fixed: false,
         transaction_fingerprint: fingerprint,
