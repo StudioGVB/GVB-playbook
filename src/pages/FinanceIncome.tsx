@@ -4,7 +4,8 @@ import { ChevronLeft, ChevronRight, TrendingUp, DollarSign, Tag, X, Briefcase, H
 import { PieChart as RePieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 import { useFinanceData } from '@/hooks/useFinanceData';
 import { useFixedExpenses } from '@/hooks/useFixedExpenses';
-import { baseAmt, formatCurrency, formatUkDate, parseUkDate } from '@/lib/financeUtils';
+import { baseAmt, formatCurrency, formatUkDate, parseUkDate, getEffectiveTxMonthDate } from '@/lib/financeUtils';
+import { deduplicateTransactions } from '@/lib/deduplication';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -216,24 +217,32 @@ export default function FinanceIncome() {
     return 'other';
   }
 
-  const incomeTxs = useMemo(() => transactions.filter(tx => {
-    if (tx.amount <= 0) return false;
-    if (tx.is_reimbursable) return false; // Exclude employer work payback deposits from earned personal income
+  const incomeTxs = useMemo(() => {
+    const { cleaned: deduped } = deduplicateTransactions(transactions);
+    let gammaCounted = false;
+    return deduped.filter(tx => {
+      if (tx.amount <= 0) return false;
+      if (tx.is_reimbursable) return false; // Exclude employer work payback deposits from earned personal income
 
-    // If explicitly assigned to an income category, bypass transfer filter
-    const cat = categories.find(c => c.id === tx.category_id);
-    const isExplicitIncome = cat?.type === 'income';
-    if (!isExplicitIncome && isInternalTransfer(tx)) return false;
+      // If explicitly assigned to an income category, bypass transfer filter
+      const cat = categories.find(c => c.id === tx.category_id);
+      const isExplicitIncome = cat?.type === 'income';
+      if (!isExplicitIncome && isInternalTransfer(tx)) return false;
 
-    const rawDate = parseUkDate(tx.posted_at);
-    const rawText = `${tx.merchant || ''} ${tx.description || ''} ${cat?.name || ''}`.toLowerCase();
-    const isGammaSalary = baseAmt(tx) >= 1000 && (rawText.includes('gamma') || rawText.includes('salary'));
-    const d = (isGammaSalary && rawDate.getDate() >= 24)
-      ? new Date(rawDate.getFullYear(), rawDate.getMonth() + 1, 1, 0, 0, 0, 0)
-      : rawDate;
+      const d = getEffectiveTxMonthDate(tx, categories);
+      if (d < monthStart || d > monthEnd) return false;
 
-    return d >= monthStart && d <= monthEnd;
-  }), [transactions, categories, monthStart, monthEnd]);
+      const amt = baseAmt(tx);
+      const rawText = `${tx.merchant || ''} ${tx.description || ''} ${cat?.name || ''}`.toLowerCase();
+      const isSalary = amt >= 1000 && (rawText.includes('gamma') || rawText.includes('salary') || rawText.includes('payroll'));
+      if (isSalary) {
+        if (gammaCounted) return false;
+        gammaCounted = true;
+      }
+
+      return true;
+    });
+  }, [transactions, categories, monthStart, monthEnd]);
 
   const grandTotal = useMemo(() => incomeTxs.reduce((s, tx) => s + baseAmt(tx), 0), [incomeTxs]);
 

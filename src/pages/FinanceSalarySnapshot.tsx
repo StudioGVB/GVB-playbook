@@ -10,7 +10,7 @@ import { useWeekTypes } from '@/hooks/useWeekTypes';
 import { useFinanceTrips } from '@/hooks/useFinanceTrips';
 import { computePolicySnapshot } from '@/lib/policyEngine';
 import { calcTakeHome, STUDENT_LOAN_LABELS, StudentLoanPlan } from '@/lib/ukTakeHome';
-import { formatCurrency, baseAmt, isExcludedSpendDate } from '@/lib/financeUtils';
+import { formatCurrency, baseAmt, isExcludedSpendDate, getEffectiveTxMonthDate } from '@/lib/financeUtils';
 
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -106,7 +106,7 @@ export default function FinanceSalarySnapshot() {
       if (t.amount <= 0) continue;
       if (t.is_transfer) continue;
       if ((t as any).is_refund) continue;
-      const d = new Date(t.posted_at);
+      const d = getEffectiveTxMonthDate(t, finance.categories);
       if (d < monthStart || d > monthEnd) continue;
       const cat = finance.categories.find(c => c.id === t.category_id);
       const key = cat?.id || '__uncat';
