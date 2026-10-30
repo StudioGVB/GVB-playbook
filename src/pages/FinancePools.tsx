@@ -204,10 +204,10 @@ export default function FinancePoolsPage() {
       : now;
     return computePolicySnapshot(
       assumptions, finance.accounts, finance.transactions, finance.categories,
-      finance.goals, finance.convertToBase, fixedMonthlyTotal, undefined, wtMap, trips, fixedMonthlyTotalAll,
+      finance.goals, finance.convertToBase, fixedMonthlyTotal, undefined, wtMap, [], fixedMonthlyTotalAll,
       poolRefDate,
     );
-  }, [assumptions, finance.accounts, finance.transactions, finance.categories, finance.goals, finance.convertToBase, finance.loading, fixedMonthlyTotal, fixedMonthlyTotalAll, wtMap, trips]);
+  }, [assumptions, finance.accounts, finance.transactions, finance.categories, finance.goals, finance.convertToBase, finance.loading, fixedMonthlyTotal, fixedMonthlyTotalAll, wtMap]);
 
   const totalCash = snapshot?.totalLiquidCash ?? 0;
   const weeksUntilIncome = snapshot?.weeksUntilIncome ?? 0;
@@ -565,12 +565,11 @@ export default function FinancePoolsPage() {
       emergencyFloor,
       currentEmergencyFunded,
       finance.goals,
-      effectiveFixedMonthly,
+      fixedMonthlyTotal,
       essentialVariable,
-      finance.convertToBase,
-      monthlyFunAllowance
+      finance.convertToBase
     );
-  }, [paycheckTx, emergencyFloor, currentEmergencyFunded, finance.goals, effectiveFixedMonthly, essentialVariable, finance.convertToBase, monthlyFunAllowance]);
+  }, [paycheckTx, emergencyFloor, currentEmergencyFunded, finance.goals, fixedMonthlyTotal, essentialVariable, finance.convertToBase]);
 
   const handleExecutePaycheckAllocation = async () => {
     if (!paycheckTx || !waterfallBreakdown || paycheckAllocated) return;
@@ -612,25 +611,7 @@ export default function FinancePoolsPage() {
         }
       }
 
-      // 3. Sweep remaining surplus cash above the £200/wk budget cap into General Savings (Stash) pool
-      const savingsSweep = waterfallBreakdown.generalSavingsSweep ?? waterfallBreakdown.funMoneyLeftover ?? 0;
-      if (savingsSweep > 0) {
-        const stashGoal = finance.goals.find(
-          g => (g as any).is_stash === true || /stash|^savings$/i.test(g.name.trim())
-        );
-        if (stashGoal) {
-          const oneInBase = finance.convertToBase(1, stashGoal.currency);
-          const nativeSweep = oneInBase === 0 ? savingsSweep : savingsSweep / oneInBase;
-          const nextAssigned = (stashGoal.assigned_amount || 0) + nativeSweep;
-          await finance.updateGoal(stashGoal.id, {
-            assigned_amount: nextAssigned,
-            target_amount: Math.max(stashGoal.target_amount || 0, nextAssigned),
-            is_stash: true,
-          } as any);
-        }
-      }
-
-      // 4. Save allocation metadata (for revert) & mark processed
+      // 3. Save allocation metadata (for revert) & mark processed
       savePaycheckAllocationMeta(paycheckTx.id, waterfallBreakdown);
       markPaycheckProcessed(paycheckTx.id);
       await finance.updateTransaction(paycheckTx.id, {
@@ -689,23 +670,7 @@ export default function FinancePoolsPage() {
         }
       }
 
-      // 3. Revert General Savings sweep
-      const savingsSweep = breakdown.generalSavingsSweep ?? breakdown.funMoneyLeftover ?? 0;
-      if (savingsSweep > 0) {
-        const stashGoal = finance.goals.find(
-          g => (g as any).is_stash === true || /stash|^savings$/i.test(g.name.trim())
-        );
-        if (stashGoal) {
-          const oneInBase = finance.convertToBase(1, stashGoal.currency);
-          const nativeDeduct = oneInBase === 0 ? savingsSweep : savingsSweep / oneInBase;
-          const current = stashGoal.assigned_amount || 0;
-          await finance.updateGoal(stashGoal.id, {
-            assigned_amount: Math.max(0, current - nativeDeduct),
-          } as any);
-        }
-      }
-
-      // 4. Unmark paycheck processed
+      // 3. Unmark paycheck processed
       unmarkPaycheckProcessed(paycheckTx.id);
       setPaycheckAllocated(false);
       setRevertSecondsLeft(0);
@@ -1031,7 +996,7 @@ export default function FinancePoolsPage() {
                   </h2>
                   <div className="flex flex-wrap items-center gap-2 pt-1 text-xs text-slate-700">
                     <span className="bg-amber-100 text-amber-900 font-semibold px-2 py-0.5 rounded-md border border-amber-200">
-                      1. Living & Weekly Budget: {fmt(waterfallBreakdown.totalLivingCostReserve)}
+                      1. Living Reserve: {fmt(waterfallBreakdown.totalLivingCostReserve)}
                     </span>
                     <span className="bg-rose-100 text-rose-900 font-semibold px-2 py-0.5 rounded-md border border-rose-200">
                       2. Emergency Top-up: {fmt(waterfallBreakdown.emergencyTopUp)}
@@ -1040,7 +1005,7 @@ export default function FinancePoolsPage() {
                       3. Goal Pools: {fmt(waterfallBreakdown.totalGoalAllocations)}
                     </span>
                     <span className="bg-emerald-100 text-emerald-900 font-bold px-2 py-0.5 rounded-md border border-emerald-200">
-                      4. General Savings Sweep: {fmt(waterfallBreakdown.generalSavingsSweep ?? waterfallBreakdown.funMoneyLeftover)}
+                      4. Fun Money: {fmt(waterfallBreakdown.funMoneyLeftover)}
                     </span>
                   </div>
                 </div>

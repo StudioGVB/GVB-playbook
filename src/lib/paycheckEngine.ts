@@ -5,13 +5,11 @@ export interface PaycheckWaterfallBreakdown {
   paycheckAmount: number;
   fixedBillsMonthly: number;
   essentialVariableMonthly: number;
-  monthlyFunAllowance: number;
   totalLivingCostReserve: number;
   emergencyShortfall: number;
   emergencyTopUp: number;
   goalAllocations: { goalId: string; goalName: string; monthlyTarget: number; allocatedAmount: number }[];
   totalGoalAllocations: number;
-  generalSavingsSweep: number;
   funMoneyLeftover: number;
 }
 
@@ -170,10 +168,10 @@ export function getPaycheckAllocationMeta(txId: string): { allocatedAt: number; 
 
 /**
  * Calculates the strict 4-step monthly waterfall allocation for a paycheck:
- * 1. Reserved Fixed Bills + £200/wk Variable Living & Fun Cap (Monthly)
+ * 1. Reserved Fixed Bills + Essential Living (Monthly)
  * 2. Emergency Reserve Top-up (up to 100% target floor)
  * 3. Goal Pools (Monthly Targets)
- * 4. General Savings Sweep (All remaining surplus cash above the £200/wk budget cap)
+ * 4. Fun Money Leftover (Discretionary)
  */
 export function calculatePaycheckWaterfall(
   paycheckAmount: number,
@@ -182,16 +180,12 @@ export function calculatePaycheckWaterfall(
   goals: FinanceGoal[],
   fixedMonthlyTotal: number,
   essentialVariableMonthly: number,
-  convertToBase: (amt: number, cur: string) => number,
-  monthlyFunAllowance: number = 0
+  convertToBase: (amt: number, cur: string) => number
 ): PaycheckWaterfallBreakdown {
   let remaining = paycheckAmount;
 
-  // Step 1: Living & Weekly Budget Reserve (Monthly Fixed Bills + Monthly Essential Variable + Monthly Fun Cap)
-  const totalLivingCostReserve = Math.min(
-    remaining,
-    fixedMonthlyTotal + essentialVariableMonthly + monthlyFunAllowance
-  );
+  // Step 1: Living Cost Reserve (Monthly Fixed Bills + Monthly Essential Variable)
+  const totalLivingCostReserve = Math.min(remaining, fixedMonthlyTotal + essentialVariableMonthly);
   remaining -= totalLivingCostReserve;
 
   // Step 2: Emergency Reserve Top-up
@@ -205,8 +199,7 @@ export function calculatePaycheckWaterfall(
   let totalGoalAllocations = 0;
 
   for (const g of goals) {
-    if ((g as any).is_emergency || g.name.toLowerCase().includes('emergency')) continue;
-    if ((g as any).is_stash || g.name.toLowerCase().includes('stash')) continue; // Exclude savings stash from step 3 goal targets (swept in step 4)
+    if ((g as any).is_stash || g.name.toLowerCase().includes('stash')) continue; // Exclude savings stash from step 3 goal targets
     if (g.start_date && new Date(g.start_date) > now) continue; // Exclude goals starting in the future
     const targetBase = convertToBase(g.target_amount || 0, g.currency);
     const assignedBase = convertToBase(g.assigned_amount || 0, g.currency);
@@ -238,20 +231,18 @@ export function calculatePaycheckWaterfall(
     });
   }
 
-  // Step 4: General Savings Sweep (All remaining surplus cash above the £200/wk budget cap)
-  const generalSavingsSweep = Math.max(0, remaining);
+  // Step 4: Discretionary Fun Money Leftover
+  const funMoneyLeftover = Math.max(0, remaining);
 
   return {
     paycheckAmount,
     fixedBillsMonthly: fixedMonthlyTotal,
     essentialVariableMonthly,
-    monthlyFunAllowance,
     totalLivingCostReserve,
     emergencyShortfall,
     emergencyTopUp,
     goalAllocations,
     totalGoalAllocations,
-    generalSavingsSweep,
-    funMoneyLeftover: generalSavingsSweep,
+    funMoneyLeftover,
   };
 }
