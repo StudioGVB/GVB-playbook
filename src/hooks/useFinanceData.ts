@@ -338,17 +338,43 @@ export function useFinanceDataState() {
 
       // Determine base currency & fx from settings (or default) so we can enrich tx with base_amount
       const settingsData = setRes.data as any;
-      const baseCurrency = settingsData?.base_currency || 'GBP';
-      const fxRates = (settingsData?.fx_rates || {}) as Record<string, number>;
+      const baseCurrency = (settingsData?.base_currency || 'GBP').toUpperCase();
+      const DEFAULT_FX_RATES: Record<string, number> = {
+        AUD_GBP: 0.52,
+        GBP_AUD: 1.92,
+        EUR_GBP: 0.85,
+        GBP_EUR: 1.18,
+        USD_GBP: 0.78,
+        GBP_USD: 1.28,
+      };
+      const fxRates: Record<string, number> = {
+        ...DEFAULT_FX_RATES,
+        ...((settingsData?.fx_rates || {}) as Record<string, number>),
+      };
       const toBase = (amt: number, cur?: string | null) => {
-        if (!cur || cur === baseCurrency) return amt;
-        const direct = fxRates[`${cur}_${baseCurrency}`];
+        if (!cur) return amt;
+        const upperCur = cur.toUpperCase();
+        const upperBase = baseCurrency.toUpperCase();
+        if (upperCur === upperBase) return amt;
+        const directKey = `${upperCur}_${upperBase}`;
+        const direct = fxRates[directKey];
         if (direct) return amt * direct;
-        const inverse = fxRates[`${baseCurrency}_${cur}`];
+        const inverseKey = `${upperBase}_${upperCur}`;
+        const inverse = fxRates[inverseKey];
         if (inverse && inverse !== 0) return amt / inverse;
+
+        if (upperCur === 'AUD' && upperBase === 'GBP') return amt * 0.52;
+        if (upperCur === 'GBP' && upperBase === 'AUD') return amt * 1.92;
+        if (upperCur === 'EUR' && upperBase === 'GBP') return amt * 0.85;
+        if (upperCur === 'GBP' && upperBase === 'EUR') return amt * 1.18;
+        if (upperCur === 'USD' && upperBase === 'GBP') return amt * 0.78;
+        if (upperCur === 'GBP' && upperBase === 'USD') return amt * 1.28;
+
         console.warn(`[fx] no rate for ${cur}->${baseCurrency}, using 1:1`);
         return amt;
       };
+
+      const accountById = new Map<string, any>((accRes.data || []).map((a: any) => [a.id, a]));
 
       if (txRes.data) {
         const ventureCat = (catRes.data || []).find((c: any) =>
@@ -386,6 +412,8 @@ export function useFinanceDataState() {
             const msg = (t.raw?.message || '').toLowerCase();
             const fullDesc = `${desc} ${merch} ${msg} ${tags.join(' ')}`;
             const numAmt = Number(t.amount) || 0;
+            const acc = t.account_id ? accountById.get(t.account_id) : undefined;
+            const txCurrency = (acc?.provider === 'up' ? 'AUD' : (t.currency || acc?.currency || baseCurrency)).toUpperCase();
 
             // Self-heal Gamma Salary payments (e.g. Monzo "10012726" with merchant "Gamma", >= £500)
             const isGammaSalary = numAmt >= 500 && (fullDesc.includes('gamma') || desc === '10012726');
@@ -418,7 +446,8 @@ export function useFinanceDataState() {
                 transfer_side: null,
                 transfer_status: null,
                 category_id: targetCatId,
-                base_amount: toBase(numAmt, t.currency),
+                currency: txCurrency,
+                base_amount: toBase(numAmt, txCurrency),
               };
             }
 
@@ -449,13 +478,15 @@ export function useFinanceDataState() {
                 transfer_side: null,
                 transfer_status: null,
                 category_id: targetCatId,
-                base_amount: toBase(numAmt, t.currency),
+                currency: txCurrency,
+                base_amount: toBase(numAmt, txCurrency),
               };
             }
 
             return {
               ...t,
-              base_amount: toBase(Number(t.amount) || 0, t.currency),
+              currency: txCurrency,
+              base_amount: toBase(Number(t.amount) || 0, txCurrency),
             };
           });
 
@@ -889,7 +920,16 @@ export function useFinanceDataState() {
       ...existing,
       ...updates,
       user_id: user.id,
-      fx_rates: updates.fx_rates || existing.fx_rates || { AUD_GBP: 0.52, GBP_AUD: 1.92 },
+      fx_rates: {
+        AUD_GBP: 0.52,
+        GBP_AUD: 1.92,
+        EUR_GBP: 0.85,
+        GBP_EUR: 1.18,
+        USD_GBP: 0.78,
+        GBP_USD: 1.28,
+        ...((existing.fx_rates as any) || {}),
+        ...((updates.fx_rates as any) || {}),
+      },
       base_currency: updates.base_currency || existing.base_currency || 'GBP',
       user_timezone: updates.user_timezone || existing.user_timezone || localStorage.getItem('gvb_user_timezone') || 'Europe/London',
     };

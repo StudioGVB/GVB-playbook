@@ -89,6 +89,51 @@ export function baseAmt(tx: any): number {
   return typeof v === 'number' ? v : (Number(tx?.amount) || 0);
 }
 
+/**
+ * Resolves the effective calendar month date for a transaction.
+ * Corporate / UK Payroll Rule:
+ * If an incoming salary / Gamma payment lands on or after the 24th of Month M (e.g. Oct 29 or 30),
+ * it is paid early to fund Month M+1 (November).
+ * It must be attributed to the 1st of Month M+1 so that:
+ * 1) Month M is not inflated by counting two months of salary (e.g. £7.4k in October).
+ * 2) Month M+1 is immediately funded and does not display "No income".
+ */
+export function getEffectiveTxMonthDate(
+  tx: any,
+  categories?: { id: string; name?: string; type?: string }[] | Map<string, any>
+): Date {
+  const rawDate = parseUkDate(tx.posted_at);
+  if (!rawDate || isNaN(rawDate.getTime())) return new Date();
+
+  const amt = baseAmt(tx);
+  if (tx.amount > 0 && Math.abs(amt) >= 500 && rawDate.getDate() >= 24) {
+    let cat: any = null;
+    if (categories) {
+      if (categories instanceof Map) {
+        cat = categories.get(tx.category_id || '');
+      } else if (Array.isArray(categories)) {
+        cat = categories.find(c => c.id === tx.category_id);
+      }
+    }
+    const catName = (cat?.name || '').toLowerCase();
+    const rawText = `${tx.merchant || ''} ${tx.description || ''} ${catName}`.toLowerCase();
+
+    const isSalaryIncome =
+      (rawText.includes('gamma') && (!rawText.includes('gamma network') || Math.abs(amt) >= 500)) ||
+      rawText.includes('salary') ||
+      rawText.includes('payroll') ||
+      catName.includes('gamma') ||
+      catName.includes('salary') ||
+      (cat?.type === 'income' && Math.abs(amt) >= 1500);
+
+    if (isSalaryIncome) {
+      return new Date(rawDate.getFullYear(), rawDate.getMonth() + 1, 1, 0, 0, 0, 0);
+    }
+  }
+
+  return rawDate;
+}
+
 // ---- Time-range helpers ----
 
 export function getDateRangeFromDays(days: number): { start: Date; end: Date } {

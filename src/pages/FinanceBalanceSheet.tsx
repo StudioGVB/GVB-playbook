@@ -3,7 +3,8 @@ import { format, startOfMonth, endOfMonth, addMonths } from 'date-fns';
 import { ChevronLeft, ChevronRight, TrendingUp, TrendingDown, Receipt, ShoppingBag, Scale } from 'lucide-react';
 import { useFinanceData } from '@/hooks/useFinanceData';
 import { useFixedExpenses, type FixedExpense, toMonthly } from '@/hooks/useFixedExpenses';
-import { baseAmt, formatCurrency, isExcludedSpendDate, parseUkDate } from '@/lib/financeUtils';
+import { baseAmt, formatCurrency, isExcludedSpendDate, parseUkDate, getEffectiveTxMonthDate } from '@/lib/financeUtils';
+import { deduplicateTransactions } from '@/lib/deduplication';
 import { Button } from '@/components/ui/button';
 
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -73,12 +74,15 @@ export default function FinanceBalanceSheet() {
     // used to avoid double-adding an auto-pay synthesis on top.
     const matchedFixedIds = new Set<string>();
 
-    for (const tx of transactions) {
-      const d = parseUkDate(tx.posted_at);
+    const { cleaned: dedupedTxs } = deduplicateTransactions(transactions);
+    let gammaSalaryCounted = false;
+
+    for (const tx of dedupedTxs) {
+      const d = getEffectiveTxMonthDate(tx, categories);
       if (d < monthStart || d > monthEnd) continue;
       if (isExcludedSpendDate(d)) continue;
       const cat = categories.find(c => c.id === tx.category_id);
-      const rawText = `${tx.merchant || ''} ${tx.description || ''}`.toLowerCase();
+      const rawText = `${tx.merchant || ''} ${tx.description || ''} ${cat?.name || ''}`.toLowerCase();
       const isIncomeCategory = cat?.type === 'income';
       const isGabriellaIncome = rawText.includes('gabriella') && tx.amount > 0 && !tx.transfer_group_id;
       const isIncomeKeyword = rawText.includes('batchbase') || rawText.includes('batch base') || rawText.includes('payroll') || rawText.includes('salary') || rawText.includes('venture') || rawText.includes('etsy') || isGabriellaIncome;
@@ -91,6 +95,13 @@ export default function FinanceBalanceSheet() {
       const amt = baseAmt(tx);
       if (amt > 0) {
         if (!tx.is_reimbursable && (cat?.type !== 'transfer' || isIncomeKeyword)) {
+          const isMonthlyGammaSalary =
+            amt >= 1000 &&
+            (rawText.includes('gamma') || rawText.includes('salary') || rawText.includes('payroll'));
+          if (isMonthlyGammaSalary) {
+            if (gammaSalaryCounted) continue;
+            gammaSalaryCounted = true;
+          }
           income += amt;
         }
       } else {
@@ -244,10 +255,10 @@ export default function FinanceBalanceSheet() {
     return computeRequiredGoalSavingsMonthly(
       finance.goals,
       finance.convertToBase,
-      new Date(),
+      monthStart,
       stats.income || expectedIncomeValue
     );
-  }, [finance.goals, finance.convertToBase, stats.income, expectedIncomeValue]);
+  }, [finance.goals, finance.convertToBase, monthStart, stats.income, expectedIncomeValue]);
 
   const poolSavingsMonthly = (snapshot?.split.goalSavingsAmount && snapshot.split.goalSavingsAmount > 0)
     ? snapshot.split.goalSavingsAmount

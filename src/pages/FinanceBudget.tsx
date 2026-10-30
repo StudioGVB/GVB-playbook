@@ -146,8 +146,16 @@ export default function FinanceBudget() {
       .reduce((sum, b) => sum + b.amount, 0);
   }, [boosts, weekStartKey]);
 
-  const baseCurrency = finance.settings?.base_currency || 'AUD';
-  const fxRates = (finance.settings?.fx_rates || {}) as Record<string, number>;
+  const baseCurrency = (finance.settings?.base_currency || 'GBP').toUpperCase();
+  const fxRates = {
+    AUD_GBP: 0.52,
+    GBP_AUD: 1.92,
+    EUR_GBP: 0.85,
+    GBP_EUR: 1.18,
+    USD_GBP: 0.78,
+    GBP_USD: 1.28,
+    ...((finance.settings?.fx_rates || {}) as Record<string, number>),
+  };
   const audToGbp = fxRates['AUD_GBP'] || 0.52;
   const fmt = (n: number) => formatCurrency(n, baseCurrency);
   const fmtGbp = (n: number) => formatCurrency(baseCurrency === 'GBP' ? n : n * audToGbp, 'GBP');
@@ -1494,6 +1502,9 @@ export default function FinanceBudget() {
                   const cat = catMap.get(tx.category_id || '');
                   const isEssential = essentialCatIds.has(tx.category_id || '');
                   const amt = Math.abs(baseAmt(tx));
+                  const txCur = (tx.currency || baseCurrency).toUpperCase();
+                  const isForeign = txCur !== baseCurrency;
+                  const nativeAmt = Math.abs(Number(tx.amount) || 0);
                   return (
                     <div
                       key={tx.id}
@@ -1547,10 +1558,15 @@ export default function FinanceBudget() {
                           </span>
                         </div>
                       </div>
-                      <div className="text-right">
+                      <div className="text-right flex flex-col items-end shrink-0">
                         <span className="text-sm font-bold tabular-nums text-slate-900">
                           {fmt(amt)}
                         </span>
+                        {isForeign && (
+                          <span className="text-[11px] font-medium text-slate-500 tabular-nums">
+                            {formatCurrency(nativeAmt, txCur)} {txCur}
+                          </span>
+                        )}
                       </div>
                     </div>
                   );

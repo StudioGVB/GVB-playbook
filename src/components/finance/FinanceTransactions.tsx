@@ -937,6 +937,19 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                               return isRealIncome && !formatted.startsWith('+') ? `+${formatted}` : formatted;
                             })()}
                           </p>
+                          {(() => {
+                            const cur = (tx.currency || finance.settings?.base_currency || 'GBP').toUpperCase();
+                            const base = (finance.settings?.base_currency || 'GBP').toUpperCase();
+                            if (cur && cur !== base) {
+                              const nativeFormatted = formatCurrency(tx.amount, cur);
+                              return (
+                                <p className="text-[10px] text-muted-foreground tabular-nums truncate">
+                                  {isRealIncome && !nativeFormatted.startsWith('+') ? `+${nativeFormatted}` : nativeFormatted} {cur}
+                                </p>
+                              );
+                            }
+                            return null;
+                          })()}
                         </div>
 
                         {/* Action Icons Toolbar (Comfortable fixed-width container ensuring all action buttons sit cleanly on the right) */}
