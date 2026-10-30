@@ -496,6 +496,77 @@ export function computeEssentialVariableMonthly(
   return { monthly: weeklyAvg * 4.33, normalWeeksUsed: last4Normal.length, excludedWeeksCount: excludedCount };
 }
 
+export function computeNormalFunVariableMonthly(
+  transactions: FinanceTransaction[],
+  categories: FinanceCategory[],
+  weekTypeMap?: Map<string, WeekType>,
+  trips: FinanceTrip[] = [],
+  referenceDate: Date = new Date(),
+): { monthly: number; weekly: number; normalWeeksUsed: number } {
+  const now = startOfWeek(referenceDate, { weekStartsOn: 1 });
+  const catMap = new Map(categories.map(c => [c.id, c]));
+  const weeklyTotals: { weekKey: string; total: number; isNormal: boolean }[] = [];
+
+  const resolveWeekType = (key: string): WeekType => {
+    if (!weekTypeMap) return 'normal';
+    if (typeof (weekTypeMap as any).get === 'function') return (weekTypeMap as any).get(key) || 'normal';
+    if (typeof (weekTypeMap as any) === 'function') {
+      try {
+        const map = (weekTypeMap as any)();
+        return map?.get?.(key) || 'normal';
+      } catch { return 'normal'; }
+    }
+    return 'normal';
+  };
+
+  for (let w = 1; w <= 12; w++) {
+    const ws = startOfWeek(subWeeks(now, w), { weekStartsOn: 1 });
+    const we = startOfWeek(subWeeks(now, w - 1), { weekStartsOn: 1 });
+    const weekKey = format(ws, 'yyyy-MM-dd');
+    const wType = resolveWeekType(weekKey);
+    const overlapsExclusion = weekOverlapsExclusion(ws, we);
+    const overlapsTrip = trips.some(t => {
+      if (!t.start_date || !t.end_date) return false;
+      const ts = parseUkDate(t.start_date);
+      const te = parseUkDate(t.end_date);
+      return ws < te && we > ts;
+    });
+
+    const isNormal = wType === 'normal' && !overlapsExclusion && !overlapsTrip;
+
+    let weekTotal = 0;
+    for (const tx of transactions) {
+      if (tx.is_transfer || tx.is_reimbursable || tx.is_fixed || (tx as any).fixed_expense_id) continue;
+      if (tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed' || isInternalTransferTx(tx)) continue;
+      if ((tx as any).goal_id || (tx as any).is_travel_spend || (tx as any).trip_id) continue;
+      if (!tx.category_id) continue;
+      const cat = catMap.get(tx.category_id);
+      if (!cat) continue;
+      if (cat.exclude_from_reports || cat.type === 'fixed' || cat.type === 'income' || cat.type === 'transfer') continue;
+      if (cat.is_essential) continue; // Only non-essential variable (fun) spend
+
+      const d = parseUkDate(tx.posted_at);
+      if (isExcludedSpendDate(d)) continue;
+      if (isInAnyTrip(d, trips)) continue;
+      if (d >= ws && d < we) {
+        if ((tx as any).is_refund && tx.amount > 0) {
+          weekTotal -= Math.abs(baseAmt(tx));
+        } else if (tx.amount < 0) {
+          weekTotal += Math.abs(baseAmt(tx));
+        }
+      }
+    }
+    weeklyTotals.push({ weekKey, total: Math.max(0, weekTotal), isNormal });
+  }
+
+  const normalWeeks = weeklyTotals.filter(w => w.isNormal);
+  const last4Normal = normalWeeks.slice(0, 4);
+  if (last4Normal.length === 0) return { monthly: 433, weekly: 100, normalWeeksUsed: 0 };
+
+  const weeklyAvg = last4Normal.reduce((s, w) => s + w.total, 0) / last4Normal.length;
+  return { monthly: weeklyAvg * 4.33, weekly: weeklyAvg, normalWeeksUsed: last4Normal.length };
+}
+
 export function computePolicySnapshot(
   assumptions: FinanceAssumptions,
   accounts: FinanceAccount[],
@@ -979,16 +1050,15 @@ export function computeMoneySplit(
   const goalSavingsAmount = poolSavingsMonthly;
   const goalSavingsPercent = effectiveIncome > 0 ? (goalSavingsAmount / effectiveIncome) * 100 : 0;
 
-  // 5. Combined Weekly Budget Cap: Essentials + Fun <= £200/wk total.
-  // Any surplus income above Fixed Bills + Goal Pots + £200/wk Variable Living Cap goes into General Savings.
+  // 5. Weekly Fun Budget = Based on rolling 4-normal-week historical average of discretionary spending
+  // (excluding trip weeks, non-normal weeks, and exclusion windows), bounded by actual cashflow leftover.
+  // Any surplus income above Fixed Bills + Goal Pots + Average Variable Living & Fun is swept into General Savings.
   const rawLeftoverMonthly = Math.max(0, effectiveIncome - monthlyMandatory - essentialVariable - goalSavingsAmount);
-  const weeklyEssential = essentialVariable / 4.33;
-  const TOTAL_WEEKLY_VARIABLE_CAP = 200;
-  const maxFunAfterEssentials = Math.max(50, TOTAL_WEEKLY_VARIABLE_CAP - weeklyEssential);
-  const userFunCap = (assumptions.weekly_fun_budget && assumptions.weekly_fun_budget > 0 && assumptions.weekly_fun_budget < 150)
-    ? Math.min(assumptions.weekly_fun_budget, maxFunAfterEssentials)
-    : maxFunAfterEssentials;
-  const weeklyFunAmount = Math.min(userFunCap, rawLeftoverMonthly / 4.33);
+  const funResult = computeNormalFunVariableMonthly(transactions, categories, weekTypeMap, trips, now);
+  const historicalWeeklyFun = funResult.normalWeeksUsed > 0 ? funResult.weekly : 100;
+  // Use historical normal-week fun average as the baseline (with a £75/wk floor so a quiet month doesn't starve the budget)
+  const targetWeeklyFun = Math.max(75, historicalWeeklyFun);
+  const weeklyFunAmount = Math.min(targetWeeklyFun, rawLeftoverMonthly / 4.33);
 
   const funAmount = weeklyFunAmount * 4.33;
   const funPercent = effectiveIncome > 0 ? (funAmount / effectiveIncome) * 100 : 0;
