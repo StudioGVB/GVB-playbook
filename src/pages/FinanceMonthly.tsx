@@ -107,10 +107,10 @@ export default function FinanceMonthly() {
     return computePolicySnapshot(
       assumptions, finance.accounts, finance.transactions,
       finance.categories, finance.goals, finance.convertToBase,
-      fixedExpensesMonthly, totalBoostThisWeek, wtMap(), [], fixedExpensesMonthlyAll,
+      fixedExpensesMonthly, totalBoostThisWeek, wtMap(), trips, fixedExpensesMonthlyAll,
       midMonthRef,
     );
-  }, [assumptions, finance.accounts, finance.transactions, finance.categories, finance.goals, finance.convertToBase, fixedExpensesMonthly, fixedExpensesMonthlyAll, totalBoostThisWeek, wtMap, selectedMonth]);
+  }, [assumptions, finance.accounts, finance.transactions, finance.categories, finance.goals, finance.convertToBase, fixedExpensesMonthly, fixedExpensesMonthlyAll, totalBoostThisWeek, wtMap, trips, selectedMonth]);
 
   const baseCurrency = finance.settings?.base_currency || 'GBP';
   const fmt = (n: number) => formatCurrency(n, baseCurrency);

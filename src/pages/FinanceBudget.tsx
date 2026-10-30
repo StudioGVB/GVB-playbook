@@ -227,7 +227,7 @@ export default function FinanceBudget() {
     const todayWeekStart = startOfWeek(today, { weekStartsOn: 1 });
     const prevWeekStart = startOfWeek(subDays(todayWeekStart, 1), { weekStartsOn: 1 });
     const prevWeekKey = format(prevWeekStart, 'yyyy-MM-dd');
-    const SETTLE_VERSION = 4;
+    const SETTLE_VERSION = 5;
 
     const prevWeekSpend = computeWeekVariableSpend(finance.transactions, finance.categories, prevWeekStart, trips);
     const prevEssentialSpent = prevWeekSpend.essentialSpent;

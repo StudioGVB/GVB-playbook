@@ -979,20 +979,26 @@ export function computeMoneySplit(
   const goalSavingsAmount = poolSavingsMonthly;
   const goalSavingsPercent = effectiveIncome > 0 ? (goalSavingsAmount / effectiveIncome) * 100 : 0;
 
-  // 5. Fun Money = Genuine Leftover (Income - Fixed Bills - Essential Living - Pool Savings)
-  const calculatedFunMonthly = Math.max(0, effectiveIncome - monthlyMandatory - essentialVariable - goalSavingsAmount);
-  
-  // Strictly enforce true dynamic cashflow leftover so that 100% of savings goals and bills are protected first
-  const weeklyFunAmount = calculatedFunMonthly / 4.33;
+  // 5. Fun Money = Capped at user's weekly_fun_budget (default £150/wk), or genuine cashflow leftover if lower.
+  // When goal pots reach 100% funded, freed-up income goes into Base Savings / Emergency Reserve Ladder
+  // rather than inflating weekly Fun Money.
+  const rawLeftoverMonthly = Math.max(0, effectiveIncome - monthlyMandatory - essentialVariable - goalSavingsAmount);
+  const maxWeeklyFunCap = (assumptions.weekly_fun_budget && assumptions.weekly_fun_budget > 0)
+    ? assumptions.weekly_fun_budget
+    : 150;
+  const weeklyFunAmount = Math.min(maxWeeklyFunCap, rawLeftoverMonthly / 4.33);
 
   const funAmount = weeklyFunAmount * 4.33;
   const funPercent = effectiveIncome > 0 ? (funAmount / effectiveIncome) * 100 : 0;
 
+  const baseSavingsAmount = Math.max(0, rawLeftoverMonthly - funAmount);
+  const baseSavingsPercent = effectiveIncome > 0 ? (baseSavingsAmount / effectiveIncome) * 100 : 0;
+
   return {
     mandatoryPercent,
     mandatoryAmount: monthlyMandatory,
-    baseSavingsPercent: 0,
-    baseSavingsAmount: 0,
+    baseSavingsPercent,
+    baseSavingsAmount,
     goalSavingsPercent,
     goalSavingsAmount,
     funPercent,
