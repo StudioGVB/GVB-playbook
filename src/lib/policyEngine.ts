@@ -597,9 +597,9 @@ export function computePolicySnapshot(
     weeklyGross = split.monthlyIncome / 4.33;
   }
 
-  // Apply weekly boost
+  // Apply weekly boost (side income is saved rather than dumped into weekly fun spending)
   const boostAmount = weeklyBoostAmount ?? 0;
-  let weeklyFunBudget = baseWeeklyFun + boostAmount + (!isDrawdownMode ? actualIncome.otherWeeklyBonus : 0);
+  let weeklyFunBudget = baseWeeklyFun + boostAmount;
 
   const spentThisWeek = computeWeeklyFunSpend(transactions, categories, weekStart, undefined, trips);
 
@@ -979,14 +979,16 @@ export function computeMoneySplit(
   const goalSavingsAmount = poolSavingsMonthly;
   const goalSavingsPercent = effectiveIncome > 0 ? (goalSavingsAmount / effectiveIncome) * 100 : 0;
 
-  // 5. Fun Money = Capped at user's weekly_fun_budget (default £150/wk), or genuine cashflow leftover if lower.
-  // When goal pots reach 100% funded, freed-up income goes into Base Savings / Emergency Reserve Ladder
-  // rather than inflating weekly Fun Money.
+  // 5. Combined Weekly Budget Cap: Essentials + Fun <= £200/wk total.
+  // Any surplus income above Fixed Bills + Goal Pots + £200/wk Variable Living Cap goes into General Savings.
   const rawLeftoverMonthly = Math.max(0, effectiveIncome - monthlyMandatory - essentialVariable - goalSavingsAmount);
-  const maxWeeklyFunCap = (assumptions.weekly_fun_budget && assumptions.weekly_fun_budget > 0)
-    ? assumptions.weekly_fun_budget
-    : 150;
-  const weeklyFunAmount = Math.min(maxWeeklyFunCap, rawLeftoverMonthly / 4.33);
+  const weeklyEssential = essentialVariable / 4.33;
+  const TOTAL_WEEKLY_VARIABLE_CAP = 200;
+  const maxFunAfterEssentials = Math.max(50, TOTAL_WEEKLY_VARIABLE_CAP - weeklyEssential);
+  const userFunCap = (assumptions.weekly_fun_budget && assumptions.weekly_fun_budget > 0 && assumptions.weekly_fun_budget < 150)
+    ? Math.min(assumptions.weekly_fun_budget, maxFunAfterEssentials)
+    : maxFunAfterEssentials;
+  const weeklyFunAmount = Math.min(userFunCap, rawLeftoverMonthly / 4.33);
 
   const funAmount = weeklyFunAmount * 4.33;
   const funPercent = effectiveIncome > 0 ? (funAmount / effectiveIncome) * 100 : 0;
