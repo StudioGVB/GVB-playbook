@@ -225,7 +225,13 @@ export default function FinanceIncome() {
     const isExplicitIncome = cat?.type === 'income';
     if (!isExplicitIncome && isInternalTransfer(tx)) return false;
 
-    const d = parseUkDate(tx.posted_at);
+    const rawDate = parseUkDate(tx.posted_at);
+    const rawText = `${tx.merchant || ''} ${tx.description || ''} ${cat?.name || ''}`.toLowerCase();
+    const isGammaSalary = baseAmt(tx) >= 1000 && (rawText.includes('gamma') || rawText.includes('salary'));
+    const d = (isGammaSalary && rawDate.getDate() >= 24)
+      ? new Date(rawDate.getFullYear(), rawDate.getMonth() + 1, 1, 0, 0, 0, 0)
+      : rawDate;
+
     return d >= monthStart && d <= monthEnd;
   }), [transactions, categories, monthStart, monthEnd]);
 

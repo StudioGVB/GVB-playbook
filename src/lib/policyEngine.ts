@@ -216,7 +216,15 @@ export function computeActualSpendingIncome(
   const allClassified = dedupedTxs
     .map(tx => {
       const info = resolveStreamName(tx);
-      return info ? { tx, ...info, date: parseUkDate(tx.posted_at) } : null;
+      if (!info) return null;
+      const rawDate = parseUkDate(tx.posted_at);
+      // Gamma salary is always paid on the last working day of Month M (>= 24th) to fund Month M+1.
+      // Attribute any Gamma salary paid on/after the 24th to the 1st of Month M+1 so it funds
+      // next month's budget (starting the first week of Month M+1) without altering Month M.
+      const effectiveDate = (info.kind === 'gamma' && baseAmt(tx) >= 1000 && rawDate.getDate() >= 24)
+        ? new Date(rawDate.getFullYear(), rawDate.getMonth() + 1, 1, 0, 0, 0, 0)
+        : rawDate;
+      return { tx, ...info, date: effectiveDate, rawDate };
     })
     .filter((x): x is NonNullable<typeof x> => x !== null);
 
@@ -229,57 +237,32 @@ export function computeActualSpendingIncome(
   let cycleEnd = curMonthEnd;
   let nextPayday = new Date(now.getFullYear(), now.getMonth() + 1, 0);
 
-  // If no Gamma pay has landed yet this month (e.g. in November when November's payday was Oct 29),
-  // carry forward the previous month's latest Gamma paycheck + any deposits since that payday,
-  // while keeping all current-month Venture & side-income deposits.
+  // Fallback if no Gamma pay is mapped to the current month yet
   const hasCurrentMonthGamma = monthItems.some(x => x.kind === 'gamma' && baseAmt(x.tx) >= 1000);
   if (!hasCurrentMonthGamma) {
     const prevMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1, 0, 0, 0, 0);
     const prevMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
     const prevItems = allClassified.filter(x => x.date >= prevMonthStart && x.date <= prevMonthEnd);
-    const prevGammaItems = prevItems
-      .filter(x => x.kind === 'gamma' && baseAmt(x.tx) >= 1000)
-      .sort((a, b) => b.date.getTime() - a.date.getTime());
-
-    if (prevGammaItems.length > 0) {
-      const latestPrevGamma = prevGammaItems[0];
-      // If previous month's Gamma salary landed on/after the 24th (funding current month),
-      // combine that paycheck (and any post-payday items) with current month's deposits
-      if (latestPrevGamma.date.getDate() >= 24) {
-        const postPaydayPrevItems = prevItems.filter(
-          x => x.tx.id === latestPrevGamma.tx.id || (x.kind !== 'gamma' && x.date > latestPrevGamma.date)
-        );
-        monthItems = [...postPaydayPrevItems, ...monthItems];
-        cycleStart = latestPrevGamma.date;
-      } else {
-        monthItems = prevItems;
-        isLate = true;
-        cycleStart = prevMonthStart;
-        cycleEnd = prevMonthEnd;
-        nextPayday = new Date(now.getFullYear(), now.getMonth(), 0);
-      }
+    const curSum = monthItems.reduce((s, x) => s + baseAmt(x.tx), 0);
+    const prevSum = prevItems.reduce((s, x) => s + baseAmt(x.tx), 0);
+    if (prevItems.length > 0 && (prevItems.some(x => x.kind === 'gamma') || prevSum > curSum)) {
+      monthItems = prevItems;
+      isLate = true;
+      cycleStart = prevMonthStart;
+      cycleEnd = prevMonthEnd;
+      nextPayday = new Date(now.getFullYear(), now.getMonth(), 0);
     }
   }
 
-  // If a late-month Gamma salary (>= 24th, e.g. Oct 29 for November) has landed in the current month,
-  // it starts the new pay cycle: exclude earlier deposits from Oct 1–28 so old October income
-  // (+£1,000) doesn't get added on top of the new November paycheck and inflate Fun Money.
+  // Ensure at most one monthly Gamma salary (>= £1,000) is counted per budget month
   const gammaSalaryItems = monthItems
     .filter(x => x.kind === 'gamma' && baseAmt(x.tx) >= 1000)
-    .sort((a, b) => b.date.getTime() - a.date.getTime());
-  if (gammaSalaryItems.length > 0) {
-    const latestGamma = gammaSalaryItems[0];
-    if (latestGamma.date.getDate() >= 24) {
-      cycleStart = latestGamma.date;
-      monthItems = monthItems.filter(
-        x => x.tx.id === latestGamma.tx.id || (x.kind !== 'gamma' && x.date > latestGamma.date)
-      );
-    } else if (gammaSalaryItems.length > 1) {
-      const keepGammaTxId = latestGamma.tx.id;
-      monthItems = monthItems.filter(
-        x => !(x.kind === 'gamma' && baseAmt(x.tx) >= 1000 && x.tx.id !== keepGammaTxId)
-      );
-    }
+    .sort((a, b) => b.rawDate.getTime() - a.rawDate.getTime());
+  if (gammaSalaryItems.length > 1) {
+    const keepGammaTxId = gammaSalaryItems[0].tx.id;
+    monthItems = monthItems.filter(
+      x => !(x.kind === 'gamma' && baseAmt(x.tx) >= 1000 && x.tx.id !== keepGammaTxId)
+    );
   }
 
   let gamma = 0;
@@ -562,10 +545,9 @@ export function computePolicySnapshot(
   // Target savings
   const targetSavings = assumptions.target_savings ?? 0;
 
-  // Determine drawdown mode
-  // Spending income = REAL Gamma + Venture deposits that hit the account this calendar month.
-  // If no Gamma pay has landed yet this month, use last month's Gamma + Venture deposits.
-  const actualIncome = computeActualSpendingIncome(transactions, categories, now);
+  // Spending income is anchored to weekStart (the Monday of the active week) so that a
+  // last-working-day Gamma paycheck for Month M+1 never changes the final week of Month M mid-week.
+  const actualIncome = computeActualSpendingIncome(transactions, categories, weekStart);
   const monthlyIncome = actualIncome.total;
   const isDrawdownMode = monthlyIncome === 0;
 

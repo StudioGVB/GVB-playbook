@@ -198,9 +198,14 @@ export default function FinancePoolsPage() {
 
   const snapshot = useMemo(() => {
     if (!assumptions || finance.loading) return null;
+    const now = new Date();
+    const poolRefDate = now.getDate() >= 24
+      ? new Date(now.getFullYear(), now.getMonth() + 1, 15)
+      : now;
     return computePolicySnapshot(
       assumptions, finance.accounts, finance.transactions, finance.categories,
       finance.goals, finance.convertToBase, fixedMonthlyTotal, undefined, wtMap, [], fixedMonthlyTotalAll,
+      poolRefDate,
     );
   }, [assumptions, finance.accounts, finance.transactions, finance.categories, finance.goals, finance.convertToBase, finance.loading, fixedMonthlyTotal, fixedMonthlyTotalAll, wtMap]);
 

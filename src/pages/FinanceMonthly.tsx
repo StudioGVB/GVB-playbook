@@ -94,21 +94,23 @@ export default function FinanceMonthly() {
   const { trips } = useFinanceTrips();
   const { weekTypeMap: wtMap } = useWeekTypes();
 
-  const snapshot = useMemo(() => {
-    if (!assumptions) return null;
-    return computePolicySnapshot(
-      assumptions, finance.accounts, finance.transactions,
-      finance.categories, finance.goals, finance.convertToBase,
-      fixedExpensesMonthly, totalBoostThisWeek, wtMap(), [], fixedExpensesMonthlyAll,
-    );
-  }, [assumptions, finance.accounts, finance.transactions, finance.categories, finance.goals, finance.convertToBase, fixedExpensesMonthly, fixedExpensesMonthlyAll, totalBoostThisWeek, wtMap]);
-
   const [selectedMonth, setSelectedMonth] = useState(new Date());
   const [activeTab, setActiveTab] = useState<string>('overview');
   const [selectedBenchmarkId, setSelectedBenchmarkId] = useState<string>('manchester_avg');
   const monthStart = startOfMonth(selectedMonth);
   const monthEnd = endOfMonth(selectedMonth);
   const monthLabel = format(monthStart, 'MMMM yyyy');
+
+  const snapshot = useMemo(() => {
+    if (!assumptions) return null;
+    const midMonthRef = new Date(selectedMonth.getFullYear(), selectedMonth.getMonth(), 15);
+    return computePolicySnapshot(
+      assumptions, finance.accounts, finance.transactions,
+      finance.categories, finance.goals, finance.convertToBase,
+      fixedExpensesMonthly, totalBoostThisWeek, wtMap(), [], fixedExpensesMonthlyAll,
+      midMonthRef,
+    );
+  }, [assumptions, finance.accounts, finance.transactions, finance.categories, finance.goals, finance.convertToBase, fixedExpensesMonthly, fixedExpensesMonthlyAll, totalBoostThisWeek, wtMap, selectedMonth]);
 
   const baseCurrency = finance.settings?.base_currency || 'GBP';
   const fmt = (n: number) => formatCurrency(n, baseCurrency);
@@ -139,14 +141,26 @@ export default function FinanceMonthly() {
     [finance.transactions]
   );
 
-  // Filter transactions for selected month (from canonical deduplicated list)
+  const getEffectiveTxMonthDate = useCallback((tx: any): Date => {
+    const rawDate = parseUkDate(tx.posted_at);
+    if (tx.amount > 0 && baseAmt(tx) >= 1000 && rawDate.getDate() >= 24) {
+      const cat = catMap.get(tx.category_id || '');
+      const rawText = `${tx.merchant || ''} ${tx.description || ''} ${cat?.name || ''}`.toLowerCase();
+      if (rawText.includes('gamma') || rawText.includes('salary')) {
+        return new Date(rawDate.getFullYear(), rawDate.getMonth() + 1, 1, 0, 0, 0, 0);
+      }
+    }
+    return rawDate;
+  }, [catMap]);
+
+  // Filter transactions for selected month (from canonical deduplicated list, shifting last-working-day Gamma paychecks to Month M+1)
   const monthTxns = useMemo(() => {
     return dedupedAllTxns.filter(tx => {
       if (tx.is_reimbursable) return false;
-      const d = parseUkDate(tx.posted_at);
+      const d = getEffectiveTxMonthDate(tx);
       return d >= monthStart && d <= monthEnd;
     });
-  }, [dedupedAllTxns, monthStart, monthEnd]);
+  }, [dedupedAllTxns, monthStart, monthEnd, getEffectiveTxMonthDate]);
 
   // Previous month transactions for comparison
   const prevMonthStart = startOfMonth(subMonths(selectedMonth, 1));
@@ -154,10 +168,10 @@ export default function FinanceMonthly() {
   const prevMonthTxns = useMemo(() => {
     return dedupedAllTxns.filter(tx => {
       if (tx.is_reimbursable) return false;
-      const d = parseUkDate(tx.posted_at);
+      const d = getEffectiveTxMonthDate(tx);
       return d >= prevMonthStart && d <= prevMonthEnd;
     });
-  }, [dedupedAllTxns, prevMonthStart, prevMonthEnd]);
+  }, [dedupedAllTxns, prevMonthStart, prevMonthEnd, getEffectiveTxMonthDate]);
 
   // Treat transaction as fixed bill if linked to fixed expense, has is_fixed flag, or belongs to fixed category
   const isFixedTx = useCallback((tx: any): boolean => {
