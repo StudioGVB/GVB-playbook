@@ -625,13 +625,40 @@ export function computePolicySnapshot(
     weeklyFunBudget = 0;
   }
 
-  // Last week performance & overspend deduction
+  // Last week performance & overspend deduction:
+  // Evaluate last week's budget at lastWeekStart so entering a new month or changing this week's
+  // essential average never distorts last week's actual budget & overspend!
   const lastWeekStart = subWeeks(weekStart, 1);
-  const lastWeekFunSpent = computeWeeklyFunSpend(transactions, categories, lastWeekStart, weekStart, trips);
-  const lastWeekEssentialSpent = computeWeeklyEssentialSpend(transactions, categories, lastWeekStart, weekStart, trips);
+  const lastWeekSpendSummary = computeWeekVariableSpend(transactions, categories, lastWeekStart, trips);
+  const lastWeekFunSpent = lastWeekSpendSummary.funSpent;
+  const lastWeekEssentialSpent = lastWeekSpendSummary.essentialSpent;
+
+  const lastWeekEssentialResult = computeEssentialVariableMonthly(transactions, categories, weekTypeMap, trips, lastWeekStart);
+  const lastWeekEssentialVariable = Math.max(
+    assumptions.estimated_essential_variable ?? 0,
+    lastWeekEssentialResult.monthly,
+  );
+  const lastWeekEssentialBudget = lastWeekEssentialVariable / 4.33;
+  const lastWeekActualIncome = computeActualSpendingIncome(transactions, categories, lastWeekStart);
+  const lastWeekSplit = lastWeekActualIncome.total > 0
+    ? computeMoneySplit(
+        assumptions,
+        transactions,
+        categories,
+        goals,
+        convertToBase,
+        fixedExpensesMonthlyAll ?? fixedMonthly,
+        lastWeekActualIncome.total,
+        weekTypeMap,
+        trips,
+        lastWeekStart,
+      )
+    : split;
+  const lastWeekBaseFun = lastWeekSplit.weeklyFunAmount + (lastWeekActualIncome.total > 0 ? lastWeekActualIncome.otherWeeklyBonus : 0);
+
   const lastWeekOverspend = Math.max(
     0,
-    (lastWeekEssentialSpent + lastWeekFunSpent) - (weeklyEssentialBudget + baseWeeklyFun),
+    Math.round(((lastWeekEssentialSpent + lastWeekFunSpent) - (lastWeekEssentialBudget + lastWeekBaseFun)) * 100) / 100,
   );
 
   // Carry-forward debt: only applies to the week matching assumptions.last_debt_week,
@@ -650,7 +677,7 @@ export function computePolicySnapshot(
   weeklyFunBudget = Math.max(0, weeklyFunBudget - effectiveDebt);
 
   // Underspent rollover is NOT added to weeklyFunBudget (it is swept into Savings Stash by auto-settle)
-  const rollover = Math.max(0, (weeklyEssentialBudget + baseWeeklyFun) - (lastWeekEssentialSpent + lastWeekFunSpent));
+  const rollover = Math.max(0, (lastWeekEssentialBudget + lastWeekBaseFun) - (lastWeekEssentialSpent + lastWeekFunSpent));
 
   // Bidirectional overspend: each category's excess eats into the other
   const essentialSpentThisWeek = computeWeeklyEssentialSpend(transactions, categories, weekStart, undefined, trips);

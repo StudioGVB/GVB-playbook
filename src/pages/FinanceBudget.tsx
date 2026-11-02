@@ -227,9 +227,10 @@ export default function FinanceBudget() {
     const todayWeekStart = startOfWeek(today, { weekStartsOn: 1 });
     const prevWeekStart = startOfWeek(subDays(todayWeekStart, 1), { weekStartsOn: 1 });
     const prevWeekKey = format(prevWeekStart, 'yyyy-MM-dd');
-    const SETTLE_VERSION = 9;
+    const SETTLE_VERSION = 10;
 
-    const prevWeekSpend = computeWeekVariableSpend(finance.transactions, finance.categories, prevWeekStart, trips);
+    const { cleaned: dedupedTxsForSettle } = deduplicateTransactions(finance.transactions);
+    const prevWeekSpend = computeWeekVariableSpend(dedupedTxsForSettle, finance.categories, prevWeekStart, trips);
     const prevEssentialSpent = prevWeekSpend.essentialSpent;
     const prevFunSpent = prevWeekSpend.funSpent;
     const prevWeekBoost = boosts
@@ -238,7 +239,7 @@ export default function FinanceBudget() {
     const prevWeekSnapshot = computePolicySnapshot(
       assumptions,
       finance.accounts,
-      finance.transactions,
+      dedupedTxsForSettle,
       finance.categories,
       finance.goals,
       finance.convertToBase,
@@ -250,8 +251,8 @@ export default function FinanceBudget() {
       prevWeekStart,
     );
 
-    // Strictly match last week's budget: last week's Essentials + Base Fun + last week's Boosts
-    const totalBudget = prevWeekSnapshot.weeklyEssentialBudget + prevWeekSnapshot.baseWeeklyFun + prevWeekBoost;
+    // Strictly match last week's displayed budget: last week's Essentials + last week's Weekly Fun Budget
+    const totalBudget = prevWeekSnapshot.weeklyEssentialBudget + prevWeekSnapshot.weeklyFunBudget;
     const totalSpent = prevEssentialSpent + prevFunSpent;
     const netDifference = Math.round((totalBudget - totalSpent) * 100) / 100;
 
@@ -261,21 +262,23 @@ export default function FinanceBudget() {
       meta.last_settled_week === prevWeekKey &&
       meta.settled_version === SETTLE_VERSION;
 
-    // If already settled under v4 and the stash delta matches current netDifference, skip
     const expectedStashDelta = netDifference > 0 ? netDifference : 0;
+    const expectedOverspend = netDifference < 0 ? Math.abs(netDifference) : 0;
     const deltaMatches =
       isCurrentVersionSettled &&
-      Math.abs((meta.last_settled_stash_delta ?? 0) - expectedStashDelta) <= 0.02;
+      Math.abs((meta.last_settled_stash_delta ?? 0) - expectedStashDelta) <= 0.02 &&
+      Math.abs((meta.last_cover?.overspend ?? 0) - expectedOverspend) <= 0.02;
 
-    if (settleRef.current === `${prevWeekKey}_${expectedStashDelta.toFixed(2)}`) return;
+    const settleKey = `${prevWeekKey}_v${SETTLE_VERSION}_${netDifference.toFixed(2)}`;
+    if (settleRef.current === settleKey) return;
     if (deltaMatches) {
-      settleRef.current = `${prevWeekKey}_${expectedStashDelta.toFixed(2)}`;
+      settleRef.current = settleKey;
       localStorage.setItem(localKey, 'true');
       return;
     }
 
     const doSettle = async () => {
-      settleRef.current = `${prevWeekKey}_${expectedStashDelta.toFixed(2)}`;
+      settleRef.current = settleKey;
       const thisWeekKey = format(todayWeekStart, 'yyyy-MM-dd');
       let stashDelta = 0;
       let newBorrowed = { ...(meta.borrowed || {}) };
@@ -412,7 +415,7 @@ export default function FinanceBudget() {
           ...(meta.closed_weeks || {}),
           [prevWeekKey]: {
             essentialBudget: Math.round(prevWeekSnapshot.weeklyEssentialBudget * 100) / 100,
-            baseFunBudget: Math.round(prevWeekSnapshot.baseWeeklyFun * 100) / 100,
+            baseFunBudget: Math.round((prevWeekSnapshot.weeklyFunBudget - prevWeekBoost) * 100) / 100,
             boost: Math.round(prevWeekBoost * 100) / 100,
             totalBudget: Math.round(totalBudget * 100) / 100,
             essentialSpent: Math.round(prevEssentialSpent * 100) / 100,
