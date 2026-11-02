@@ -24,9 +24,9 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import MonthlyPotPlanner from '@/components/finance/MonthlyPotPlanner';
 import FinanceBalanceSheet from '@/pages/FinanceBalanceSheet';
 import WeeklyPoolSavingsCard from '@/components/finance/WeeklyPoolSavingsCard';
-import { format, startOfMonth, endOfMonth, parseISO } from 'date-fns';
+import { format, startOfMonth, endOfMonth, parseISO, isSameMonth } from 'date-fns';
 import { detectPaycheck, calculatePaycheckWaterfall, isPaycheckProcessed, markPaycheckProcessed, unmarkPaycheckProcessed, savePaycheckAllocationMeta, getPaycheckAllocationMeta } from '@/lib/paycheckEngine';
-import { baseAmt } from '@/lib/financeUtils';
+import { baseAmt, parseUkDate } from '@/lib/financeUtils';
 import { evaluatePoolFeasibility } from '@/lib/feasibilityEngine';
 import { computeEmergencyLadder } from '@/lib/emergencyLadderEngine';
 import EmergencyLadderModal from '@/components/finance/EmergencyLadderModal';
@@ -101,7 +101,7 @@ interface CapOverflowInfo {
 export default function FinancePoolsPage() {
   const finance = useFinanceData();
   const { assumptions, loading: assumptionsLoading, update: updateAssumptions } = useFinanceAssumptions();
-  const { monthlyTotalInternal: fixedMonthlyTotal, monthlyTotal: fixedMonthlyTotalAll } = useFixedExpenses();
+  const { expenses: fixedExpenses, monthlyTotalInternal: fixedMonthlyTotal, monthlyTotal: fixedMonthlyTotalAll } = useFixedExpenses();
   const { totalBoostThisWeek } = useWeeklyBoosts();
   const { weekTypeMap } = useWeekTypes();
   const { trips } = useFinanceTrips();
@@ -225,10 +225,75 @@ export default function FinancePoolsPage() {
   const rawBufferMonths = assumptions?.buffer_months ?? 1;
   const actualMonthlySurvival = snapshot?.emergencySurvivalMonthly ?? snapshot?.survivalCostMonthly ?? (fixedMonthlyTotal + essentialVariable);
 
+  // Paycheck Detection & Target Month
+  const detectedPaycheck = useMemo(
+    () => detectPaycheck(finance.transactions, finance.categories),
+    [finance.transactions, finance.categories]
+  );
+
+  const targetMonthDate = useMemo(() => {
+    const now = new Date();
+    return now.getDate() >= 25 ? new Date(now.getFullYear(), now.getMonth() + 1, 1) : now;
+  }, []);
+
+  const targetMonthLabel = detectedPaycheck?.targetMonthName || format(targetMonthDate, 'MMMM yyyy');
+  const isCurrentMonth = useMemo(() => isSameMonth(targetMonthDate, new Date()), [targetMonthDate]);
+
   // Living & Monthly Budget Pool target (Priority #1: must be ring-fenced before Emergency Fund ladder upgrades)
   const effectiveFixedMonthly = fixedMonthlyTotalAll || fixedMonthlyTotal;
   const monthlyFunAllowance = (snapshot?.baseWeeklyFun ?? 0) * 4.33;
   const monthlyLivingTarget = effectiveFixedMonthly + essentialVariable + monthlyFunAllowance;
+
+  // Track living expenses already paid so far this month (Fixed Bills / Rent, Essentials, Discretionary)
+  // When bills like rent are paid on the 1st, they are paid OUT OF this month's living reserve.
+  // Ring-fencing must only reserve the REMAINING unpaid bills so emergency cash is never drained by paid rent.
+  const { fixedPaidSoFar, variableSpentSoFar } = useMemo(() => {
+    const curStart = startOfMonth(new Date());
+    const curEnd = endOfMonth(new Date());
+    let fixedPaid = 0;
+    let variableSpent = 0;
+
+    for (const tx of finance.transactions) {
+      if (tx.amount >= 0 || tx.is_transfer) continue;
+      if (tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') continue;
+      if ((tx as any).goal_id || (tx as any).is_travel_spend || (tx as any).trip_id) continue;
+
+      const d = parseUkDate(tx.posted_at);
+      if (d < curStart || d > curEnd) continue;
+
+      const cat = finance.categories.find(c => c.id === tx.category_id);
+      if (cat?.exclude_from_reports) continue;
+
+      const amt = Math.abs(baseAmt(tx));
+      const rawText = `${tx.merchant || ''} ${tx.description || ''} ${cat?.name || ''}`.toLowerCase();
+
+      const isFixed = Boolean(
+        (tx as any).fixed_expense_id ||
+        tx.is_fixed ||
+        cat?.type === 'fixed' ||
+        rawText.includes('rent') ||
+        rawText.includes('landlord') ||
+        rawText.includes('tenancy') ||
+        fixedExpenses.some(e => {
+          const eName = (e.name || '').toLowerCase();
+          return eName && (rawText.includes(eName) || eName.includes(rawText));
+        })
+      );
+
+      if (isFixed) {
+        fixedPaid += amt;
+      } else {
+        variableSpent += amt;
+      }
+    }
+
+    return { fixedPaidSoFar: fixedPaid, variableSpentSoFar: variableSpent };
+  }, [finance.transactions, finance.categories, fixedExpenses]);
+
+  const remainingFixedBills = Math.max(0, effectiveFixedMonthly - fixedPaidSoFar);
+  const remainingVariableLiving = Math.max(0, (essentialVariable + monthlyFunAllowance) - variableSpentSoFar);
+  const remainingLivingReserve = remainingFixedBills + remainingVariableLiving;
+  const livingReserveToProtect = isCurrentMonth ? remainingLivingReserve : monthlyLivingTarget;
 
   const nonEmergencyGoalTotalEarly = useMemo(() => {
     return finance.goals
@@ -236,9 +301,9 @@ export default function FinancePoolsPage() {
       .reduce((s, g) => s + finance.convertToBase(g.assigned_amount || 0, g.currency), 0);
   }, [finance.goals, finance.convertToBase]);
 
-  // Max emergency months affordable AFTER reserving next month's Living & Monthly Budget Pool and active Goal Pools
+  // Max emergency months affordable AFTER reserving Living & Monthly Budget Pool and active Goal Pools
   const costPerEmergencyMonth = actualMonthlySurvival * 1.2;
-  const cashAvailableForEmergencyAfterLiving = Math.max(0, totalCash - nonEmergencyGoalTotalEarly - monthlyLivingTarget);
+  const cashAvailableForEmergencyAfterLiving = Math.max(0, totalCash - nonEmergencyGoalTotalEarly - livingReserveToProtect);
   const maxAffordableBufferMonths = costPerEmergencyMonth > 0
     ? Math.max(1, Math.floor((cashAvailableForEmergencyAfterLiving + 0.01) / costPerEmergencyMonth))
     : 1;
@@ -268,9 +333,9 @@ export default function FinancePoolsPage() {
       totalLiquidCash: totalCash,
       goals: finance.goals,
       convertToBase: finance.convertToBase,
-      monthlyLivingReserve: monthlyLivingTarget,
+      monthlyLivingReserve: livingReserveToProtect,
     });
-  }, [bufferMonths, targetMonthsVal, actualMonthlySurvival, totalCash, finance.goals, finance.convertToBase, monthlyLivingTarget]);
+  }, [bufferMonths, targetMonthsVal, actualMonthlySurvival, totalCash, finance.goals, finance.convertToBase, livingReserveToProtect]);
 
   const handleLevelUpEmergencyMonth = async () => {
     if (!updateAssumptions) return;
@@ -417,7 +482,8 @@ export default function FinancePoolsPage() {
   const unassignedCash = Math.max(0, totalCash - assignedOtherGoalsTotal);
 
   // Ring-fence Living & Monthly Budget Pool FIRST so next month's living is never starved
-  const livingPoolReserved = Math.min(unassignedCash, monthlyLivingTarget);
+  // Once bills (like rent) are paid in the month, reserve only the remaining unpaid living expenses
+  const livingPoolReserved = Math.min(unassignedCash, livingReserveToProtect);
   const cashAfterLivingReserve = Math.max(0, unassignedCash - livingPoolReserved);
 
   // Cash for emergency includes explicitly assigned emergency funds + remaining cash after Living Pool reserve
@@ -440,7 +506,7 @@ export default function FinancePoolsPage() {
   const unassignedCashAmount = livingPoolReserved + unallocatedSurplusCash;
   const livingPoolCash = unassignedCashAmount;
 
-  // Build pool options for the move dialog — Living Pool reserve (monthlyLivingTarget) is untouchable; only surplus above it is movable
+  // Build pool options for the move dialog — Living Pool reserve is untouchable; only surplus above it is movable
   const poolOptions: { id: PoolId; label: string; available: number; cap?: number }[] = useMemo(() => {
     const opts: { id: PoolId; label: string; available: number; cap?: number }[] = [];
     opts.push({
@@ -489,19 +555,6 @@ export default function FinancePoolsPage() {
     ...(unallocatedSurplusCash > 0.01 ? [{ label: 'Unallocated Surplus', amount: unallocatedSurplusCash, color: '#FFB8E6' }] : []),
   ];
   const totalForBar = Math.max(totalCash, segments.reduce((s, seg) => s + seg.amount, 0)) || 1;
-
-  // Paycheck Detection & Auto-Waterfall Engine
-  const detectedPaycheck = useMemo(
-    () => detectPaycheck(finance.transactions, finance.categories),
-    [finance.transactions, finance.categories]
-  );
-
-  const targetMonthDate = useMemo(() => {
-    const now = new Date();
-    return now.getDate() >= 25 ? new Date(now.getFullYear(), now.getMonth() + 1, 1) : now;
-  }, []);
-
-  const targetMonthLabel = detectedPaycheck?.targetMonthName || format(targetMonthDate, 'MMMM yyyy');
 
   const paycheckTx = detectedPaycheck?.transaction || null;
 
@@ -1665,10 +1718,12 @@ export default function FinancePoolsPage() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {(() => {
-            const isLivingCovered = livingPoolCash >= monthlyLivingTarget - 0.01;
-            const isSurvivalCovered = livingPoolCash >= effectiveFixedMonthly + essentialVariable - 0.01;
-            const livingShortfall = Math.max(0, monthlyLivingTarget - livingPoolCash);
-            const livingPct = monthlyLivingTarget > 0 ? Math.min(100, (livingPoolCash / monthlyLivingTarget) * 100) : 100;
+            const totalLivingSpentSoFar = fixedPaidSoFar + variableSpentSoFar;
+            const totalLivingCovered = livingPoolReserved + totalLivingSpentSoFar;
+            const isLivingCovered = totalLivingCovered >= monthlyLivingTarget - 0.01 || livingPoolReserved >= remainingLivingReserve - 0.01;
+            const isSurvivalCovered = totalLivingCovered >= effectiveFixedMonthly + essentialVariable - 0.01;
+            const livingShortfall = Math.max(0, monthlyLivingTarget - totalLivingCovered);
+            const livingPct = monthlyLivingTarget > 0 ? Math.min(100, (totalLivingCovered / monthlyLivingTarget) * 100) : 100;
 
             let cardStyle = 'bg-sky-50/80 border-sky-300 shadow-[4px_4px_0px_0px_rgba(14,165,233,0.15)]';
             let iconStyle = 'bg-sky-500 text-white';
@@ -1723,7 +1778,7 @@ export default function FinancePoolsPage() {
                           {fmt(livingPoolReserved)}
                         </span>
                         <span className="text-xs text-slate-500 ml-1 font-semibold">
-                          / {fmt(monthlyLivingTarget)} locked for {targetMonthLabel}
+                          in reserve / {fmt(monthlyLivingTarget)} locked for {targetMonthLabel}
                         </span>
                       </div>
                       <span className="text-xs font-bold tabular-nums text-sky-700">
@@ -1744,13 +1799,13 @@ export default function FinancePoolsPage() {
                     <div className="flex justify-between">
                       <span className="text-slate-500 font-semibold">1. Fixed Bills Reserve:</span>
                       <span className="font-bold text-slate-800">
-                        {fmt(effectiveFixedMonthly)}/mo ({fmt(effectiveFixedMonthly / 4.33)}/wk)
+                        {fmt(remainingFixedBills)} remaining {fixedPaidSoFar > 0 ? `(${fmt(fixedPaidSoFar)} paid)` : ''}
                       </span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-slate-500 font-semibold">2. Variable Essentials:</span>
                       <span className="font-bold text-slate-800">
-                        {fmt(essentialVariable)}/mo ({fmt(essentialVariable / 4.33)}/wk)
+                        {fmt(Math.max(0, essentialVariable - variableSpentSoFar))} remaining {variableSpentSoFar > 0 ? `(${fmt(variableSpentSoFar)} spent)` : ''}
                       </span>
                     </div>
                     <div className="flex justify-between">
