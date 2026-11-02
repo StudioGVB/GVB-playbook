@@ -37,15 +37,15 @@ export default function EmergencyLadderModal({
               </div>
               <div>
                 <DialogTitle className="text-xl font-bold font-display text-slate-900">
-                  Emergency Fund Growth Ladder
+                  Emergency Fund Levels & Roadmap
                 </DialogTitle>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  Building up to {ladderState.targetMonths}+ months in stages without breaking active pots
+                  Building your safety cushion up to Level {ladderState.targetMonths} ({ladderState.targetMonths} months) progressively
                 </p>
               </div>
             </div>
             <Badge className="bg-emerald-100 text-emerald-800 border-emerald-300 font-bold px-3 py-1 text-xs">
-              Stage {ladderState.activeMonths} of {ladderState.targetMonths} Mo
+              Level {ladderState.activeMonths} of {ladderState.targetMonths}
             </Badge>
           </div>
         </DialogHeader>
@@ -55,29 +55,29 @@ export default function EmergencyLadderModal({
           <div className="bg-gradient-to-br from-emerald-50/70 via-teal-50/40 to-slate-50 p-4 rounded-2xl border border-emerald-200/70 space-y-3">
             <div className="flex items-center justify-between flex-wrap gap-2 text-xs">
               <div>
-                <span className="text-slate-500 font-medium block">Active Safety Floor</span>
+                <span className="text-slate-500 font-medium block">Current Level</span>
                 <span className="text-lg font-black text-slate-900 font-display">
-                  {ladderState.activeMonths} Months ({fmt(ladderState.currentFloor)})
+                  Level {ladderState.activeMonths} ({ladderState.activeMonths} Mo · {fmt(ladderState.currentFloor)})
                 </span>
               </div>
               <div className="text-right">
-                <span className="text-slate-500 font-medium block">North Star Target</span>
+                <span className="text-slate-500 font-medium block">Goal Target</span>
                 <span className="text-lg font-black text-emerald-800 font-display">
-                  {ladderState.targetMonths} Months ({fmt(ladderState.ultimateFloor)})
+                  Level {ladderState.targetMonths} ({ladderState.targetMonths} Mo · {fmt(ladderState.ultimateFloor)})
                 </span>
               </div>
             </div>
 
             <div className="space-y-1">
               <div className="flex justify-between text-[11px] text-slate-500 font-semibold">
-                <span>Milestone Progress</span>
+                <span>Level Progression</span>
                 <span>{ladderState.progressPercent.toFixed(0)}% towards final goal</span>
               </div>
               <Progress value={ladderState.progressPercent} className="h-2.5 bg-emerald-200/50" />
             </div>
 
             <p className="text-[11px] text-slate-600 leading-relaxed pt-1">
-              💡 <strong>Why stage it?</strong> If you raised your setting to {ladderState.targetMonths} months today, the system would immediately reserve an extra {fmt(ladderState.ultimateFloor - ladderState.currentFloor)}, which would starve your active holiday/travel pots. Staging allows you to fund your trips now and unlock more months as cashflow frees up!
+              💡 <strong>Why progress in levels?</strong> If you jumped straight to Level {ladderState.targetMonths} immediately, the system would require reserving an extra {fmt(ladderState.ultimateFloor - ladderState.currentFloor)} at once, which could starve active holiday and priority pots. Progressing level by level lets you fund your life goals while steadily building rock-solid security!
             </p>
           </div>
 
@@ -85,7 +85,7 @@ export default function EmergencyLadderModal({
           <div className="space-y-2">
             <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
               <Target className="w-3.5 h-3.5 text-slate-500" />
-              Expansion Roadmap
+              Level Roadmap (1 to {ladderState.targetMonths} Months)
             </h4>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
               {ladderState.milestones.map((m) => {
@@ -103,7 +103,7 @@ export default function EmergencyLadderModal({
                 return (
                   <div key={m.month} className={`rounded-xl border p-2.5 flex flex-col justify-between text-left ${border}`}>
                     <div className="flex items-center justify-between text-[11px] font-bold">
-                      <span>{m.month} Mo</span>
+                      <span>Level {m.month}</span>
                       {isAchieved && <Check className="w-3.5 h-3.5 text-emerald-600" />}
                       {isActive && <Shield className="w-3.5 h-3.5 text-blue-600" />}
                       {isNext && <Sparkles className="w-3.5 h-3.5 text-amber-600" />}
@@ -111,7 +111,7 @@ export default function EmergencyLadderModal({
                     <div className="mt-2 text-xs font-black font-display">{fmt(m.amount)}</div>
                     <div className="text-[9px] uppercase font-bold tracking-tight mt-1 opacity-80">
                       {isAchieved && 'Achieved'}
-                      {isActive && 'Active Floor'}
+                      {isActive && 'Current Level'}
                       {isNext && 'Next Step'}
                       {isTarget && !isActive && !isNext && 'Goal'}
                       {!isAchieved && !isActive && !isNext && !isTarget && 'Upcoming'}
@@ -189,18 +189,18 @@ export default function EmergencyLadderModal({
                       <Lock className="w-4 h-4 text-amber-700" />
                     )}
                     <h5 className="font-bold text-sm text-slate-900">
-                      Step to Month {ladderState.nextMonth} (+{fmt(ladderState.additionalCostForNextMonth)})
+                      Step to Level {ladderState.nextMonth} (+{fmt(ladderState.additionalCostForNextMonth)})
                     </h5>
                   </div>
                   {ladderState.canAffordNextMonthNow ? (
                     <p className="text-xs text-emerald-800 leading-relaxed">
-                      You have sufficient unallocated liquid cash ({fmt(ladderState.unallocatedCash)}) to advance your emergency floor to <strong>{ladderState.nextMonth} months</strong> right now without creating a deficit for any active goal!
+                      You have sufficient unallocated liquid cash ({fmt(ladderState.unallocatedCash)}) to advance your emergency cushion to <strong>Level {ladderState.nextMonth} ({ladderState.nextMonth} months)</strong> right now without creating a deficit for any active goal!
                     </p>
                   ) : (
                     <p className="text-xs text-amber-900 leading-relaxed">
                       Currently, your weekly savings are committed to your active holiday & priority pots.
                       {ladderState.projectedUnlockPotName ? ` Once ${ladderState.projectedUnlockPotName} finishes, ` : ' Once these pots finish, '}
-                      ~<strong>{fmt(ladderState.totalWeeklyCommittedToPots)}/wk</strong> will be freed up to comfortably fund Month {ladderState.nextMonth}.
+                      ~<strong>{fmt(ladderState.totalWeeklyCommittedToPots)}/wk</strong> will be freed up to comfortably fund Level {ladderState.nextMonth}.
                     </p>
                   )}
                 </div>
@@ -218,7 +218,7 @@ export default function EmergencyLadderModal({
                     }`}
                   >
                     <ArrowUpRight className="w-4 h-4" />
-                    Level Up to {ladderState.nextMonth} Months
+                    Lock in Level {ladderState.nextMonth}
                   </Button>
                 </div>
               </div>

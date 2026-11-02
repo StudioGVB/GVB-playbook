@@ -301,25 +301,12 @@ export default function FinancePoolsPage() {
       .reduce((s, g) => s + finance.convertToBase(g.assigned_amount || 0, g.currency), 0);
   }, [finance.goals, finance.convertToBase]);
 
-  // Max emergency months affordable AFTER reserving Living & Monthly Budget Pool and active Goal Pools
+  // Emergency buffer baseline
   const costPerEmergencyMonth = actualMonthlySurvival * 1.2;
-  const cashAvailableForEmergencyAfterLiving = Math.max(0, totalCash - nonEmergencyGoalTotalEarly - livingReserveToProtect);
-  const maxAffordableBufferMonths = costPerEmergencyMonth > 0
-    ? Math.max(1, Math.floor((cashAvailableForEmergencyAfterLiving + 0.01) / costPerEmergencyMonth))
-    : 1;
-  const bufferMonths = Math.min(rawBufferMonths, maxAffordableBufferMonths);
+  const bufferMonths = Math.max(1, rawBufferMonths);
   const emergencyFloor = bufferMonths * costPerEmergencyMonth;
 
-  // Auto-sync buffer_months down if a prior ladder upgrade encroached on the Living & Monthly Budget Pool
-  useEffect(() => {
-    if (!assumptions || finance.loading || !updateAssumptions) return;
-    if (totalCash > 0 && rawBufferMonths > maxAffordableBufferMonths) {
-      updateAssumptions({ buffer_months: maxAffordableBufferMonths });
-    }
-  }, [assumptions, finance.loading, totalCash, rawBufferMonths, maxAffordableBufferMonths, updateAssumptions]);
-
   const [ladderDialogOpen, setLadderDialogOpen] = useState(false);
-  const [ladderBannerDismissed, setLadderBannerDismissed] = useState(false);
 
   const targetMonthsVal = parseInt(
     String((finance.settings?.fx_rates as any)?.target_buffer_months || localStorage.getItem('gvb_target_buffer_months') || '6')
@@ -1153,198 +1140,191 @@ export default function FinancePoolsPage() {
         </div>
       </div>
 
-      {/* Smart Emergency Level-Up Opportunity Banner */}
-      {ladderState.canAffordNextMonthNow && ladderState.nextMonth && !ladderBannerDismissed && (
-        <div className="rounded-2xl border-2 border-emerald-300 bg-gradient-to-r from-emerald-50 via-teal-50/70 to-emerald-50 p-4 shadow-sm flex items-center justify-between flex-wrap gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-bold shrink-0">
-              <Sparkles className="w-5 h-5" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h4 className="font-bold text-slate-900 text-sm">Emergency Fund Level-Up Opportunity</h4>
-                <Badge className="bg-emerald-100 text-emerald-800 border-emerald-300 text-[10px] font-bold">Headroom Ready</Badge>
-              </div>
-              <p className="text-xs text-slate-600 mt-0.5">
-                You have enough liquid cashflow headroom to step your emergency cushion from <strong>{ladderState.activeMonths}</strong> to <strong>{ladderState.nextMonth} months</strong> (+{fmt(ladderState.additionalCostForNextMonth)}) without putting any active savings pots into deficit.
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => setLadderBannerDismissed(true)}
-              className="text-xs text-slate-500 hover:text-slate-800 h-8"
-            >
-              Dismiss
-            </Button>
-            <Button
-              size="sm"
-              onClick={handleLevelUpEmergencyMonth}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs h-8 gap-1.5 shadow-xs"
-            >
-              <ArrowUpRight className="w-3.5 h-3.5" /> Level Up to {ladderState.nextMonth} Months
-            </Button>
-          </div>
-        </div>
-      )}
-
       {/* Pools Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {/* Emergency Fund */}
         {(() => {
           const currentFunded = currentEmergencyFunded;
-          const shortfallAmt = emergencyShortfallAmt;
-          const isShort = shortfallAmt > 0.01;
-          const fundPct = emergencyFloor > 0 ? Math.min(100, (currentFunded / emergencyFloor) * 100) : 100;
-          const monthsCovered = actualMonthlySurvival > 0 ? (currentFunded / actualMonthlySurvival) : 0;
+          const costPerMonth = (actualMonthlySurvival > 0 ? actualMonthlySurvival : 1000) * 1.2;
+          const monthsCovered = costPerMonth > 0 ? (currentFunded / costPerMonth) : 0;
 
-          // Color tier logic:
-          // Short of target floor / < 2 months: Red background & border
-          // Fully funded for target floor, but < 3 months: Orange background & border
-          // >= 3 months: Green background & border
+          // Achieved level based on actual funded cash
+          const levelAchieved = Math.min(targetMonthsVal, Math.floor(monthsCovered));
+          // User's active baseline level setting
+          const activeLevelSetting = Math.min(targetMonthsVal, Math.max(1, bufferMonths));
+          const currentLevelDisplay = Math.max(levelAchieved, activeLevelSetting);
+
+          // Next level milestone to work towards
+          const nextLevel = Math.min(targetMonthsVal, currentLevelDisplay + 1);
+          const nextLevelFloor = nextLevel * costPerMonth;
+          const currentLevelFloor = currentLevelDisplay * costPerMonth;
+
+          // Continuous progress towards next level
+          const pctTowardsNext = nextLevelFloor > 0
+            ? Math.min(100, Math.max(0, (currentFunded / nextLevelFloor) * 100))
+            : 100;
+          const shortfallToNextLevel = Math.max(0, nextLevelFloor - currentFunded);
+
+          // Headroom ready to level up
+          const canLevelUpNow = (ladderState.canAffordNextMonthNow || currentFunded >= nextLevelFloor) && ladderState.nextMonth && nextLevel <= targetMonthsVal;
+
+          // Visual theme based on months covered
           let cardStyle = 'bg-emerald-50/80 border-emerald-300 shadow-[4px_4px_0px_0px_rgba(16,185,129,0.15)]';
           let iconStyle = 'bg-emerald-100 text-emerald-600';
           let barStyle = 'bg-emerald-500';
           let badgeStyle = 'bg-emerald-100 text-emerald-700 border-emerald-200';
-          let alertTextStyle = 'text-emerald-700';
 
-          if (isShort || monthsCovered < 2) {
+          if (monthsCovered < 1) {
             cardStyle = 'bg-rose-50/80 border-rose-300 shadow-[4px_4px_0px_0px_rgba(244,63,94,0.15)]';
             iconStyle = 'bg-rose-100 text-rose-600';
             barStyle = 'bg-rose-500';
             badgeStyle = 'bg-rose-100 text-rose-700 border-rose-200';
-            alertTextStyle = 'text-rose-600';
-          } else if (monthsCovered < 3) {
+          } else if (monthsCovered < 2) {
             cardStyle = 'bg-amber-50/80 border-amber-300 shadow-[4px_4px_0px_0px_rgba(245,158,11,0.15)]';
             iconStyle = 'bg-amber-100 text-amber-700';
             barStyle = 'bg-amber-500';
             badgeStyle = 'bg-amber-100 text-amber-800 border-amber-300';
-            alertTextStyle = 'text-amber-700';
           }
 
           return (
             <div className={`${cardStyle} rounded-2xl border-2 p-5 transition-all flex flex-col justify-between hover:scale-[1.01]`}>
               <div>
+                {/* Header: Level Identity */}
                 <div className="flex items-start justify-between gap-2 mb-2">
                   <div className="flex items-center gap-3">
-                    <div className={`w-11 h-11 rounded-xl ${iconStyle} flex items-center justify-center flex-shrink-0`}>
-                      <Lock className="w-5 h-5" />
+                    <div className={`w-11 h-11 rounded-xl ${iconStyle} flex items-center justify-center flex-shrink-0 shadow-2xs`}>
+                      <Shield className="w-5 h-5" />
                     </div>
                     <div>
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <h3 className="text-base font-bold text-slate-900">Emergency Fund</h3>
-                        <Badge variant="outline" className="text-[10px] text-muted-foreground border-slate-200 bg-white/60">Auto-calculated</Badge>
+                        <Badge className={`${badgeStyle} border font-bold text-[10px] px-2 py-0.5 rounded-full`}>
+                          Level {currentLevelDisplay} of {targetMonthsVal}
+                        </Badge>
                       </div>
                       <button
                         type="button"
                         onClick={() => setLadderDialogOpen(true)}
-                        className="mt-0.5 inline-flex items-center gap-1 text-[10px] font-bold text-emerald-800 hover:text-emerald-950 bg-emerald-100/70 hover:bg-emerald-200/70 border border-emerald-300/80 px-2 py-0.5 rounded-md transition-all cursor-pointer"
-                        title="Click to view 6-month staged expansion roadmap"
+                        className="mt-1 inline-flex items-center gap-1 text-[11px] font-bold text-emerald-800 hover:text-emerald-950 bg-emerald-100/70 hover:bg-emerald-200/70 border border-emerald-300/80 px-2 py-0.5 rounded-md transition-all cursor-pointer"
+                        title="Click to view 6-Level Roadmap"
                       >
                         <Milestone className="w-3 h-3 text-emerald-700" />
-                        Stage {ladderState.activeMonths} of {ladderState.targetMonths} Mo Ladder
+                        Level {currentLevelDisplay} ({currentLevelDisplay} Mo Cushion) · View Ladder
                       </button>
                     </div>
                   </div>
-                  {isShort ? (
-                    <Badge className={`${badgeStyle} border font-display font-extrabold text-xs px-2.5 py-1 rounded-full shrink-0`}>
-                      {fmt(shortfallAmt)} short
-                    </Badge>
-                  ) : (
-                    <Badge className={`${badgeStyle} border font-display font-bold text-xs px-2.5 py-1 rounded-full shrink-0`}>
-                      Fully Funded
-                    </Badge>
-                  )}
+
+                  <Badge className={`${badgeStyle} border font-display font-bold text-xs px-2.5 py-1 rounded-full shrink-0`}>
+                    {monthsCovered.toFixed(1)} mo covered
+                  </Badge>
                 </div>
 
-                <div className="mt-3">
+                {/* Primary Metric: Exact Saved Amount */}
+                <div className="mt-3.5">
                   <div className="flex items-baseline justify-between flex-wrap gap-1">
                     <span className="text-3xl font-display font-black text-slate-900 tracking-tight">
                       {fmt(currentFunded)}
                     </span>
-                    <span className="text-xs font-display font-semibold text-slate-500">
-                      Target Floor: <strong className="text-slate-800 font-bold">{fmt(emergencyFloor)}</strong>
+                    <span className="text-xs font-display font-medium text-slate-500">
+                      Level {currentLevelDisplay} Floor: <strong className="text-slate-800 font-bold">{fmt(currentLevelFloor)}</strong>
                     </span>
                   </div>
 
-                  {/* Funding Progress Bar */}
-                  <div className="mt-2.5 w-full bg-slate-200/60 rounded-full h-2 overflow-hidden">
-                    <div
-                      className={`h-full transition-all rounded-full ${barStyle}`}
-                      style={{ width: `${fundPct}%` }}
-                    />
-                  </div>
-
-                  {isShort && (
-                    <div className="mt-2 flex items-center justify-between text-xs">
-                      <span className={`${alertTextStyle} font-display font-bold flex items-center gap-1`}>
-                        <AlertCircle className="w-3.5 h-3.5" />
-                        {fmt(shortfallAmt)} short
+                  {/* Next Milestone Progress Bar */}
+                  <div className="mt-3 space-y-1.5">
+                    <div className="flex items-center justify-between text-xs font-semibold text-slate-700">
+                      <span className="flex items-center gap-1">
+                        <Target className="w-3.5 h-3.5 text-slate-500" />
+                        {currentLevelDisplay >= targetMonthsVal
+                          ? `Max Level ${targetMonthsVal} Achieved!`
+                          : `Progress to Level ${nextLevel} (${nextLevel} Mo · ${fmt(nextLevelFloor)})`
+                        }
                       </span>
-                      <span className="text-slate-500 font-semibold">{fundPct.toFixed(0)}% saved</span>
+                      <span className="font-bold text-slate-900">{pctTowardsNext.toFixed(0)}%</span>
                     </div>
-                  )}
+
+                    <div className="w-full bg-slate-200/70 rounded-full h-2.5 overflow-hidden">
+                      <div
+                        className={`h-full transition-all rounded-full ${barStyle}`}
+                        style={{ width: `${pctTowardsNext}%` }}
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between text-[11px] text-slate-500 pt-0.5">
+                      <span>
+                        {currentLevelDisplay >= targetMonthsVal ? (
+                          <span className="text-emerald-700 font-bold">Rock-solid 6-month safety cushion achieved</span>
+                        ) : shortfallToNextLevel > 0.01 ? (
+                          <span className="font-semibold text-slate-600">{fmt(shortfallToNextLevel)} needed to reach Level {nextLevel}</span>
+                        ) : (
+                          <span className="text-emerald-700 font-bold">🎉 Level {nextLevel} target funded!</span>
+                        )}
+                      </span>
+                      <span className="text-slate-400 font-medium">
+                        {fmt(costPerMonth)}/mo cushion
+                      </span>
+                    </div>
+                  </div>
                 </div>
               </div>
 
+              {/* Lower Section: Level Status & Actions */}
               <div>
                 <p className="text-[11px] text-slate-500 mt-4 pt-3 border-t border-slate-200/60 font-medium">
-                  {monthsCovered.toFixed(1)}mo covered • ({bufferMonths}mo target × {fmt(actualMonthlySurvival)}/mo × 1.2 buffer)
+                  {monthsCovered.toFixed(1)}mo covered • ({fmt(actualMonthlySurvival)} survival + 20% safety margin)
                 </p>
 
-                {/* Staged Expansion Next-Step Advisor */}
+                {/* Level Up / Expansion Action Box */}
                 {ladderState.nextMonth && (
                   <div className="mt-2.5 pt-2.5 border-t border-slate-200/60">
-                    {ladderState.canAffordNextMonthNow ? (
-                      <div className="p-2.5 rounded-xl bg-emerald-100/80 border border-emerald-300 text-xs flex items-center justify-between gap-2 shadow-2xs">
+                    {canLevelUpNow ? (
+                      <div className="p-3 rounded-xl bg-emerald-100/90 border border-emerald-300 text-xs flex items-center justify-between gap-2 shadow-2xs">
                         <div className="space-y-0.5">
-                          <span className="font-extrabold text-emerald-950 flex items-center gap-1 text-[11px]">
+                          <span className="font-extrabold text-emerald-950 flex items-center gap-1.5 text-[11px]">
                             <Sparkles className="w-3.5 h-3.5 text-emerald-700" />
-                            Month {ladderState.nextMonth} Ready (+{fmt(ladderState.additionalCostForNextMonth)})
+                            Level {ladderState.nextMonth} Ready (+{fmt(ladderState.additionalCostForNextMonth)})
                           </span>
                           <p className="text-[10px] text-emerald-800 font-medium leading-tight">
-                            Sufficient cash available without starving your active pots.
+                            You have headroom to lock in Level {ladderState.nextMonth} without starving active pots.
                           </p>
                         </div>
                         <Button
                           size="sm"
                           onClick={handleLevelUpEmergencyMonth}
-                          className="h-7 px-2.5 text-[11px] font-bold bg-emerald-700 hover:bg-emerald-800 text-white shrink-0 shadow-2xs"
+                          className="h-7 px-3 text-[11px] font-bold bg-emerald-700 hover:bg-emerald-800 text-white shrink-0 shadow-2xs gap-1 cursor-pointer"
                         >
-                          Level Up
+                          <ArrowUpRight className="w-3.5 h-3.5" /> Level Up to Level {ladderState.nextMonth}
                         </Button>
                       </div>
                     ) : (
                       <div
                         onClick={() => setLadderDialogOpen(true)}
-                        className="p-2.5 rounded-xl bg-amber-50/90 border border-amber-200/80 text-xs cursor-pointer hover:bg-amber-100/80 transition-all flex items-start justify-between gap-2 group"
+                        className="p-2.5 rounded-xl bg-white/70 border border-slate-200/80 text-xs cursor-pointer hover:bg-white transition-all flex items-start justify-between gap-2 group shadow-2xs"
                       >
                         <div className="space-y-0.5">
-                          <span className="font-bold text-amber-950 flex items-center gap-1 text-[11px]">
-                            <Lock className="w-3.5 h-3.5 text-amber-700" />
-                            Month {ladderState.nextMonth} Staged (+{fmt(ladderState.additionalCostForNextMonth)})
+                          <span className="font-bold text-slate-900 flex items-center gap-1.5 text-[11px]">
+                            <Lock className="w-3.5 h-3.5 text-slate-500" />
+                            Next Milestone: Level {ladderState.nextMonth} (+{fmt(ladderState.additionalCostForNextMonth)})
                           </span>
-                          <p className="text-[10px] text-amber-900 leading-tight">
+                          <p className="text-[10px] text-slate-600 leading-tight">
                             {ladderState.isBlockedByActivePots ? (
                               <>
                                 Protecting <strong>{ladderState.activeCompetingPots.length} active pots</strong>
                                 {ladderState.projectedUnlockPotName ? ` (${ladderState.projectedUnlockPotName})` : ''}.
-                                Unlocks once completed {ladderState.projectedUnlockDate ? `(~${ladderState.projectedUnlockDate})` : ''}.
+                                Unlocks as priority goals complete {ladderState.projectedUnlockDate ? `(~${ladderState.projectedUnlockDate})` : ''}.
                               </>
                             ) : (
-                              <>Waiting for cashflow headroom before advancing.</>
+                              <>Save towards Level {ladderState.nextMonth} or view full roadmap.</>
                             )}
                           </p>
                         </div>
-                        <ChevronRight className="w-4 h-4 text-amber-700 shrink-0 mt-0.5 group-hover:translate-x-0.5 transition-transform" />
+                        <ChevronRight className="w-4 h-4 text-slate-400 shrink-0 mt-0.5 group-hover:translate-x-0.5 transition-transform" />
                       </div>
                     )}
                   </div>
                 )}
 
-                {/* Actions */}
+                {/* Primary Card Actions */}
                 <div className="flex gap-2 pt-2 mt-2 w-full">
                   <Button
                     size="sm"
@@ -1360,6 +1340,14 @@ export default function FinancePoolsPage() {
                     }}
                   >
                     <Plus className="w-3.5 h-3.5" /> Add funds
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-8 text-xs font-semibold gap-1 text-slate-700 bg-white/80 hover:bg-white border-slate-200/80 transition-colors"
+                    onClick={() => setLadderDialogOpen(true)}
+                  >
+                    <Milestone className="w-3.5 h-3.5 text-slate-500" /> Roadmap
                   </Button>
                   {currentFunded > 0 && (
                     <Button
