@@ -24,7 +24,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import MonthlyPotPlanner from '@/components/finance/MonthlyPotPlanner';
 import FinanceBalanceSheet from '@/pages/FinanceBalanceSheet';
 import WeeklyPoolSavingsCard from '@/components/finance/WeeklyPoolSavingsCard';
-import { format, startOfMonth, endOfMonth, parseISO, isSameMonth } from 'date-fns';
+import { format, startOfMonth, endOfMonth, parseISO, isSameMonth, startOfWeek, addWeeks } from 'date-fns';
 import { detectPaycheck, calculatePaycheckWaterfall, isPaycheckProcessed, markPaycheckProcessed, unmarkPaycheckProcessed, savePaycheckAllocationMeta, getPaycheckAllocationMeta } from '@/lib/paycheckEngine';
 import { baseAmt, parseUkDate } from '@/lib/financeUtils';
 import { evaluatePoolFeasibility } from '@/lib/feasibilityEngine';
@@ -102,7 +102,7 @@ export default function FinancePoolsPage() {
   const finance = useFinanceData();
   const { assumptions, loading: assumptionsLoading, update: updateAssumptions } = useFinanceAssumptions();
   const { expenses: fixedExpenses, loading: fixedExpensesLoading, monthlyTotalInternal: fixedMonthlyTotal, monthlyTotal: fixedMonthlyTotalAll } = useFixedExpenses();
-  const { totalBoostThisWeek, loading: boostsLoading } = useWeeklyBoosts();
+  const { totalBoostThisWeek, addBoostBatch, loading: boostsLoading } = useWeeklyBoosts();
   const { weekTypeMap, loading: weekTypesLoading } = useWeekTypes();
   const { trips, loading: tripsLoading } = useFinanceTrips();
   const allDataReady = !finance.loading && !assumptionsLoading && !fixedExpensesLoading && !boostsLoading && !weekTypesLoading && !tripsLoading;
@@ -125,11 +125,14 @@ export default function FinancePoolsPage() {
   const [newName, setNewName] = useState('');
   const [newDescription, setNewDescription] = useState('');
   const [newAmount, setNewAmount] = useState('');
-  const [newCurrency, setNewCurrency] = useState('AUD');
+  const [newCurrency, setNewCurrency] = useState('GBP');
   const [newColor, setNewColor] = useState(POOL_COLORS[0]);
   const [newPercentAllocation, setNewPercentAllocation] = useState('0');
   const [newStartDate, setNewStartDate] = useState('');
   const [newDeadline, setNewDeadline] = useState('');
+  const [newFundMode, setNewFundMode] = useState<'payday' | 'weekly_budget'>('payday');
+  const [newFundWeeks, setNewFundWeeks] = useState('3');
+  const [newFundStartWhen, setNewFundStartWhen] = useState<'this_week' | 'next_week'>('this_week');
   // Move funds dialog
   const [moveOpen, setMoveOpen] = useState(false);
   const [moveFrom, setMoveFrom] = useState<PoolId>('');
@@ -794,19 +797,65 @@ export default function FinancePoolsPage() {
 
   const handleCreate = async () => {
     if (!newName.trim() || !newAmount) return;
-    await finance.addGoal({
+    const totalAmt = parseFloat(newAmount);
+    if (isNaN(totalAmt) || totalAmt <= 0) return;
+    const isWeeklyFunded = newFundMode === 'weekly_budget';
+    const weeksCount = Math.max(1, Math.min(12, parseInt(newFundWeeks, 10) || 3));
+
+    const created = await finance.addGoal({
       name: newName.trim(),
-      description: newDescription.trim() || null,
-      target_amount: parseFloat(newAmount),
+      description: newDescription.trim() || (isWeeklyFunded ? `Funded mid-month over ${weeksCount} week${weeksCount > 1 ? 's' : ''}` : null),
+      target_amount: totalAmt,
+      assigned_amount: isWeeklyFunded ? totalAmt : 0,
       currency: newCurrency,
       priority: finance.goals.length + 1,
       safety_mode: 'balanced',
       color: newColor,
-      percent_allocation: parseFloat(newPercentAllocation) || 0,
-      start_date: newStartDate || null,
-      deadline: newDeadline || null,
+      percent_allocation: isWeeklyFunded ? 0 : (parseFloat(newPercentAllocation) || 0),
+      start_date: isWeeklyFunded ? null : (newStartDate || null),
+      deadline: isWeeklyFunded ? null : (newDeadline || null),
     } as any);
-    setNewName(''); setNewDescription(''); setNewAmount(''); setNewColor(POOL_COLORS[0]); setNewPercentAllocation('0'); setNewStartDate(''); setNewDeadline(''); setCreateOpen(false);
+
+    if (isWeeklyFunded && created && (created as any).id) {
+      const targetGoalId = (created as any).id;
+      const baseWeekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
+      const firstWeek = newFundStartWhen === 'next_week' ? addWeeks(baseWeekStart, 1) : baseWeekStart;
+      const amtInBase = finance.convertToBase(totalAmt, newCurrency);
+      const perWeekBase = Math.floor((amtInBase / weeksCount) * 100) / 100;
+      const entries: { goalId: string; amount: number; weekStart: string; note?: string }[] = [];
+
+      let allocatedSoFar = 0;
+      for (let i = 0; i < weeksCount; i++) {
+        const wkDate = addWeeks(firstWeek, i);
+        const wkKey = format(wkDate, 'yyyy-MM-dd');
+        const amt = i === weeksCount - 1
+          ? Math.round((amtInBase - allocatedSoFar) * 100) / 100
+          : perWeekBase;
+        allocatedSoFar += amt;
+        entries.push({
+          goalId: targetGoalId,
+          amount: -amt,
+          weekStart: wkKey,
+          note: `${newName.trim()} (Wk ${i + 1}/${weeksCount})`,
+        });
+      }
+      await addBoostBatch(entries);
+      toast.success(
+        `Created "${newName.trim()}" and scheduled ${fmt(amtInBase / weeksCount)}/wk over ${weeksCount} week${weeksCount > 1 ? 's' : ''}! 🎉`,
+        { duration: 7000 }
+      );
+    }
+
+    setNewName('');
+    setNewDescription('');
+    setNewAmount('');
+    setNewColor(POOL_COLORS[0]);
+    setNewPercentAllocation('0');
+    setNewStartDate('');
+    setNewDeadline('');
+    setNewFundMode('payday');
+    setNewFundWeeks('3');
+    setCreateOpen(false);
   };
 
   const handleMoveFunds = async (bypassCapCheck = false) => {
@@ -1910,46 +1959,116 @@ export default function FinancePoolsPage() {
           <div className="space-y-4 pt-2">
             <div className="space-y-2">
               <Label>Pool Name</Label>
-              <Input value={newName} onChange={e => setNewName(e.target.value)} placeholder="e.g. Europe Trip" />
+              <Input value={newName} onChange={e => setNewName(e.target.value)} placeholder="e.g. Lip Filler or Europe Trip" />
             </div>
             <div className="space-y-2">
               <Label>Description / Purpose (Optional)</Label>
-              <Input value={newDescription} onChange={e => setNewDescription(e.target.value)} placeholder="What is this fund for? (e.g. Flight to Tokyo and accommodation)" />
-              <p className="text-[10px] text-muted-foreground">Included in AI financial summaries so your AI knows what the fund is for.</p>
+              <Input value={newDescription} onChange={e => setNewDescription(e.target.value)} placeholder="What is this fund for?" />
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Target Amount</Label>
-                <Input type="number" value={newAmount} onChange={e => setNewAmount(e.target.value)} placeholder="5000" />
+                <Input type="number" value={newAmount} onChange={e => setNewAmount(e.target.value)} placeholder="100" />
               </div>
               <div className="space-y-2">
                 <Label>Currency</Label>
                 <Select value={newCurrency} onValueChange={setNewCurrency}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="AUD">AUD</SelectItem>
                     <SelectItem value="GBP">GBP</SelectItem>
+                    <SelectItem value="AUD">AUD</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
             </div>
+
+            {/* Funding Method Toggle */}
             <div className="space-y-2">
-              <Label>Monthly Proportional Allocation (%)</Label>
-              <Input type="number" value={newPercentAllocation} onChange={e => setNewPercentAllocation(e.target.value)} placeholder="15" min="0" max="100" />
-              <p className="text-[10px] text-muted-foreground">Used if no due date is set.</p>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Savings Start Date (Optional)</Label>
-                <Input type="date" value={newStartDate} onChange={e => setNewStartDate(e.target.value)} />
-                <p className="text-[10px] text-muted-foreground">Contributions begin on/after this date.</p>
+              <Label>How do you want to fund this pool?</Label>
+              <div className="grid grid-cols-2 gap-1.5 p-1 bg-muted rounded-xl">
+                <button
+                  type="button"
+                  onClick={() => setNewFundMode('payday')}
+                  className={`py-2 px-3 rounded-lg text-xs font-semibold transition-all ${
+                    newFundMode === 'payday' ? 'bg-white text-slate-900 shadow-xs' : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  📅 Monthly on Payday
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setNewFundMode('weekly_budget')}
+                  className={`py-2 px-3 rounded-lg text-xs font-semibold transition-all ${
+                    newFundMode === 'weekly_budget' ? 'bg-white text-[#FF2EB8] shadow-xs' : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  ✨ Mid-Month (Weekly Budget)
+                </button>
               </div>
-              <div className="space-y-2">
-                <Label>Target Date / Due Date (Optional)</Label>
-                <Input type="date" value={newDeadline} onChange={e => setNewDeadline(e.target.value)} />
-                <p className="text-[10px] text-muted-foreground">Calculates exact pace to hit goal in time.</p>
-              </div>
             </div>
+
+            {newFundMode === 'weekly_budget' ? (
+              <div className="space-y-3 rounded-2xl bg-pink-50/70 border border-pink-200/80 p-3.5">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Spread Over</Label>
+                    <Select value={newFundWeeks} onValueChange={setNewFundWeeks}>
+                      <SelectTrigger className="bg-white"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {[1, 2, 3, 4, 5, 6, 8].map(n => {
+                          const amt = parseFloat(newAmount) || 0;
+                          return (
+                            <SelectItem key={n} value={String(n)}>
+                              {n} {n === 1 ? 'week' : 'weeks'} ({amt > 0 ? `${formatCurrency(amt / n, newCurrency)}/wk` : ''})
+                            </SelectItem>
+                          );
+                        })}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Start Deductions</Label>
+                    <Select value={newFundStartWhen} onValueChange={(v: any) => setNewFundStartWhen(v)}>
+                      <SelectTrigger className="bg-white"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="this_week">Start This Week</SelectItem>
+                        <SelectItem value="next_week">Start Next Monday</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                {parseFloat(newAmount) > 0 && (
+                  <p className="text-[11px] text-slate-600">
+                    Fills this pool with <strong>{formatCurrency(parseFloat(newAmount), newCurrency)}</strong> straight away and automatically deducts{' '}
+                    <strong className="text-[#FF2EB8]">
+                      {formatCurrency(parseFloat(newAmount) / Math.max(1, parseInt(newFundWeeks, 10) || 3), newCurrency)}/week
+                    </strong>{' '}
+                    from your next {newFundWeeks} weekly budgets.
+                  </p>
+                )}
+              </div>
+            ) : (
+              <>
+                <div className="space-y-2">
+                  <Label>Monthly Proportional Allocation (%)</Label>
+                  <Input type="number" value={newPercentAllocation} onChange={e => setNewPercentAllocation(e.target.value)} placeholder="15" min="0" max="100" />
+                  <p className="text-[10px] text-muted-foreground">Used if no due date is set.</p>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Savings Start Date (Optional)</Label>
+                    <Input type="date" value={newStartDate} onChange={e => setNewStartDate(e.target.value)} />
+                    <p className="text-[10px] text-muted-foreground">Contributions begin on/after this date.</p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Target Date / Due Date (Optional)</Label>
+                    <Input type="date" value={newDeadline} onChange={e => setNewDeadline(e.target.value)} />
+                    <p className="text-[10px] text-muted-foreground">Calculates exact pace to hit goal in time.</p>
+                  </div>
+                </div>
+              </>
+            )}
+
             <div className="space-y-2">
               <Label>Color</Label>
               <div className="flex flex-wrap gap-1.5">
@@ -1967,7 +2086,7 @@ export default function FinancePoolsPage() {
                 ))}
               </div>
             </div>
-            {newDeadline && parseFloat(newAmount) > 0 && (
+            {newFundMode === 'payday' && newDeadline && parseFloat(newAmount) > 0 && (
               <FeasibilityAlert
                 assessment={createFeasibility}
                 currency={newCurrency}
@@ -1975,7 +2094,9 @@ export default function FinancePoolsPage() {
                 onApplyRecommendedTarget={t => setNewAmount(String(t))}
               />
             )}
-            <Button onClick={handleCreate} className="w-full">Create Pool</Button>
+            <Button onClick={handleCreate} className="w-full">
+              {newFundMode === 'weekly_budget' ? 'Create Pool & Schedule Weekly Deductions' : 'Create Pool'}
+            </Button>
           </div>
         </DialogContent>
       </Dialog>
