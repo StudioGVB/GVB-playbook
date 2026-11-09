@@ -117,17 +117,16 @@ export default function FinanceGoals({ finance }: Props) {
                   <Input type="date" value={deadline} onChange={e => setDeadline(e.target.value)} />
                 </div>
               </div>
-                <div className="space-y-2">
-                  <Label>Safety Mode</Label>
-                  <Select value={safetyMode} onValueChange={setSafetyMode}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="conservative">Conservative (easy cuts)</SelectItem>
-                      <SelectItem value="balanced">Balanced (medium cuts)</SelectItem>
-                      <SelectItem value="yolo">Aggressive (max savings)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+              <div className="space-y-2">
+                <Label>Safety Mode</Label>
+                <Select value={safetyMode} onValueChange={setSafetyMode}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="conservative">Conservative (easy cuts)</SelectItem>
+                    <SelectItem value="balanced">Balanced (medium cuts)</SelectItem>
+                    <SelectItem value="yolo">Aggressive (max savings)</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
               <Button onClick={handleCreate} className="w-full">Create Goal</Button>
             </div>

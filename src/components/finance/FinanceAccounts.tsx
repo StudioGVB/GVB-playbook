@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
-import { Plus, Trash2, Wallet, RefreshCw, Loader2, Building2, Landmark, CreditCard, Upload, FileText, X, ArrowRight, Camera, Check, Eye, EyeOff } from 'lucide-react';
+import { Plus, Trash2, Wallet, RefreshCw, Loader2, Building2, Landmark, CreditCard, Upload, FileText, X, ArrowRight, Camera, Check, Eye, EyeOff, Sparkles } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { formatCurrency, parseUkDate } from '@/lib/financeUtils';
@@ -53,6 +53,12 @@ function safeGetStorage(key: string): string | null {
   } catch {
     return null;
   }
+}
+
+function isConnectedAccount(acc: any): boolean {
+  if (!acc) return false;
+  const prov = (acc.provider || '').toLowerCase();
+  return prov === 'up' || prov === 'monzo' || prov === 'wise';
 }
 
 export default function FinanceAccounts({ finance }: Props) {

@@ -51,28 +51,57 @@ export class ErrorBoundary extends Component<Props, State> {
             </div>
 
             {this.state.error?.message && (
-              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-left">
-                <p className="text-[10px] font-mono text-slate-600 font-medium break-words">
-                  {this.state.error.message}
+              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-left space-y-2">
+                <p className="text-[11px] font-mono text-slate-700 font-semibold break-words">
+                  {this.state.error.name ? `${this.state.error.name}: ` : ''}{this.state.error.message}
                 </p>
+                {this.state.error.stack && (
+                  <pre className="text-[9px] font-mono text-slate-500 overflow-x-auto max-h-24 whitespace-pre-wrap">
+                    {this.state.error.stack.split('\n').slice(0, 4).join('\n')}
+                  </pre>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const text = `${this.state.error?.name || 'Error'}: ${this.state.error?.message}\n${this.state.error?.stack || ''}`;
+                    navigator.clipboard?.writeText(text);
+                    alert('Error copied to clipboard!');
+                  }}
+                  className="text-[10px] text-pink-600 font-semibold underline cursor-pointer"
+                >
+                  Copy Error Details
+                </button>
               </div>
             )}
 
-            <div className="flex items-center justify-center gap-2 pt-2">
+            <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
               <Button
                 variant="outline"
                 size="sm"
                 onClick={this.handleReset}
-                className="rounded-xl border-slate-200 text-slate-700 hover:bg-slate-50 gap-1.5"
+                className="rounded-xl border-slate-200 text-slate-700 hover:bg-slate-50 gap-1.5 text-xs"
               >
                 <RefreshCw className="w-3.5 h-3.5" /> Retry
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  if ('caches' in window) {
+                    caches.keys().then(names => names.forEach(name => caches.delete(name)));
+                  }
+                  window.location.reload();
+                }}
+                className="rounded-xl border-slate-200 text-slate-700 hover:bg-slate-50 gap-1.5 text-xs"
+              >
+                Hard Reload
               </Button>
               <Button
                 size="sm"
                 onClick={() => {
                   window.location.href = '/finance/budget';
                 }}
-                className="rounded-xl bg-[#FF2EB8] hover:bg-[#E026A2] text-white gap-1.5"
+                className="rounded-xl bg-[#FF2EB8] hover:bg-[#E026A2] text-white gap-1.5 text-xs"
               >
                 <Home className="w-3.5 h-3.5" /> Go to Budget
               </Button>

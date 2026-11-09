@@ -87,8 +87,8 @@ export default function FinanceAccountsPage({ defaultTab }: { defaultTab?: strin
   };
 
   const baseCurrency = finance.settings?.base_currency || 'GBP';
-  const totalLiquidity = finance.totalCashBase();
-  const includedAccounts = finance.accounts.filter(a => !a.exclude_from_totals && a.provider !== 'external');
+  const totalLiquidity = typeof finance.totalCashBase === 'function' ? (finance.totalCashBase() || 0) : 0;
+  const includedAccounts = (finance.accounts || []).filter(a => !a.exclude_from_totals && a.provider !== 'external');
   const activeCount = includedAccounts.length;
 
   // Dynamic Cost of Living & Runway calculation
@@ -149,50 +149,52 @@ export default function FinanceAccountsPage({ defaultTab }: { defaultTab?: strin
           </TabsList>
 
           <TabsContent value="accounts" className="space-y-6 mt-0">
-            {/* Bento hero grid */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              {/* Total Liquidity hero */}
-              <div
-                className="md:col-span-2 md:row-span-2 bg-white rounded-[2rem] p-7 border-2 border-[#FF2EB8] relative overflow-hidden flex flex-col justify-between min-h-[220px]"
-                style={{ boxShadow: `8px 8px 0px 0px ${PINK}` }}
-              >
-                <div className="relative z-10">
-                  <p className="text-[#FF2EB8] font-display font-bold uppercase tracking-widest text-xs mb-2">
-                    Total Liquidity
-                  </p>
-                  <h2 className="text-4xl sm:text-5xl font-display font-black text-slate-900 tabular-nums leading-none">
-                    {formatCurrency(totalLiquidity, baseCurrency)}
-                  </h2>
-                  <div className="mt-4 inline-flex items-center gap-1.5 bg-[#86EFAC] px-3 py-1 rounded-full text-[#166534] text-sm font-bold">
-                    <Wallet className="w-4 h-4" />
-                    {activeCount} account{activeCount !== 1 ? 's' : ''} tracked
+            <ErrorBoundary>
+              {/* Bento hero grid */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                {/* Total Liquidity hero */}
+                <div
+                  className="md:col-span-2 md:row-span-2 bg-white rounded-[2rem] p-7 border-2 border-[#FF2EB8] relative overflow-hidden flex flex-col justify-between min-h-[220px]"
+                  style={{ boxShadow: `8px 8px 0px 0px ${PINK}` }}
+                >
+                  <div className="relative z-10">
+                    <p className="text-[#FF2EB8] font-display font-bold uppercase tracking-widest text-xs mb-2">
+                      Total Liquidity
+                    </p>
+                    <h2 className="text-4xl sm:text-5xl font-display font-black text-slate-900 tabular-nums leading-none">
+                      {formatCurrency(totalLiquidity, baseCurrency)}
+                    </h2>
+                    <div className="mt-4 inline-flex items-center gap-1.5 bg-[#86EFAC] px-3 py-1 rounded-full text-[#166534] text-sm font-bold">
+                      <Wallet className="w-4 h-4" />
+                      {activeCount} account{activeCount !== 1 ? 's' : ''} tracked
+                    </div>
                   </div>
+                  {/* Sparkline-ish bars from top account balances */}
+                  <div className="mt-8 flex items-end gap-1.5 h-20">
+                    {(() => {
+                      const bars = includedAccounts
+                        .map(a => Math.abs(finance.convertToBase(a.balance || 0, a.currency || 'GBP')))
+                        .filter(v => !isNaN(v))
+                        .sort((a, b) => b - a)
+                        .slice(0, 6);
+                      const max = Math.max(1, ...bars);
+                      if (bars.length === 0) return <div className="flex-1 h-full bg-[#FFF5FA] rounded-lg" />;
+                      return bars.map((v, i) => (
+                        <div
+                          key={i}
+                          className="flex-1 rounded-t-lg"
+                          style={{
+                            height: `${Math.max(12, (v / max) * 100)}%`,
+                            backgroundColor: i === 0 ? PINK : PINK_SOFT,
+                            opacity: i === 0 ? 1 : 0.35 + i * 0.1,
+                          }}
+                        />
+                      ));
+                    })()}
+                  </div>
+                  <div className="absolute -top-12 -right-12 w-40 h-40 bg-[#FF7AD1]/15 rounded-full" />
+                  <div className="absolute -bottom-8 -left-8 w-24 h-24 bg-[#86EFAC]/20 rounded-full" />
                 </div>
-                {/* Sparkline-ish bars from top account balances */}
-                <div className="mt-8 flex items-end gap-1.5 h-20">
-                  {(() => {
-                    const bars = includedAccounts
-                      .map(a => Math.abs(finance.convertToBase(a.balance, a.currency)))
-                      .sort((a, b) => b - a)
-                      .slice(0, 6);
-                    const max = Math.max(1, ...bars);
-                    if (bars.length === 0) return <div className="flex-1 h-full bg-[#FFF5FA] rounded-lg" />;
-                    return bars.map((v, i) => (
-                      <div
-                        key={i}
-                        className="flex-1 rounded-t-lg"
-                        style={{
-                          height: `${Math.max(12, (v / max) * 100)}%`,
-                          backgroundColor: i === 0 ? PINK : PINK_SOFT,
-                          opacity: i === 0 ? 1 : 0.35 + i * 0.1,
-                        }}
-                      />
-                    ));
-                  })()}
-                </div>
-                <div className="absolute -top-12 -right-12 w-40 h-40 bg-[#FF7AD1]/15 rounded-full" />
-                <div className="absolute -bottom-8 -left-8 w-24 h-24 bg-[#86EFAC]/20 rounded-full" />
-              </div>
 
               {/* Cost of Living / Runway summary tile */}
               <div className="md:col-span-2 bg-[#86EFAC] rounded-[2rem] p-6 border-2 border-[#22C55E] flex flex-col justify-between min-h-[160px]">
@@ -253,6 +255,7 @@ export default function FinanceAccountsPage({ defaultTab }: { defaultTab?: strin
                 <span className="text-slate-400 text-xs">Savings, income, buffer</span>
               </button>
             </div>
+            </ErrorBoundary>
 
             {/* Wide accounts list wrapper */}
             <div className="bg-white rounded-[2rem] p-6 sm:p-8 border-2 border-slate-100 shadow-sm">
