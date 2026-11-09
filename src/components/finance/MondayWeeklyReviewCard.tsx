@@ -97,14 +97,14 @@ export function MondayWeeklyReviewCard({ finance, assumptions, trips = [], force
       <Card
         className={`relative overflow-hidden border-2 transition-all duration-300 shadow-md ${
           isTotalOver
-            ? 'bg-gradient-to-br from-rose-500/10 via-amber-500/5 to-rose-500/10 border-rose-400/40'
+            ? 'bg-gradient-to-br from-amber-500/10 via-orange-500/5 to-amber-500/5 border-amber-300/40'
             : 'bg-gradient-to-br from-emerald-500/10 via-teal-500/5 to-emerald-500/10 border-emerald-400/40'
         } rounded-[2.2rem] p-6 text-slate-800`}
       >
         {/* Ambient background glow */}
         <div
           className={`absolute -top-12 -right-12 w-48 h-48 rounded-full filter blur-3xl pointer-events-none ${
-            isTotalOver ? 'bg-rose-500/15' : 'bg-emerald-500/15'
+            isTotalOver ? 'bg-amber-400/15' : 'bg-emerald-500/15'
           }`}
         />
 
@@ -116,14 +116,14 @@ export function MondayWeeklyReviewCard({ finance, assumptions, trips = [], force
                 variant="outline"
                 className={`px-3 py-1 text-xs font-bold uppercase tracking-wider rounded-xl border flex items-center gap-1.5 ${
                   isTotalOver
-                    ? 'bg-rose-500/15 text-rose-700 border-rose-400/30'
+                    ? 'bg-amber-100 text-amber-800 border-amber-300/60'
                     : 'bg-emerald-500/15 text-emerald-700 border-emerald-400/30'
                 }`}
               >
                 {isTotalOver ? (
                   <>
-                    <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
-                    Monday Weekly Review · Over Budget
+                    <Sparkles className="w-3.5 h-3.5 text-amber-700" />
+                    Monday Weekly Review · Slightly Over Budget
                   </>
                 ) : (
                   <>
@@ -143,8 +143,7 @@ export function MondayWeeklyReviewCard({ finance, assumptions, trips = [], force
             <div>
               {isTotalOver ? (
                 <h2 className="text-xl sm:text-2xl font-display font-extrabold text-slate-900 tracking-tight leading-snug">
-                  You spent <span className="text-rose-600">{fmt(totalSpent)}</span> last week, which is{' '}
-                  <span className="text-rose-600">{fmt(totalOverAmount)} over</span> your weekly budget.
+                  You were just <span className="text-amber-700 font-black">{fmt(totalOverAmount)}</span> over your {fmt(totalBudget)} budget last week
                 </h2>
               ) : (
                 <h2 className="text-xl sm:text-2xl font-display font-extrabold text-slate-900 tracking-tight leading-snug">
@@ -154,7 +153,7 @@ export function MondayWeeklyReviewCard({ finance, assumptions, trips = [], force
 
               <p className="text-sm text-slate-600 mt-1.5 leading-relaxed">
                 {isTotalOver
-                  ? `Cut back a little bit this week to get back on track and meet your saving goals!`
+                  ? `No stress at all — your Savings Stash automatically covers this ${fmt(totalOverAmount)} so your savings pools and long-term plans stay 100% on track.`
                   : `You stayed under your ${fmt(totalBudget)} weekly budget. Your leftover savings have been swept into your Savings Stash!`}
               </p>
             </div>
@@ -163,14 +162,18 @@ export function MondayWeeklyReviewCard({ finance, assumptions, trips = [], force
           {/* Quick Metrics & Actions */}
           <div className="flex flex-col sm:flex-row md:flex-col items-stretch sm:items-center md:items-end gap-3 shrink-0">
             {/* Stat Pill */}
-            <div className="bg-white/80 backdrop-blur-md border border-slate-200/80 rounded-2xl p-3.5 shadow-sm min-w-[200px] flex items-center justify-between gap-4">
+            <div className="bg-white/90 backdrop-blur-md border border-slate-200/90 rounded-2xl p-3.5 shadow-sm min-w-[210px] flex items-center justify-between gap-4">
               <div>
-                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Last Week Spend</p>
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total Spent</p>
                 <p className="text-lg font-display font-black text-slate-900 tabular-nums">{fmt(totalSpent)}</p>
+                <p className="text-[10px] text-slate-500 font-medium">Budget was {fmt(totalBudget)}</p>
               </div>
               <div className="text-right">
-                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Weekly Budget</p>
-                <p className="text-sm font-semibold text-slate-600 tabular-nums">{fmt(totalBudget)}</p>
+                <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold ${
+                  isTotalOver ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'
+                }`}>
+                  {isTotalOver ? `+${fmt(totalOverAmount)} over` : `${fmt(totalUnderAmount)} saved`}
+                </span>
               </div>
             </div>
 

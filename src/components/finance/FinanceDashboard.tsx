@@ -504,14 +504,22 @@ export function FinanceDashboard() {
           </span>
           <p
             className={`text-2xl sm:text-3xl font-black tabular-nums tracking-tight mt-1 truncate ${
-              combinedSafeToSpend >= 0 ? 'text-slate-900' : 'text-rose-600'
+              combinedSafeToSpend >= 0 ? 'text-slate-900' : 'text-amber-700'
             }`}
           >
-            {fmt(combinedSafeToSpend)}
+            {combinedSafeToSpend >= 0 ? fmt(combinedSafeToSpend) : `−${fmt(Math.abs(combinedSafeToSpend))}`}
           </p>
           <div className="mt-2">
-            <span className="inline-flex items-center rounded-full bg-[#FF2EB8]/10 px-2 py-0.5 text-[10px] sm:text-[11px] font-bold text-[#FF2EB8] whitespace-nowrap">
-              {fmt(combinedDailyPace)}/day · {daysLeftInWeek}d left
+            <span
+              className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] sm:text-[11px] font-bold whitespace-nowrap ${
+                combinedSafeToSpend >= 0
+                  ? 'bg-[#FF2EB8]/10 text-[#FF2EB8]'
+                  : 'bg-amber-100 text-amber-800'
+              }`}
+            >
+              {combinedSafeToSpend >= 0
+                ? `${fmt(combinedDailyPace)}/day · ${daysLeftInWeek}d left`
+                : `${fmt(Math.abs(combinedSafeToSpend))} over · Stash covered`}
             </span>
           </div>
         </div>
@@ -532,7 +540,7 @@ export function FinanceDashboard() {
               className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] sm:text-[11px] font-bold whitespace-nowrap ${
                 projectedDiff <= 0
                   ? 'bg-emerald-50 text-emerald-700'
-                  : 'bg-rose-50 text-rose-700'
+                  : 'bg-amber-100 text-amber-800'
               }`}
             >
               {projectedDiff <= 0 ? (
@@ -541,7 +549,7 @@ export function FinanceDashboard() {
                 </>
               ) : (
                 <>
-                  <TrendingUp className="w-3 h-3 shrink-0" /> Over by {fmt(projectedDiff)}
+                  <TrendingUp className="w-3 h-3 shrink-0" /> {fmt(projectedDiff)} over target
                 </>
               )}
             </span>
