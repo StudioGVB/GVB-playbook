@@ -1296,17 +1296,21 @@ export function evaluateMidMonthPotFeasibility(params: {
   fmt: (n: number) => string;
   now?: Date;
 }): MidMonthPotAdvice {
-  const {
-    totalAmount,
-    weeksCount,
-    startWhen,
-    weeklyBudget,
-    typicalWeeklySpend,
-    thisWeekSpentSoFar = 0,
-    daysLeftThisWeek = 7,
-    fmt,
-    now = new Date(),
-  } = params;
+  const safeFmt = typeof (params as any).fmt === 'function'
+    ? (params as any).fmt
+    : typeof (params as any).formatCurrency === 'function'
+    ? (params as any).formatCurrency
+    : ((n: number) => `£${Math.round(n).toLocaleString()}`);
+  const fmt = safeFmt;
+
+  const totalAmount = Number(params.totalAmount || 0);
+  const weeksCount = Math.max(1, Number(params.weeksCount ?? (params as any).selectedWeeks ?? 1));
+  const startWhen = params.startWhen || 'this_week';
+  const weeklyBudget = Number(params.weeklyBudget ?? (params as any).weeklyTotalBudget ?? 0);
+  const typicalWeeklySpend = Number(params.typicalWeeklySpend || 0);
+  const thisWeekSpentSoFar = Number(params.thisWeekSpentSoFar ?? 0);
+  const daysLeftThisWeek = Number(params.daysLeftThisWeek ?? 7);
+  const now = params.now || new Date();
 
   const baseWeekStart = startOfWeek(now, { weekStartsOn: 1 });
   const firstWeek = startWhen === 'next_week' ? addWeeks(baseWeekStart, 1) : baseWeekStart;

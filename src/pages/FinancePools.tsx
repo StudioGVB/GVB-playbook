@@ -77,7 +77,7 @@ import { useFixedExpenses } from '@/hooks/useFixedExpenses';
 import { useWeekTypes } from '@/hooks/useWeekTypes';
 import { useFinanceTrips } from '@/hooks/useFinanceTrips';
 import { computePolicySnapshot, computeTripSpent, computeTypicalWeeklyVariableSpend, computeWeekVariableSpend, evaluateMidMonthPotFeasibility } from '@/lib/policyEngine';
-import { toast } from 'sonner';
+import ErrorBoundary from '@/components/ErrorBoundary';
 
 type PoolId = string; // goal id or virtual id
 const UNALLOCATED = '__unallocated__';
@@ -247,15 +247,18 @@ export default function FinancePoolsPage() {
       finance.categories,
       startOfWeek(new Date(), { weekStartsOn: 1 }),
     );
-    const currentWeekRemaining = Math.max(0, weeklyTotalAllowance - (thisWeekSpent.essentialSpent + thisWeekSpent.funSpent));
+    const thisWeekSpentTotal = (thisWeekSpent?.essentialSpent || 0) + (thisWeekSpent?.funSpent || 0);
+    const dayOfWeek = new Date().getDay();
+    const daysLeft = 7 - (dayOfWeek === 0 ? 7 : dayOfWeek) + 1;
     return evaluateMidMonthPotFeasibility({
       totalAmount: totalAmountBase,
-      selectedWeeks: numWeeks,
+      weeksCount: numWeeks,
       startWhen: newFundStartWhen,
-      weeklyTotalBudget: weeklyTotalAllowance,
+      weeklyBudget: weeklyTotalAllowance,
       typicalWeeklySpend,
-      currentWeekRemaining,
-      formatCurrency: fmt,
+      thisWeekSpentSoFar: thisWeekSpentTotal,
+      daysLeftThisWeek: daysLeft,
+      fmt,
     });
   }, [newAmount, newCurrency, newFundWeeks, newFundStartWhen, essentialVariable, weeklyFromRemainder, totalBoostThisWeek, finance.transactions, finance.categories, finance.convertToBase, wtMap, trips, fmt]);
 
@@ -1051,7 +1054,8 @@ export default function FinancePoolsPage() {
   }
 
   return (
-    <div className="space-y-6 w-full font-body">
+    <ErrorBoundary>
+      <div className="space-y-6 w-full font-body">
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div>
           <h1 className="text-2xl sm:text-4xl font-display font-bold text-slate-900 tracking-tight">Money Pools</h1>
@@ -2478,6 +2482,7 @@ export default function FinancePoolsPage() {
           toast.success(`Target goal updated to ${months} months!`);
         }}
       />
-    </div>
+      </div>
+    </ErrorBoundary>
   );
 }
