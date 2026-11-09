@@ -2052,6 +2052,7 @@ export function useFinanceDataState() {
       }
     },
     refetch: fetchAll,
+    fetchAll,
   };
 }
 

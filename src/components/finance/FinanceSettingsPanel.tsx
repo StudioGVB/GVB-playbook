@@ -45,6 +45,20 @@ function safeLocaleDate(d: string | number | Date | null | undefined): string | 
   return isNaN(date.getTime()) ? null : date.toLocaleString();
 }
 
+function safeGetStorage(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function safeSetStorage(key: string, val: string): void {
+  try {
+    localStorage.setItem(key, val);
+  } catch {}
+}
+
 function CategoryColorPicker({ color, onChange }: { color: string | null; onChange: (c: string) => void }) {
   const [customColor, setCustomColor] = useState(color || '#3B82F6');
 
@@ -112,7 +126,7 @@ export default function FinanceSettingsPanel({ finance }: Props) {
   // Emergency Ladder
   const [emergencyMonths, setEmergencyMonths] = useState('2');
   const [targetMonths, setTargetMonths] = useState(() => {
-    return String((settings?.fx_rates as any)?.target_buffer_months || localStorage.getItem('gvb_target_buffer_months') || '6');
+    return String((settings?.fx_rates as any)?.target_buffer_months || safeGetStorage('gvb_target_buffer_months') || '6');
   });
 
   // Policy Settings
@@ -151,14 +165,14 @@ export default function FinanceSettingsPanel({ finance }: Props) {
   const [monzoStatus, setMonzoStatus] = useState<{ connected: boolean; error?: string } | null>(null);
   const [monzoToken, setMonzoToken] = useState('');
   const [monzoClientId, setMonzoClientId] = useState(
-    () => localStorage.getItem('gvb_monzo_client_id') || atob('b2F1dGgyY2xpZW50XzAwMDBCQUlVTWhyQThqRGdVNllkbXI=')
+    () => safeGetStorage('gvb_monzo_client_id') || atob('b2F1dGgyY2xpZW50XzAwMDBCQUlVTWhyQThqRGdVNllkbXI=')
   );
   const [monzoClientSecret, setMonzoClientSecret] = useState(
     () =>
-      localStorage.getItem('gvb_monzo_client_secret') ||
+      safeGetStorage('gvb_monzo_client_secret') ||
       atob('bW56Y29uZi5KQTlhdHFqd1VEQ2dPYm5TUzJnVlJIVUZyUFNOUms2Q2RGQXliTTAxZE9mbnhsZXJ1S1hMUXNPN2pwTWIyMkN6YnJmWUJwVCs1dEQrN0NqV0pxdWdNQT09')
   );
-  const [monzoEmail, setMonzoEmail] = useState(() => localStorage.getItem('gvb_monzo_email') || '');
+  const [monzoEmail, setMonzoEmail] = useState(() => safeGetStorage('gvb_monzo_email') || '');
   const [monzoSendingLink, setMonzoSendingLink] = useState(false);
 
   // Password Update
@@ -170,7 +184,7 @@ export default function FinanceSettingsPanel({ finance }: Props) {
 
   // Timezone
   const [livingTimezone, setLivingTimezone] = useState(
-    localStorage.getItem('gvb_user_timezone') || (settings as any)?.user_timezone || 'Europe/London'
+    safeGetStorage('gvb_user_timezone') || (settings as any)?.user_timezone || 'Europe/London'
   );
   const [rescanRunning, setRescanRunning] = useState(false);
 
@@ -208,8 +222,8 @@ export default function FinanceSettingsPanel({ finance }: Props) {
     monzoStatus?.connected === true ||
     !!(settings as any)?.bank_tokens?.monzo ||
     !!(settings as any)?.bank_tokens?.monzo_refresh ||
-    !!localStorage.getItem('gvb_monzo_access_token') ||
-    !!localStorage.getItem('gvb_monzo_refresh_token');
+    !!safeGetStorage('gvb_monzo_access_token') ||
+    !!safeGetStorage('gvb_monzo_refresh_token');
 
   const activeIncomeCats = useMemo(() => {
     return categories.filter(c => c.type === 'income' && !c.is_archived);
@@ -225,9 +239,9 @@ export default function FinanceSettingsPanel({ finance }: Props) {
       setAudGbp(String(rates.AUD_GBP ?? 0.52));
       setGbpAud(String(rates.GBP_AUD ?? 1.92));
       setBaseCurrency(settings.base_currency || 'GBP');
-      const tz = (settings as any).user_timezone || localStorage.getItem('gvb_user_timezone');
+      const tz = (settings as any).user_timezone || safeGetStorage('gvb_user_timezone');
       if (tz) setLivingTimezone(tz);
-      const savedTarget = (settings.fx_rates as any)?.target_buffer_months || localStorage.getItem('gvb_target_buffer_months');
+      const savedTarget = (settings.fx_rates as any)?.target_buffer_months || safeGetStorage('gvb_target_buffer_months');
       if (savedTarget) setTargetMonths(String(savedTarget));
     }
   }, [settings]);
@@ -259,7 +273,7 @@ export default function FinanceSettingsPanel({ finance }: Props) {
     if (!updateAssumptions) return;
     const active = parseInt(emergencyMonths) || 2;
     const target = parseInt(targetMonths) || 6;
-    localStorage.setItem('gvb_target_buffer_months', String(target));
+    safeSetStorage('gvb_target_buffer_months', String(target));
     if (updateSettings && settings) {
       updateSettings({
         fx_rates: {
@@ -489,12 +503,12 @@ export default function FinanceSettingsPanel({ finance }: Props) {
           'bW56Y29uZi5KQTlhdHFqd1VEQ2dPYm5TUzJnVlJIVUZyUFNOUms2Q2RGQXliTTAxZE9mbnhsZXJ1S1hMUXNPN2pwTWIyMkN6YnJmWUJwVCs1dEQrN0NqV0pxdWdNQT09'
         );
         const clientId = (
-          localStorage.getItem('gvb_monzo_client_id') ||
+          safeGetStorage('gvb_monzo_client_id') ||
           storedTokens.monzo_client_id ||
           defaultCid
         ).trim();
         const clientSecret = (
-          localStorage.getItem('gvb_monzo_client_secret') ||
+          safeGetStorage('gvb_monzo_client_secret') ||
           storedTokens.monzo_client_secret ||
           defaultCsec
         ).trim();
@@ -543,7 +557,7 @@ export default function FinanceSettingsPanel({ finance }: Props) {
             { onConflict: 'user_id' }
           );
 
-        localStorage.setItem('gvb_monzo_access_token', accessToken);
+        safeSetStorage('gvb_monzo_access_token', accessToken);
         await finance.refetch();
         toast.success(
           'Permanent Monzo OAuth linked! Open the Monzo app on your phone and tap Approve, then click Verify Connection.',
@@ -574,9 +588,9 @@ export default function FinanceSettingsPanel({ finance }: Props) {
 
     setMonzoSendingLink(true);
     try {
-      localStorage.setItem('gvb_monzo_client_id', cid);
-      localStorage.setItem('gvb_monzo_client_secret', csec);
-      localStorage.setItem('gvb_monzo_email', email);
+      safeSetStorage('gvb_monzo_client_id', cid);
+      safeSetStorage('gvb_monzo_client_secret', csec);
+      safeSetStorage('gvb_monzo_email', email);
 
       if (user) {
         const { data: settingsRow } = await supabase
@@ -850,7 +864,7 @@ export default function FinanceSettingsPanel({ finance }: Props) {
                       ) : (
                         <Badge variant="outline" className="text-slate-500 text-[10px]">Not verified</Badge>
                       )}
-                      {(settings as any)?.bank_tokens?.monzo_refresh || localStorage.getItem('gvb_monzo_refresh_token') ? (
+                      {(settings as any)?.bank_tokens?.monzo_refresh || safeGetStorage('gvb_monzo_refresh_token') ? (
                         <Badge className="bg-blue-100 text-blue-800 border-blue-300 font-bold text-[10px]">
                           Permanent OAuth Active
                         </Badge>

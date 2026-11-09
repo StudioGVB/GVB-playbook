@@ -47,6 +47,14 @@ function safeFormatDate(d: string | number | Date | null | undefined, pattern: s
   }
 }
 
+function safeGetStorage(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
 export default function FinanceAccounts({ finance }: Props) {
   const navigate = useNavigate();
   const { accounts, transactions, importTransactions, addAccount, updateAccount, deleteAccount, syncUpTransactions, syncWiseTransactions, syncMonzoTransactions, connectMonzo, categorizeTransactions, matchTransfers, importLogs, addImportLog, deleteImportLog, refetch } = finance;
@@ -56,8 +64,8 @@ export default function FinanceAccounts({ finance }: Props) {
     accounts.some(a => (a.provider || '').toLowerCase() === 'monzo' || (a.account_name || '').toLowerCase().includes('monzo')) ||
     !!(finance.settings as any)?.bank_tokens?.monzo ||
     !!(finance.settings as any)?.bank_tokens?.monzo_refresh ||
-    !!localStorage.getItem('gvb_monzo_access_token') ||
-    !!localStorage.getItem('gvb_monzo_refresh_token');
+    !!safeGetStorage('gvb_monzo_access_token') ||
+    !!safeGetStorage('gvb_monzo_refresh_token');
   const [syncing, setSyncing] = useState(false);
   const [wiseSyncing, setWiseSyncing] = useState(false);
   const [monzoSyncing, setMonzoSyncing] = useState(false);

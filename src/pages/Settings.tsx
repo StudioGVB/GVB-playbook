@@ -432,7 +432,7 @@ export default function Settings() {
             trips={trips}
             settings={finance.settings}
             assumptions={assumptions}
-            onRefresh={finance.fetchAll}
+            onRefresh={finance.refetch}
           />
         </TabsContent>
 

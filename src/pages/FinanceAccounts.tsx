@@ -19,6 +19,7 @@ import FinanceSettingsPanel from '@/components/finance/FinanceSettingsPanel';
 import FinanceAccountsComponent from '@/components/finance/FinanceAccounts';
 import FinanceCostOfLivingPage from './FinanceCostOfLiving';
 import FinanceHistoryPage from './FinanceHistory';
+import ErrorBoundary from '@/components/ErrorBoundary';
 import { toast } from 'sonner';
 
 const INCOME_COLORS = ['#2563EB', '#EA580C', '#7C3AED', '#0891B2', '#DB2777', '#65A30D', '#DC2626', '#F59E0B'];
@@ -255,25 +256,33 @@ export default function FinanceAccountsPage({ defaultTab }: { defaultTab?: strin
 
             {/* Wide accounts list wrapper */}
             <div className="bg-white rounded-[2rem] p-6 sm:p-8 border-2 border-slate-100 shadow-sm">
-              <FinanceAccountsComponent finance={finance} />
+              <ErrorBoundary>
+                <FinanceAccountsComponent finance={finance} />
+              </ErrorBoundary>
             </div>
           </TabsContent>
 
           <TabsContent value="cost-of-living" className="mt-0">
             <div className="bg-white rounded-[2rem] p-6 sm:p-8 border-2 border-slate-100 shadow-sm">
-              <FinanceCostOfLivingPage />
+              <ErrorBoundary>
+                <FinanceCostOfLivingPage />
+              </ErrorBoundary>
             </div>
           </TabsContent>
 
           <TabsContent value="history" className="mt-0">
             <div className="bg-white rounded-[2rem] p-6 sm:p-8 border-2 border-slate-100 shadow-sm">
-              <FinanceHistoryPage />
+              <ErrorBoundary>
+                <FinanceHistoryPage />
+              </ErrorBoundary>
             </div>
           </TabsContent>
 
           <TabsContent value="settings" className="mt-0">
             <div className="bg-white rounded-[2rem] p-6 sm:p-8 border-2 border-slate-100 shadow-sm">
-              <FinanceSettingsPanel finance={finance} />
+              <ErrorBoundary>
+                <FinanceSettingsPanel finance={finance} />
+              </ErrorBoundary>
             </div>
           </TabsContent>
         </Tabs>
