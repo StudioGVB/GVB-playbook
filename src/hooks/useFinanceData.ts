@@ -194,7 +194,7 @@ export interface ImportLog {
 }
 
 export function useFinanceDataState() {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const [accounts, setAccounts] = useState<FinanceAccount[]>([]);
   const [categories, setCategories] = useState<FinanceCategory[]>([]);
   const [transactions, setTransactions] = useState<FinanceTransaction[]>([]);
@@ -240,6 +240,7 @@ export function useFinanceDataState() {
   }, [user]);
 
   const fetchAll = useCallback(async () => {
+    if (authLoading) return;
     if (!user) {
       setLoading(false);
       return;
@@ -624,7 +625,7 @@ export function useFinanceDataState() {
       setLoading(false);
       hasLoadedOnce.current = true;
     }
-  }, [user]);
+  }, [user, authLoading]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
@@ -1974,7 +1975,9 @@ export function useFinanceDataState() {
   };
 
   return {
-    accounts, categories, transactions, goals, goalPlans, settings, loading,
+    accounts, categories, transactions, goals, goalPlans, settings,
+    loading: loading || authLoading || (!hasLoadedOnce.current && !!user),
+    hasLoadedOnce: hasLoadedOnce.current,
     importLogs, addImportLog, deleteImportLog,
     incomeSourceTags, addIncomeSourceTag, deleteIncomeSourceTag,
     addAccount, updateAccount, deleteAccount,

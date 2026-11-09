@@ -85,6 +85,11 @@ export function MondayWeeklyReviewCard({ finance, assumptions, trips = [], force
     return null;
   }
 
+  // Prevent premature zero-spend calculation while transactions are still loading
+  if (finance?.loading || !snapshot) {
+    return null;
+  }
+
   const handleDismiss = () => {
     localStorage.setItem(`gvb_monday_review_dismissed_${weekKey}`, 'true');
     setIsDismissed(true);
@@ -99,7 +104,7 @@ export function MondayWeeklyReviewCard({ finance, assumptions, trips = [], force
           isTotalOver
             ? 'bg-gradient-to-br from-amber-500/10 via-orange-500/5 to-amber-500/5 border-amber-300/40'
             : 'bg-gradient-to-br from-emerald-500/10 via-teal-500/5 to-emerald-500/10 border-emerald-400/40'
-        } rounded-[2.2rem] p-6 text-slate-800`}
+        } rounded-[2rem] sm:rounded-[2.2rem] p-4.5 sm:p-6 text-slate-800`}
       >
         {/* Ambient background glow */}
         <div
@@ -108,7 +113,7 @@ export function MondayWeeklyReviewCard({ finance, assumptions, trips = [], force
           }`}
         />
 
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
+        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-5 sm:gap-6">
           {/* Main Copy & Badge */}
           <div className="space-y-3 max-w-2xl">
             <div className="flex items-center gap-2 flex-wrap">
@@ -142,16 +147,16 @@ export function MondayWeeklyReviewCard({ finance, assumptions, trips = [], force
             {/* Headline message */}
             <div>
               {isTotalOver ? (
-                <h2 className="text-xl sm:text-2xl font-display font-extrabold text-slate-900 tracking-tight leading-snug">
+                <h2 className="text-lg sm:text-2xl font-display font-extrabold text-slate-900 tracking-tight leading-snug">
                   You were just <span className="text-amber-700 font-black">{fmt(totalOverAmount)}</span> over your {fmt(totalBudget)} budget last week
                 </h2>
               ) : (
-                <h2 className="text-xl sm:text-2xl font-display font-extrabold text-slate-900 tracking-tight leading-snug">
+                <h2 className="text-lg sm:text-2xl font-display font-extrabold text-slate-900 tracking-tight leading-snug">
                   Congrats! You finished <span className="text-emerald-600">{fmt(totalUnderAmount)} under</span> your weekly budget last week! 🎉
                 </h2>
               )}
 
-              <p className="text-sm text-slate-600 mt-1.5 leading-relaxed">
+              <p className="text-xs sm:text-sm text-slate-600 mt-1.5 leading-relaxed">
                 {isTotalOver
                   ? `No stress at all — your Savings Stash automatically covers this ${fmt(totalOverAmount)} so your savings pools and long-term plans stay 100% on track.`
                   : `You stayed under your ${fmt(totalBudget)} weekly budget. Your leftover savings have been swept into your Savings Stash!`}
@@ -160,12 +165,12 @@ export function MondayWeeklyReviewCard({ finance, assumptions, trips = [], force
           </div>
 
           {/* Quick Metrics & Actions */}
-          <div className="flex flex-col sm:flex-row md:flex-col items-stretch sm:items-center md:items-end gap-3 shrink-0">
+          <div className="flex flex-col sm:flex-row md:flex-col items-stretch sm:items-center md:items-end gap-3 shrink-0 w-full md:w-auto">
             {/* Stat Pill */}
-            <div className="bg-white/90 backdrop-blur-md border border-slate-200/90 rounded-2xl p-3.5 shadow-sm min-w-[210px] flex items-center justify-between gap-4">
+            <div className="bg-white/90 backdrop-blur-md border border-slate-200/90 rounded-2xl p-3 sm:p-3.5 shadow-sm w-full md:min-w-[210px] flex items-center justify-between gap-4">
               <div>
                 <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total Spent</p>
-                <p className="text-lg font-display font-black text-slate-900 tabular-nums">{fmt(totalSpent)}</p>
+                <p className="text-base sm:text-lg font-display font-black text-slate-900 tabular-nums">{fmt(totalSpent)}</p>
                 <p className="text-[10px] text-slate-500 font-medium">Budget was {fmt(totalBudget)}</p>
               </div>
               <div className="text-right">
@@ -178,7 +183,7 @@ export function MondayWeeklyReviewCard({ finance, assumptions, trips = [], force
             </div>
 
             {/* Action Buttons */}
-            <div className="flex items-center gap-2 w-full sm:w-auto">
+            <div className="flex items-center gap-2 w-full">
               <Button
                 variant="outline"
                 size="sm"

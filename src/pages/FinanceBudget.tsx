@@ -14,7 +14,7 @@ import { deduplicateTransactions } from '@/lib/deduplication';
 import { parseCoverMeta, planOverspendCover, planUnderspendRepay, type CoverMeta, type CoverStep } from '@/lib/overspendCover';
 import { formatCurrency, baseAmt, parseUkDate } from '@/lib/financeUtils';
 import { subDays, startOfDay, startOfWeek, endOfWeek, differenceInDays, format, addWeeks, subWeeks, isSameWeek, addDays } from 'date-fns';
-import { Lock, ShoppingCart, PartyPopper, Zap, X, Info, TrendingDown, Calendar as CalendarIcon, Shield, Target, ChevronDown, History, Clock, Check, Plane, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Lock, ShoppingCart, PartyPopper, Zap, X, Info, TrendingDown, Calendar as CalendarIcon, Shield, Target, ChevronDown, History, Clock, Check, Plane, ChevronLeft, ChevronRight, RefreshCw, Sparkles, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { MetricCard } from '@/components/finance/MetricCard';
 import { DonutChart } from '@/components/finance/DonutChart';
@@ -100,11 +100,40 @@ export default function FinanceBudget() {
   const finance = useFinanceData();
   const { assumptions, loading: assumptionsLoading, update: updateAssumptions } = useFinanceAssumptions();
   const { expenses: fixedExpenses, loading: fixedExpensesLoading, monthlyTotalInternal: fixedExpensesMonthly, monthlyTotal: fixedExpensesMonthlyAll } = useFixedExpenses();
-  const { boosts, loading: boostsLoading, totalBoostThisWeek, addBoost, removeBoost } = useWeeklyBoosts();
+  const { boosts, loading: boostsLoading, totalBoostThisWeek, addBoost, addBoostBatch, removeBoost } = useWeeklyBoosts();
   const { getWeekType, weekTypeMap, loading: weekTypesLoading } = useWeekTypes();
   const { trips, loading: tripsLoading } = useFinanceTrips();
   const { isPaidThisPeriod, markPaid, unmarkPaid, totalPaidThisMonth } = useFixedExpensePayments();
   const navigate = useNavigate();
+
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const handleRefreshTransactions = async () => {
+    setIsRefreshing(true);
+    try {
+      const tasks: Promise<any>[] = [];
+      if (finance.syncUpTransactions) {
+        tasks.push(finance.syncUpTransactions({ skipAutoCategorize: true }));
+      }
+      if (finance.syncWiseTransactions) {
+        tasks.push(finance.syncWiseTransactions(undefined, { skipAutoCategorize: true }));
+      }
+      if (finance.syncMonzoTransactions && finance.accounts.some(a => a.provider === 'monzo')) {
+        tasks.push(finance.syncMonzoTransactions(undefined, { skipAutoCategorize: true }));
+      }
+      await Promise.allSettled(tasks);
+      if (finance.categorizeTransactions) {
+        await finance.categorizeTransactions();
+      }
+      await finance.refetch();
+      toast.success('Recalculated latest weekly spending & transactions! ✨');
+    } catch (err) {
+      console.error('Failed to refresh transactions:', err);
+      toast.error('Failed to recalculate transactions');
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   const allDataReady = !finance.loading && !assumptionsLoading && !fixedExpensesLoading && !boostsLoading && !weekTypesLoading && !tripsLoading;
 
@@ -124,10 +153,80 @@ export default function FinanceBudget() {
       const goal = finance.goals.find(g => g.id === boost.goal_id);
       if (goal) {
         const currentAssigned = goal.assigned_amount || 0;
-        await finance.updateGoal(goal.id, { assigned_amount: currentAssigned + boost.amount } as any);
+        await finance.updateGoal(goal.id, { assigned_amount: Math.max(0, currentAssigned + boost.amount) } as any);
       }
     }
     await removeBoost(boostId);
+    toast.success(boost && boost.amount < 0 ? 'Returned weekly deduction back to budget' : 'Boost removed');
+  };
+
+  const handleFundPotFromWeeks = async (params: {
+    mode: 'new' | 'existing';
+    potName?: string;
+    existingGoalId?: string;
+    totalAmount: number;
+    weeksCount: number;
+    startWhen: 'this_week' | 'next_week';
+    color?: string;
+  }) => {
+    const { mode, potName, existingGoalId, totalAmount, weeksCount, startWhen, color } = params;
+    const baseCur = (finance.settings?.base_currency || 'GBP').toUpperCase();
+    let targetGoalId = existingGoalId || '';
+    let targetGoalName = potName?.trim() || 'Savings Pot';
+
+    if (mode === 'new') {
+      const created = await finance.addGoal({
+        name: targetGoalName,
+        description: `Funded mid-month over ${weeksCount} week${weeksCount > 1 ? 's' : ''}`,
+        target_amount: totalAmount,
+        assigned_amount: totalAmount,
+        currency: baseCur,
+        priority: finance.goals.length + 1,
+        safety_mode: 'balanced',
+        color: color || '#FF2EB8',
+      } as any);
+      if (!created || !(created as any).id) return;
+      targetGoalId = (created as any).id;
+    } else if (existingGoalId) {
+      const existing = finance.goals.find(g => g.id === existingGoalId);
+      if (!existing) return;
+      targetGoalName = existing.name;
+      const newAssigned = Math.round(((existing.assigned_amount || 0) + totalAmount) * 100) / 100;
+      const newTarget = Math.max(existing.target_amount || 0, newAssigned);
+      await finance.updateGoal(existing.id, {
+        assigned_amount: newAssigned,
+        target_amount: newTarget,
+      } as any);
+    }
+
+    const baseWeekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
+    const firstWeek = startWhen === 'next_week' ? addWeeks(baseWeekStart, 1) : baseWeekStart;
+    const perWeekBase = Math.floor((totalAmount / weeksCount) * 100) / 100;
+    const entries: { goalId: string; amount: number; weekStart: string; note?: string }[] = [];
+
+    let allocatedSoFar = 0;
+    for (let i = 0; i < weeksCount; i++) {
+      const wkDate = addWeeks(firstWeek, i);
+      const wkKey = format(wkDate, 'yyyy-MM-dd');
+      const amt = i === weeksCount - 1
+        ? Math.round((totalAmount - allocatedSoFar) * 100) / 100
+        : perWeekBase;
+      allocatedSoFar += amt;
+      entries.push({
+        goalId: targetGoalId,
+        amount: -amt,
+        weekStart: wkKey,
+        note: `${targetGoalName} (Wk ${i + 1}/${weeksCount})`,
+      });
+    }
+
+    const ok = await addBoostBatch(entries);
+    if (ok) {
+      toast.success(
+        `Saved ${formatCurrency(totalAmount, baseCur)} into "${targetGoalName}" — taking ${formatCurrency(totalAmount / weeksCount, baseCur)}/wk over ${weeksCount} week${weeksCount > 1 ? 's' : ''}! 🎉`,
+        { duration: 7000 }
+      );
+    }
   };
 
   const wtMap = useMemo(() => weekTypeMap(), [weekTypeMap]);
@@ -142,11 +241,13 @@ export default function FinanceBudget() {
 
   const weekStartKey = useMemo(() => format(weekStart, 'yyyy-MM-dd'), [weekStart]);
 
-  const boostAmount = useMemo(() => {
-    return boosts
-      .filter(b => b.week_start === weekStartKey)
-      .reduce((sum, b) => sum + b.amount, 0);
+  const weekBoostEntries = useMemo(() => {
+    return boosts.filter(b => b.week_start === weekStartKey);
   }, [boosts, weekStartKey]);
+
+  const boostAmount = useMemo(() => {
+    return weekBoostEntries.reduce((sum, b) => sum + b.amount, 0);
+  }, [weekBoostEntries]);
 
   const baseCurrency = (finance.settings?.base_currency || 'GBP').toUpperCase();
   const fxRates = {
@@ -735,28 +836,29 @@ export default function FinanceBudget() {
   return (
     <div className="space-y-6 sm:space-y-8 w-full font-body">
       {/* Utility bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white/70 backdrop-blur-sm sm:bg-transparent p-3 sm:p-0 rounded-2xl border sm:border-0 border-pink-100 shadow-sm sm:shadow-none">
+        {/* Week navigation */}
+        <div className="flex items-center justify-between sm:justify-start gap-2 sm:gap-3 w-full sm:w-auto">
           <Button
             variant="ghost"
             size="icon"
             onClick={() => setSelectedDate(prev => subWeeks(prev, 1))}
-            className="h-8 w-8 hover:bg-[#FF7AD1]/15 hover:text-[#FF2EB8] rounded-xl transition-all"
+            className="h-8 w-8 hover:bg-[#FF7AD1]/15 hover:text-[#FF2EB8] rounded-xl transition-all shrink-0"
             title="Previous Week"
           >
             <ChevronLeft className="w-4 h-4" />
           </Button>
           
-          <div className="text-left min-w-[130px]">
-            <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-[#FF2EB8]/80">Weekly Budget</p>
-            <p className="text-xs sm:text-sm font-semibold text-slate-800 tabular-nums">{weekLabel}</p>
+          <div className="text-center sm:text-left flex-1 sm:flex-initial min-w-[130px]">
+            <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-[#FF2EB8]">Weekly Budget</p>
+            <p className="text-xs sm:text-sm font-bold text-slate-800 tabular-nums">{weekLabel}</p>
           </div>
 
           <Button
             variant="ghost"
             size="icon"
             onClick={() => setSelectedDate(prev => addWeeks(prev, 1))}
-            className="h-8 w-8 hover:bg-[#FF7AD1]/15 hover:text-[#FF2EB8] rounded-xl transition-all"
+            className="h-8 w-8 hover:bg-[#FF7AD1]/15 hover:text-[#FF2EB8] rounded-xl transition-all shrink-0"
             title="Next Week"
           >
             <ChevronRight className="w-4 h-4" />
@@ -767,23 +869,44 @@ export default function FinanceBudget() {
               variant="outline"
               size="xs"
               onClick={() => setSelectedDate(new Date())}
-              className="text-[9px] h-6 px-2.5 rounded-lg border-pink-200/50 bg-pink-50/20 text-[#FF2EB8] hover:bg-[#FF2EB8] hover:text-white hover:border-transparent transition-all font-semibold"
+              className="text-[9px] h-6 px-2 rounded-lg border-pink-200/60 bg-pink-50/50 text-[#FF2EB8] hover:bg-[#FF2EB8] hover:text-white hover:border-transparent transition-all font-semibold shrink-0"
             >
               Today
             </Button>
           )}
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 self-end sm:self-auto">
-          <FinancialReportExporterModal />
-          {currentWeekType !== 'normal' && (
-            <Badge variant="secondary" className="text-[10px]">
-              {currentWeekType === 'travel' ? '🏖 Holiday week' : '⚡ Exception week'}
-            </Badge>
-          )}
-          <Button variant="ghost" size="sm" className="gap-1.5 h-7 text-xs text-muted-foreground" onClick={() => navigate('/finance/history')}>
-            <History className="w-3.5 h-3.5" /> History
+        {/* Action Controls (Refresh, Exporter, Badges, History) */}
+        <div className="flex items-center justify-between sm:justify-end gap-2 w-full sm:w-auto pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-100">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRefreshTransactions}
+            disabled={isRefreshing}
+            className="h-7 sm:h-8 px-2.5 sm:px-3 text-xs font-semibold rounded-xl border-pink-200/80 bg-pink-50/40 text-[#FF2EB8] hover:bg-[#FF2EB8] hover:text-white transition-all gap-1.5 shadow-none"
+            title="Recalculate latest transactions and weekly spend"
+          >
+            <RefreshCw className={cn("w-3.5 h-3.5", isRefreshing && "animate-spin")} />
+            <span>{isRefreshing ? 'Recalculating...' : 'Refresh'}</span>
           </Button>
+
+          <div className="flex items-center gap-1.5">
+            <FinancialReportExporterModal />
+            {currentWeekType !== 'normal' && (
+              <Badge variant="secondary" className="text-[10px]">
+                {currentWeekType === 'travel' ? '🏖 Holiday' : '⚡ Exception'}
+              </Badge>
+            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="gap-1.5 h-7 sm:h-8 px-2 sm:px-2.5 text-xs text-muted-foreground hover:text-slate-800 rounded-xl"
+              onClick={() => navigate('/finance/history')}
+            >
+              <History className="w-3.5 h-3.5" />
+              <span className="hidden xs:inline">History</span>
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -812,38 +935,38 @@ export default function FinanceBudget() {
       )}
 
       {/* === EDITORIAL HERO === */}
-      <div className="text-center pt-6 pb-2">
+      <div className="text-center pt-3 sm:pt-6 pb-2">
         <span className={cn(
-          "text-[11px] font-bold uppercase tracking-[0.2em]",
+          "text-[10px] sm:text-[11px] font-bold uppercase tracking-[0.2em]",
           !isCurrentWeek
-            ? (weekNetDifference >= 0 ? "text-emerald-600" : "text-destructive/80")
-            : (isOverBudget ? "text-destructive/70" : "text-muted-foreground/70")
+            ? (weekNetDifference >= 0 ? "text-emerald-600" : "text-amber-700")
+            : (isOverBudget ? "text-amber-700" : "text-muted-foreground/70")
         )}>
           {!isCurrentWeek
             ? (weekNetDifference > 0 ? 'Week Closed · Underspent' : weekNetDifference < 0 ? 'Week Closed · Overspent' : 'Week Closed · On Target')
-            : (isOverBudget ? 'Over Budget This Week' : 'Safe to Spend This Week')}
+            : (isOverBudget ? 'Slightly Over Budget This Week' : 'Safe to Spend This Week')}
         </span>
         <h1 className={cn(
-          "text-6xl sm:text-7xl font-display font-black mt-4 mb-3 tracking-tight tabular-nums",
+          "text-4xl xs:text-5xl sm:text-6xl md:text-7xl font-display font-black mt-2.5 sm:mt-4 mb-2 sm:mb-3 tracking-tight tabular-nums break-words",
           !isCurrentWeek
-            ? (weekNetDifference >= 0 ? "text-emerald-600" : "text-destructive")
-            : (isOverBudget ? "text-destructive" : "text-[#FF2EB8]")
+            ? (weekNetDifference >= 0 ? "text-emerald-600" : "text-amber-700")
+            : (isOverBudget ? "text-amber-700" : "text-[#FF2EB8]")
         )}>
           {!isCurrentWeek
             ? (weekNetDifference >= 0 ? `+${fmt(weekNetDifference)}` : `−${fmt(Math.abs(weekNetDifference))}`)
             : (isOverBudget ? `−${fmt(overAmount)}` : fmt(combinedSafeToSpend))}
         </h1>
-        <p className="text-sm sm:text-base text-muted-foreground">
+        <p className="text-xs sm:text-base text-muted-foreground max-w-md mx-auto px-2">
           {!isCurrentWeek ? (
             weekNetDifference > 0 ? (
               <>Auto-saved <span className="font-semibold text-emerald-600 tabular-nums">{fmt(weekNetDifference)}</span> straight into Savings Stash 💰</>
             ) : weekNetDifference < 0 ? (
-              <>Auto-deducted <span className="font-semibold text-destructive tabular-nums">{fmt(Math.abs(weekNetDifference))}</span> straight from Savings Stash 📉</>
+              <>Auto-deducted <span className="font-semibold text-amber-700 tabular-nums">{fmt(Math.abs(weekNetDifference))}</span> from Savings Stash 📉</>
             ) : (
               <>Balanced budget · Zero net change to Savings Stash 🎯</>
             )
           ) : isOverBudget ? (
-            <>Resets in <span className="font-semibold text-foreground">{daysUntilReset} day{daysUntilReset !== 1 ? 's' : ''}</span></>
+            <>No stress at all — your Savings Stash automatically covers this <span className="font-semibold text-amber-700 tabular-nums">{fmt(overAmount)}</span> so your goals stay on track.</>
           ) : (
             <>
               You can spend{' '}
@@ -855,21 +978,21 @@ export default function FinanceBudget() {
         </p>
 
         {/* Thin progress */}
-        <div className="mt-8 max-w-xs mx-auto">
+        <div className="mt-6 sm:mt-8 max-w-xs mx-auto px-4 sm:px-0">
           <div className="h-1.5 w-full bg-muted/60 rounded-full overflow-hidden">
             <div
               className={cn(
                 "h-full rounded-full transition-all",
                 !isCurrentWeek
-                  ? (weekNetDifference >= 0 ? "bg-emerald-500" : "bg-destructive")
-                  : (isOverBudget ? "bg-destructive" : "bg-emerald-500")
+                  ? (weekNetDifference >= 0 ? "bg-emerald-500" : "bg-amber-500")
+                  : (isOverBudget ? "bg-amber-500" : "bg-emerald-500")
               )}
               style={{ width: `${!isCurrentWeek ? 100 : Math.min(100, (dayOfWeek / 7) * 100)}%` }}
             />
           </div>
-          <div className="flex justify-between mt-3 text-[10px] font-bold text-muted-foreground/60 uppercase tracking-widest">
+          <div className="flex justify-between mt-2.5 text-[9px] sm:text-[10px] font-bold text-muted-foreground/60 uppercase tracking-widest">
             <span>{format(now, 'EEEE')}</span>
-            <span>{!isCurrentWeek ? 'Week Complete (7 of 7 days)' : `${daysLeft} Day${daysLeft !== 1 ? 's' : ''} Left`}</span>
+            <span>{!isCurrentWeek ? 'Week Complete (7/7d)' : `${daysLeft} Day${daysLeft !== 1 ? 's' : ''} Left`}</span>
           </div>
         </div>
       </div>
@@ -884,18 +1007,18 @@ export default function FinanceBudget() {
         <div className={cn(
           "bg-white rounded-2xl border-2 p-4 sm:p-5",
           (!isCurrentWeek ? weekNetDifference < 0 : isOverBudget)
-            ? "border-destructive/50 shadow-[4px_4px_0px_0px_rgba(220,38,38,0.15)]"
+            ? "border-amber-400/50 shadow-[4px_4px_0px_0px_rgba(245,158,11,0.15)]"
             : "border-[#22C55E]/40 shadow-[4px_4px_0px_0px_rgba(34,197,94,0.15)]"
         )}>
           <p className={cn(
             "text-[10px] font-display font-bold uppercase tracking-[0.15em] mb-2",
-            (!isCurrentWeek ? weekNetDifference < 0 : isOverBudget) ? "text-destructive" : "text-[#166534]"
+            (!isCurrentWeek ? weekNetDifference < 0 : isOverBudget) ? "text-amber-800" : "text-[#166534]"
           )}>
             {!isCurrentWeek ? 'Total Spent' : 'Spent So Far'}
           </p>
           <p className={cn(
             "font-display font-black tabular-nums text-2xl sm:text-3xl leading-none",
-            (!isCurrentWeek ? weekNetDifference < 0 : isOverBudget) ? 'text-destructive' : 'text-slate-900'
+            (!isCurrentWeek ? weekNetDifference < 0 : isOverBudget) ? 'text-amber-800' : 'text-slate-900'
           )}>
             {fmt(essentialSpentThisWeek + effectiveFunSpent)}
           </p>
@@ -934,15 +1057,17 @@ export default function FinanceBudget() {
             />
           ))}
         </div>
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-3 text-[10px] text-muted-foreground">
-          {pulseSegments.map((s, i) => (
-            <div key={i} className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-sm" style={{ backgroundColor: s.color }} />
-              <span>{s.label}</span>
-              <span className="tabular-nums font-semibold text-foreground/80">{fmt(s.value)}</span>
-            </div>
-          ))}
-          <div className="flex items-center gap-1.5 ml-auto">
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 mt-3 text-[10px] text-muted-foreground">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            {pulseSegments.map((s, i) => (
+              <div key={i} className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-sm" style={{ backgroundColor: s.color }} />
+                <span>{s.label}</span>
+                <span className="tabular-nums font-semibold text-foreground/80">{fmt(s.value)}</span>
+              </div>
+            ))}
+          </div>
+          <div className="flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-sm bg-muted/70" />
             <span>Remaining</span>
             <span className="tabular-nums font-semibold text-foreground/80">{fmt(pulseRemaining)}</span>
@@ -953,30 +1078,30 @@ export default function FinanceBudget() {
       {/* === CONTEXTUAL INSIGHT === */}
       <Card className={cn(
         "border shadow-sm",
-        insightTone === 'bad' && "border-destructive/20 bg-destructive/[0.03]",
+        insightTone === 'bad' && "border-amber-500/25 bg-amber-500/[0.04]",
         insightTone === 'warn' && "border-amber-500/25 bg-amber-500/[0.03]",
         insightTone === 'good' && "border-border bg-card",
       )}>
-        <CardContent className="p-5 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-4">
+        <CardContent className="p-4 sm:p-5 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3 sm:gap-4 min-w-0">
             <div className={cn(
-              "w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0",
+              "w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center flex-shrink-0",
               insightTone === 'good' && "bg-emerald-50 dark:bg-emerald-500/10",
               insightTone === 'warn' && "bg-amber-500/10",
-              insightTone === 'bad' && "bg-destructive/10",
+              insightTone === 'bad' && "bg-amber-500/10",
             )}>
-              {insightTone === 'good' && <Check className="w-5 h-5 text-emerald-600" />}
-              {insightTone === 'warn' && <History className="w-5 h-5 text-amber-600" />}
-              {insightTone === 'bad' && <Lock className="w-5 h-5 text-destructive" />}
+              {insightTone === 'good' && <Check className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-600" />}
+              {insightTone === 'warn' && <History className="w-4 h-4 sm:w-5 sm:h-5 text-amber-600" />}
+              {insightTone === 'bad' && <Sparkles className="w-4 h-4 sm:w-5 sm:h-5 text-amber-600" />}
             </div>
-            <div>
+            <div className="min-w-0">
               <p className={cn(
-                "text-sm font-semibold",
+                "text-sm font-semibold truncate",
                 insightTone === 'good' && "text-foreground",
                 insightTone === 'warn' && "text-amber-700 dark:text-amber-400",
-                insightTone === 'bad' && "text-destructive",
+                insightTone === 'bad' && "text-amber-800",
               )}>{insightTitle}</p>
-              <p className="text-xs text-muted-foreground">{insightSubtitle}</p>
+              <p className="text-xs text-muted-foreground line-clamp-2 sm:line-clamp-none">{insightSubtitle}</p>
             </div>
           </div>
           <Badge variant="outline" className="text-[10px] whitespace-nowrap hidden sm:inline-flex">
@@ -985,12 +1110,10 @@ export default function FinanceBudget() {
         </CardContent>
       </Card>
 
-
-
       {/* === DETAIL DRILL-DOWNS (Essentials / Fun / Bills) === */}
       <div>
         <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-muted-foreground/75 mb-3">Pool Breakdown</p>
-        <div className={cn('grid grid-cols-1 sm:grid-cols-2 gap-4', snapshot.isTravelWeek ? 'md:grid-cols-2 xl:grid-cols-4' : 'md:grid-cols-2 xl:grid-cols-4')}>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
           <MetricCard
             label={!isCurrentWeek ? "Total Spent" : "Spent This Week"}
             value={fmt(essentialSpentThisWeek + effectiveFunSpent)}
@@ -1249,35 +1372,48 @@ export default function FinanceBudget() {
           </div>
 
           {/* Hero: Left to Spend */}
-          <div className="flex items-end justify-between gap-4">
+          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 sm:gap-4">
             <div>
-              <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Left to Spend</p>
-              <p className={`text-3xl font-semibold tracking-tight tabular-nums ${combinedSafeToSpend < 0 ? 'text-destructive' : 'text-foreground'}`}>
+              <p className="text-[10px] sm:text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Left to Spend</p>
+              <p className={`text-2xl sm:text-3xl font-black tracking-tight tabular-nums ${combinedSafeToSpend < 0 ? 'text-amber-700' : 'text-foreground'}`}>
                 {combinedSafeToSpend < 0 ? `−${fmt(Math.abs(combinedSafeToSpend))}` : fmt(combinedSafeToSpend)}
               </p>
             </div>
-            <div className="text-right text-xs font-medium text-muted-foreground tabular-nums space-y-0.5">
+            <div className="text-left sm:text-right text-xs font-medium text-muted-foreground tabular-nums space-y-0.5">
               <div>{fmt(essentialSpentThisWeek + funSpentThisWeek)} of {fmt(totalWeeklyBudget)}</div>
               {snapshot.boostAmount > 0 && <div className="text-emerald-600 font-semibold">+{fmt(snapshot.boostAmount)} boosts</div>}
-              {snapshot.carryForwardDebt > 0 && <div className="text-destructive font-semibold">−{fmt(snapshot.carryForwardDebt)} last week overspend</div>}
+              {snapshot.carryForwardDebt > 0 && <div className="text-amber-700 font-semibold">−{fmt(snapshot.carryForwardDebt)} last week overspend</div>}
             </div>
           </div>
 
           {/* Where it's going */}
           {allVariableCategories.length > 0 && (
             <div className="pt-4 border-t border-border/50">
-              <div className="flex items-center justify-between gap-6">
-                <div className="flex flex-col gap-2.5 flex-1 min-w-0">
+              <div className="flex flex-col md:flex-row items-center justify-between gap-6">
+                <div className="w-full flex justify-center md:hidden pb-2">
+                  <MultiSegmentDonut
+                    segments={allVariableCategories.map((cat) => ({
+                      color: cat.color || '#FF2EB8',
+                      value: thisWeekByCategory.get(cat.catId) || 0,
+                      label: cat.name,
+                    }))}
+                    total={totalWeeklyBudget}
+                    size={120}
+                    centerTop={fmt(essentialSpentThisWeek + funSpentThisWeek)}
+                    centerBottom={`/ ${fmt(totalWeeklyBudget)}`}
+                  />
+                </div>
+                <div className="flex flex-col gap-2.5 w-full md:flex-1 min-w-0">
                   {allVariableCategories.map((cat) => {
                     const actualSpent = thisWeekByCategory.get(cat.catId) || 0;
                     return (
                       <button
                         key={cat.catId}
                         onClick={() => setSelectedCategory(cat)}
-                        className="flex items-center gap-2.5 w-full text-left p-1 -m-1 rounded-md hover:bg-muted/40 transition-colors"
+                        className="flex items-center gap-2.5 w-full text-left p-1.5 -m-1 rounded-lg hover:bg-muted/40 transition-colors"
                       >
                         <span
-                          className="w-1.5 h-1.5 rounded-full shrink-0"
+                          className="w-2 h-2 rounded-full shrink-0"
                           style={{ backgroundColor: cat.color || '#FF2EB8' }}
                         />
                         <span className="text-xs font-medium text-muted-foreground truncate">{cat.name}</span>
@@ -1286,17 +1422,19 @@ export default function FinanceBudget() {
                     );
                   })}
                 </div>
-                <MultiSegmentDonut
-                  segments={allVariableCategories.map((cat) => ({
-                    color: cat.color || '#FF2EB8',
-                    value: thisWeekByCategory.get(cat.catId) || 0,
-                    label: cat.name,
-                  }))}
-                  total={totalWeeklyBudget}
-                  size={115}
-                  centerTop={fmt(essentialSpentThisWeek + funSpentThisWeek)}
-                  centerBottom={`/ ${fmt(totalWeeklyBudget)}`}
-                />
+                <div className="hidden md:block shrink-0">
+                  <MultiSegmentDonut
+                    segments={allVariableCategories.map((cat) => ({
+                      color: cat.color || '#FF2EB8',
+                      value: thisWeekByCategory.get(cat.catId) || 0,
+                      label: cat.name,
+                    }))}
+                    total={totalWeeklyBudget}
+                    size={120}
+                    centerTop={fmt(essentialSpentThisWeek + funSpentThisWeek)}
+                    centerBottom={`/ ${fmt(totalWeeklyBudget)}`}
+                  />
+                </div>
               </div>
 
               <p className="text-[10px] font-medium text-muted-foreground/80 pt-4 mt-4 border-t border-border/40">

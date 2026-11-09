@@ -41,7 +41,7 @@ export function useWeeklyBoostsState() {
 
   useEffect(() => { fetchBoosts(); }, [fetchBoosts]);
 
-  const addBoost = async (goalId: string, amount: number, note?: string) => {
+  const addBoost = async (goalId: string, amount: number, note?: string, weekStart?: string) => {
     if (!user) return;
     const { error } = await supabase
       .from('finance_weekly_boosts' as any)
@@ -49,15 +49,39 @@ export function useWeeklyBoostsState() {
         user_id: user.id,
         goal_id: goalId,
         amount,
-        week_start: currentWeekStart,
+        week_start: weekStart || currentWeekStart,
         note: note || null,
       } as any);
     if (error) {
-      toast.error('Failed to add boost');
+      toast.error('Failed to save weekly budget adjustment');
       return;
     }
-    toast.success(`Added boost of ${amount} for this week`);
-    fetchBoosts();
+    if (amount >= 0) {
+      toast.success(`Added boost of ${amount} for this week`);
+    }
+    await fetchBoosts();
+  };
+
+  const addBoostBatch = async (
+    items: { goalId: string; amount: number; weekStart: string; note?: string }[]
+  ) => {
+    if (!user || items.length === 0) return false;
+    const rows = items.map(item => ({
+      user_id: user.id,
+      goal_id: item.goalId,
+      amount: item.amount,
+      week_start: item.weekStart,
+      note: item.note || null,
+    }));
+    const { error } = await supabase
+      .from('finance_weekly_boosts' as any)
+      .insert(rows as any);
+    if (error) {
+      toast.error('Failed to schedule weekly pot deductions');
+      return false;
+    }
+    await fetchBoosts();
+    return true;
   };
 
   const removeBoost = async (id: string) => {
@@ -66,17 +90,17 @@ export function useWeeklyBoostsState() {
       .delete()
       .eq('id', id);
     if (error) {
-      toast.error('Failed to remove boost');
+      toast.error('Failed to remove adjustment');
       return;
     }
-    fetchBoosts();
+    await fetchBoosts();
   };
 
   const totalBoostThisWeek = boosts
     .filter(b => b.week_start === currentWeekStart)
     .reduce((s, b) => s + b.amount, 0);
 
-  return { boosts, loading, addBoost, removeBoost, totalBoostThisWeek, refetch: fetchBoosts };
+  return { boosts, loading, addBoost, addBoostBatch, removeBoost, totalBoostThisWeek, refetch: fetchBoosts };
 }
 
 export function useWeeklyBoosts() {
