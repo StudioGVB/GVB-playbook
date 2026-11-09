@@ -1950,9 +1950,9 @@ export function useFinanceDataState() {
       user_id: user.id,
       ...log,
     });
-    // Auto-prune logs older than 7 days to keep database lean
-    const sevenDaysAgo = subDays(new Date(), 7).toISOString();
-    supabase.from('finance_import_logs').delete().lt('created_at', sevenDaysAgo).then(() => {}).catch(() => {});
+    // Auto-prune logs older than 90 days to keep database lean without losing history
+    const ninetyDaysAgo = subDays(new Date(), 90).toISOString();
+    supabase.from('finance_import_logs').delete().lt('created_at', ninetyDaysAgo).then(() => {}).catch(() => {});
     fetchAll();
   };
 

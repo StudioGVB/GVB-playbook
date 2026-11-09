@@ -39,8 +39,9 @@ export default function DataStorageManager({
   const [writeTestStatus, setWriteTestStatus] = useState<'idle' | 'success' | 'readonly' | 'error'>('idle');
   const [writeTestMsg, setWriteTestMsg] = useState('');
 
-  // 90 days threshold date
-  const cutoffDate90 = useMemo(() => subDays(new Date(), 90), []);
+  // Configurable retention window for active granular transactions (default: 180 days / 6 months)
+  const [retentionDays, setRetentionDays] = useState<number>(180);
+  const cutoffDate = useMemo(() => subDays(new Date(), retentionDays), [retentionDays]);
 
   // Trip date ranges to protect Holiday Mode
   const tripIntervals = useMemo(() => {
@@ -57,7 +58,7 @@ export default function DataStorageManager({
 
   // Analyze transaction storage distribution
   const analysis = useMemo(() => {
-    let olderThan90Count = 0;
+    let olderThanCutoffCount = 0;
     let tripTaggedCount = 0;
     let bloatedRawCount = 0;
     let oldestDate: Date | null = null;
@@ -68,8 +69,8 @@ export default function DataStorageManager({
       if (!oldestDate || d < oldestDate) oldestDate = d;
       if (!newestDate || d > newestDate) newestDate = d;
 
-      if (d < cutoffDate90) {
-        olderThan90Count++;
+      if (d < cutoffDate) {
+        olderThanCutoffCount++;
       }
 
       // Check if linked to holiday mode / trip
@@ -87,14 +88,14 @@ export default function DataStorageManager({
 
     return {
       total: transactions.length,
-      olderThan90Count,
-      recent90Count: Math.max(0, transactions.length - olderThan90Count),
+      olderThanCutoffCount,
+      recentCutoffCount: Math.max(0, transactions.length - olderThanCutoffCount),
       tripTaggedCount,
       bloatedRawCount,
       oldestDate: oldestDate ? format(oldestDate, 'MMM d, yyyy') : 'N/A',
       newestDate: newestDate ? format(newestDate, 'MMM d, yyyy') : 'N/A',
     };
-  }, [transactions, cutoffDate90, tripIntervals]);
+  }, [transactions, cutoffDate, tripIntervals]);
 
   // Export complete JSON backup
   const handleExportBackup = () => {
@@ -183,12 +184,12 @@ export default function DataStorageManager({
     const toastId = toast.loading('Slimming transaction metadata & purging debug logs...');
 
     try {
-      // 1. Purge import logs older than 7 days
-      const sevenDaysAgo = subDays(new Date(), 7).toISOString();
+      // 1. Purge import logs older than 90 days (keeps 3 full months of CSV upload logs)
+      const ninetyDaysAgo = subDays(new Date(), 90).toISOString();
       const { error: logErr } = await supabase
         .from('finance_import_logs')
         .delete()
-        .lt('created_at', sevenDaysAgo);
+        .lt('created_at', ninetyDaysAgo);
 
       if (logErr) {
         console.warn('Import logs cleanup notice:', logErr);
@@ -232,11 +233,11 @@ export default function DataStorageManager({
     }
   };
 
-  // Archive & Roll Old Transactions (>90 Days) while protecting Holiday Mode
+  // Archive & Roll Old Transactions while protecting Holiday Mode
   const handleArchiveOldTransactions = async () => {
     if (!user) return;
     if (!window.confirm(
-      `This will aggregate ${analysis.olderThan90Count} transactions older than 90 days into monthly totals and remove the old individual line items to free up database space.\n\nAll Holiday Mode trips and active goals are 100% protected and will NOT be deleted.\n\nHave you exported a backup first?`
+      `This will aggregate ${analysis.olderThanCutoffCount} transactions older than ${retentionDays} days into monthly totals and remove the old individual line items to free up database space.\n\nAll Holiday Mode trips and active goals are 100% protected and will NOT be deleted.\n\nHave you exported a backup first?`
     )) {
       return;
     }
@@ -245,10 +246,10 @@ export default function DataStorageManager({
     const toastId = toast.loading('Aggregating historical transactions and pruning database...');
 
     try {
-      // Find candidate transactions older than 90 days that are NOT tied to Holiday Mode
+      // Find candidate transactions older than cutoffDate that are NOT tied to Holiday Mode
       const candidates = transactions.filter(tx => {
         const d = new Date(tx.posted_at);
-        if (d >= cutoffDate90) return false; // Keep recent 90 days
+        if (d >= cutoffDate) return false; // Keep recent window
 
         // Protect Holiday Mode trips & tagged transactions
         const isTrip = Boolean(
@@ -372,6 +373,36 @@ export default function DataStorageManager({
           </div>
         )}
 
+        {/* Retention Window Selector */}
+        <div className="flex items-center justify-between flex-wrap gap-2 p-3.5 rounded-xl bg-slate-50 border border-slate-200">
+          <div className="space-y-0.5">
+            <span className="text-xs font-bold text-slate-900 block">Granular Transaction History Window</span>
+            <p className="text-[11px] text-slate-500">
+              Keep individual transactions for this duration. Older historical months can be condensed into monthly totals.
+            </p>
+          </div>
+          <div className="flex items-center gap-1.5 bg-white p-1 rounded-lg border border-slate-200 shadow-2xs">
+            {[
+              { label: '6 Months (180d)', value: 180 },
+              { label: '1 Full Year (365d)', value: 365 },
+              { label: '3 Months (90d)', value: 90 },
+            ].map(opt => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => setRetentionDays(opt.value)}
+                className={`text-xs px-2.5 py-1 rounded-md font-bold transition-all cursor-pointer ${
+                  retentionDays === opt.value
+                    ? 'bg-teal-700 text-white shadow-2xs'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* Live Metrics Grid */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80">
@@ -383,9 +414,9 @@ export default function DataStorageManager({
           </div>
 
           <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80">
-            <span className="text-[11px] text-slate-500 font-medium block">Active Window (&le;90d)</span>
+            <span className="text-[11px] text-slate-500 font-medium block">Active Window (&le;{retentionDays}d)</span>
             <span className="text-xl font-bold font-display text-emerald-700 mt-0.5 block">
-              {analysis.recent90Count.toLocaleString()}
+              {analysis.recentCutoffCount.toLocaleString()}
             </span>
             <span className="text-[10px] text-slate-400">Daily living & pots</span>
           </div>
@@ -399,9 +430,9 @@ export default function DataStorageManager({
           </div>
 
           <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80">
-            <span className="text-[11px] text-slate-500 font-medium block">Older History (&gt;90d)</span>
+            <span className="text-[11px] text-slate-500 font-medium block">Older History (&gt;{retentionDays}d)</span>
             <span className="text-xl font-bold font-display text-amber-700 mt-0.5 block">
-              {analysis.olderThan90Count.toLocaleString()}
+              {analysis.olderThanCutoffCount.toLocaleString()}
             </span>
             <span className="text-[10px] text-slate-400">Eligible for roll-up</span>
           </div>
@@ -453,7 +484,7 @@ export default function DataStorageManager({
                   <h5 className="font-bold text-xs text-emerald-950">2. Strip Heavy Metadata</h5>
                 </div>
                 <p className="text-[11px] text-emerald-800 leading-relaxed">
-                  Removes giant raw API JSON blobs and purges old sync logs. <strong>No transactions deleted</strong>. Saves up to 70% space!
+                  Removes giant raw API JSON blobs and purges old sync logs older than 90 days. <strong>No transactions deleted</strong>. Saves up to 70% space!
                 </p>
               </div>
               <Button
@@ -466,25 +497,25 @@ export default function DataStorageManager({
               </Button>
             </div>
 
-            {/* Step 3: Archive >90d */}
+            {/* Step 3: Archive >retentionDays */}
             <div className="p-4 rounded-xl border border-amber-200 bg-amber-50/40 space-y-3 flex flex-col justify-between">
               <div className="space-y-1">
                 <div className="flex items-center gap-1.5">
                   <History className="w-4 h-4 text-amber-800" />
-                  <h5 className="font-bold text-xs text-amber-950">3. Archive Old (&gt;90d)</h5>
+                  <h5 className="font-bold text-xs text-amber-950">3. Archive Old (&gt;{retentionDays}d)</h5>
                 </div>
                 <p className="text-[11px] text-amber-900 leading-relaxed">
-                  Condenses older transactions into monthly totals while protecting all Holiday Mode records.
+                  Condenses older transactions past {retentionDays} days into monthly totals while protecting all Holiday Mode records.
                 </p>
               </div>
               <Button
                 size="sm"
                 variant="outline"
                 onClick={handleArchiveOldTransactions}
-                disabled={isArchiving || analysis.olderThan90Count === 0}
+                disabled={isArchiving || analysis.olderThanCutoffCount === 0}
                 className="w-full text-xs font-bold border-amber-300 text-amber-900 hover:bg-amber-100"
               >
-                <Trash2 className="w-3.5 h-3.5 text-amber-700" /> Archive {analysis.olderThan90Count} Old Records
+                <Trash2 className="w-3.5 h-3.5 text-amber-700" /> Archive {analysis.olderThanCutoffCount} Old Records
               </Button>
             </div>
           </div>
