@@ -25,6 +25,8 @@ import { useWeeklyBoosts } from '@/hooks/useWeeklyBoosts';
 import { useWeekTypes } from '@/hooks/useWeekTypes';
 import { computePolicySnapshot } from '@/lib/policyEngine';
 import { triggerPreview8pmNotification, triggerPreview955pmNotification } from '@/lib/daily8pmNotification';
+import { useFinanceTrips } from '@/hooks/useFinanceTrips';
+import DataStorageManager from '@/components/finance/DataStorageManager';
 
 interface AdminUser {
   id: string;
@@ -41,6 +43,8 @@ export default function Settings() {
   const { monthlyTotalInternal: fixedExpensesMonthly, monthlyTotal: fixedExpensesMonthlyAll } = useFixedExpenses();
   const { totalBoostThisWeek } = useWeeklyBoosts();
   const { weekTypeMap: wtMap } = useWeekTypes();
+  const tripsState = useFinanceTrips();
+  const trips = tripsState.trips;
 
   const snapshot = useMemo(() => {
     if (!assumptions) return null;
@@ -417,6 +421,19 @@ export default function Settings() {
               </div>
             </CardContent>
           </Card>
+
+          {/* Database & Storage Health Manager */}
+          <DataStorageManager
+            user={user}
+            transactions={finance.transactions}
+            accounts={finance.accounts}
+            categories={finance.categories}
+            goals={finance.goals}
+            trips={trips}
+            settings={finance.settings}
+            assumptions={assumptions}
+            onRefresh={finance.fetchAll}
+          />
         </TabsContent>
 
         {isAdmin && (

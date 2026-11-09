@@ -99,12 +99,14 @@ const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 export default function FinanceBudget() {
   const finance = useFinanceData();
   const { assumptions, loading: assumptionsLoading, update: updateAssumptions } = useFinanceAssumptions();
-  const { expenses: fixedExpenses, monthlyTotalInternal: fixedExpensesMonthly, monthlyTotal: fixedExpensesMonthlyAll } = useFixedExpenses();
-  const { boosts, totalBoostThisWeek, addBoost, removeBoost } = useWeeklyBoosts();
-  const { getWeekType, weekTypeMap } = useWeekTypes();
-  const { trips } = useFinanceTrips();
+  const { expenses: fixedExpenses, loading: fixedExpensesLoading, monthlyTotalInternal: fixedExpensesMonthly, monthlyTotal: fixedExpensesMonthlyAll } = useFixedExpenses();
+  const { boosts, loading: boostsLoading, totalBoostThisWeek, addBoost, removeBoost } = useWeeklyBoosts();
+  const { getWeekType, weekTypeMap, loading: weekTypesLoading } = useWeekTypes();
+  const { trips, loading: tripsLoading } = useFinanceTrips();
   const { isPaidThisPeriod, markPaid, unmarkPaid, totalPaidThisMonth } = useFixedExpensePayments();
   const navigate = useNavigate();
+
+  const allDataReady = !finance.loading && !assumptionsLoading && !fixedExpensesLoading && !boostsLoading && !weekTypesLoading && !tripsLoading;
 
   const handleAddBoost = async (goalId: string, amount: number, note?: string) => {
     const goal = finance.goals.find(g => g.id === goalId);
@@ -172,7 +174,7 @@ export default function FinanceBudget() {
   }, [isCurrentWeek, today, weekStart]);
 
   const snapshot = useMemo(() => {
-    if (!assumptions) return null;
+    if (!assumptions || !allDataReady) return null;
     const computed = computePolicySnapshot(
       assumptions, finance.accounts, finance.transactions,
       finance.categories, finance.goals, finance.convertToBase,
@@ -196,7 +198,7 @@ export default function FinanceBudget() {
       }
     }
     return computed;
-  }, [assumptions, finance.accounts, finance.transactions, finance.categories, finance.goals, finance.convertToBase, fixedExpensesMonthly, fixedExpensesMonthlyAll, boostAmount, wtMap, trips, referenceDateForEngine, isCurrentWeek, selectedDate, today, stashGoal?.description, weekStartKey]);
+  }, [assumptions, allDataReady, finance.accounts, finance.transactions, finance.categories, finance.goals, finance.convertToBase, fixedExpensesMonthly, fixedExpensesMonthlyAll, boostAmount, wtMap, trips, referenceDateForEngine, isCurrentWeek, selectedDate, today, stashGoal?.description, weekStartKey]);
 
   // Emergency Fund Goal: find existing goal marked with is_emergency or named "Emergency"
   const emergencyGoal = useMemo(() => finance.goals.find(g => (g as any).is_emergency === true || g.name.toLowerCase().includes('emergency')), [finance.goals]);
@@ -223,11 +225,11 @@ export default function FinanceBudget() {
   const settleRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!snapshot || finance.loading || assumptionsLoading || !assumptions) return;
+    if (!snapshot || !allDataReady || !assumptions) return;
     const todayWeekStart = startOfWeek(today, { weekStartsOn: 1 });
     const prevWeekStart = startOfWeek(subDays(todayWeekStart, 1), { weekStartsOn: 1 });
     const prevWeekKey = format(prevWeekStart, 'yyyy-MM-dd');
-    const SETTLE_VERSION = 10;
+    const SETTLE_VERSION = 11;
 
     const { cleaned: dedupedTxsForSettle } = deduplicateTransactions(finance.transactions);
     const prevWeekSpend = computeWeekVariableSpend(dedupedTxsForSettle, finance.categories, prevWeekStart, trips);

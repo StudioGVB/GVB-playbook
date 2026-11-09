@@ -7,6 +7,7 @@ import { FinanceContext } from '@/contexts/FinanceContext';
 import { recalibrateBankTimestamp } from '@/lib/timezoneEngine';
 import { formatUkDate } from '@/lib/financeUtils';
 import { deduplicateTransactions } from '@/lib/deduplication';
+import { subDays } from 'date-fns';
 
 export interface FinanceAccount {
   id: string;
@@ -1629,11 +1630,7 @@ export function useFinanceDataState() {
           is_reimbursable: existing?.is_reimbursable ?? isGammaReimb,
           reimbursement_status: existing?.reimbursement_status ?? (isGammaReimb ? 'reimbursed' : null),
           transaction_fingerprint: fingerprint,
-          raw: {
-            category: tx.category || null,
-            merchantId: tx.merchant?.id || null,
-            scheme: tx.scheme || null,
-          },
+          raw: existing?.raw?.paycheck_allocated ? { paycheck_allocated: true } : null,
         });
       }
 
@@ -1953,6 +1950,9 @@ export function useFinanceDataState() {
       user_id: user.id,
       ...log,
     });
+    // Auto-prune logs older than 7 days to keep database lean
+    const sevenDaysAgo = subDays(new Date(), 7).toISOString();
+    supabase.from('finance_import_logs').delete().lt('created_at', sevenDaysAgo).then(() => {}).catch(() => {});
     fetchAll();
   };
 
