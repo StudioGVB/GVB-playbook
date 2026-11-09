@@ -93,7 +93,7 @@ export function FinanceDashboard() {
   }, []);
 
   const snapshot = useMemo(() => {
-    if (!assumptions) return null;
+    if (!assumptions || finance.loading) return null;
     return computePolicySnapshot(
       assumptions,
       finance.accounts,
@@ -109,6 +109,7 @@ export function FinanceDashboard() {
     );
   }, [
     assumptions,
+    finance.loading,
     finance.accounts,
     finance.transactions,
     finance.categories,
@@ -125,7 +126,7 @@ export function FinanceDashboard() {
   const fmt = (n: number) => formatCurrency(n, baseCurrency);
 
   const lastWeekSnapshot = useMemo(() => {
-    if (!assumptions) return null;
+    if (!assumptions || finance.loading) return null;
     const prevWeekStart = startOfWeek(addWeeks(new Date(), -1), { weekStartsOn: 1 });
     const prevWeekKey = format(prevWeekStart, 'yyyy-MM-dd');
     const prevWeekBoost = boosts
@@ -164,6 +165,7 @@ export function FinanceDashboard() {
     return computed;
   }, [
     assumptions,
+    finance.loading,
     finance.accounts,
     finance.transactions,
     finance.categories,
@@ -424,6 +426,25 @@ export function FinanceDashboard() {
 
   const hour = now.getHours();
   const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+
+  if (finance.loading || assumptionsLoading || !snapshot) {
+    return (
+      <div className="space-y-5 max-w-5xl mx-auto pb-10 animate-pulse">
+        <div className="flex items-center justify-between gap-3">
+          <div className="h-7 w-48 bg-slate-200/70 rounded-xl" />
+          <div className="h-7 w-32 bg-slate-200/70 rounded-xl" />
+        </div>
+        <div className="h-28 bg-slate-200/60 rounded-[2.2rem]" />
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+          <div className="h-24 bg-slate-200/60 rounded-2xl" />
+          <div className="h-24 bg-slate-200/60 rounded-2xl" />
+          <div className="h-24 bg-slate-200/60 rounded-2xl" />
+          <div className="h-24 bg-slate-200/60 rounded-2xl" />
+        </div>
+        <div className="h-64 bg-slate-200/60 rounded-3xl" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-5 max-w-5xl mx-auto pb-10">

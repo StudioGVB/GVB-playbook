@@ -86,7 +86,7 @@ export function MondayWeeklyReviewCard({ finance, assumptions, trips = [], force
   }
 
   // Prevent premature zero-spend calculation while transactions are still loading
-  if (finance?.loading || !snapshot) {
+  if (finance?.loading || !snapshot || (finance.accounts && finance.accounts.length > 0 && (!finance.transactions || finance.transactions.length === 0))) {
     return null;
   }
 

@@ -135,7 +135,8 @@ export default function FinanceBudget() {
     }
   };
 
-  const allDataReady = !finance.loading && !assumptionsLoading && !fixedExpensesLoading && !boostsLoading && !weekTypesLoading && !tripsLoading;
+  const hasTransactionsLoaded = finance.accounts.length === 0 || finance.transactions.length > 0;
+  const allDataReady = !finance.loading && !assumptionsLoading && !fixedExpensesLoading && !boostsLoading && !weekTypesLoading && !tripsLoading && hasTransactionsLoaded;
 
   const handleAddBoost = async (goalId: string, amount: number, note?: string) => {
     const goal = finance.goals.find(g => g.id === goalId);
