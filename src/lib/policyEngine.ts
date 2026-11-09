@@ -6,6 +6,7 @@ import type { WeekType } from '@/hooks/useWeekTypes';
 import { isExcludedSpendDate, weekOverlapsExclusion, baseAmt, parseUkDate } from './financeUtils';
 import { calcTakeHome } from './ukTakeHome';
 import { deduplicateTransactions } from './deduplication';
+import { parseCoverMeta, planOverspendCover } from './overspendCover';
 
 
 // ---- Trip helpers ----
@@ -656,9 +657,17 @@ export function computePolicySnapshot(
     : split;
   const lastWeekBaseFun = lastWeekSplit.weeklyFunAmount + (lastWeekActualIncome.total > 0 ? lastWeekActualIncome.otherWeeklyBonus : 0);
 
+  const lastWeekKey = format(lastWeekStart, 'yyyy-MM-dd');
+  const stashGoal = goals.find(g => (g as any).is_stash === true || g.name.toLowerCase().includes('stash')) || null;
+  const stashMeta = parseCoverMeta((stashGoal as any)?.description);
+  const lockedLastWeek = stashMeta.closed_weeks?.[lastWeekKey];
+  const effectiveLastWeekBudget = lockedLastWeek && lockedLastWeek.totalBudget > 0
+    ? lockedLastWeek.totalBudget
+    : (lastWeekEssentialBudget + lastWeekBaseFun);
+
   const lastWeekOverspend = Math.max(
     0,
-    Math.round(((lastWeekEssentialSpent + lastWeekFunSpent) - (lastWeekEssentialBudget + lastWeekBaseFun)) * 100) / 100,
+    Math.round(((lastWeekEssentialSpent + lastWeekFunSpent) - effectiveLastWeekBudget) * 100) / 100,
   );
 
   // Carry-forward debt: only applies to the week matching assumptions.last_debt_week,
@@ -668,9 +677,28 @@ export function computePolicySnapshot(
   const isViewingCurrentWeek = currentWeekKey === todayWeekKey;
   const debtAppliesThisWeek = assumptions.last_debt_week === currentWeekKey;
   const storedDebt = debtAppliesThisWeek ? (assumptions.carry_forward_debt ?? 0) : 0;
-  const carryForwardDebt = debtAppliesThisWeek
-    ? storedDebt
-    : (isViewingCurrentWeek ? lastWeekOverspend : 0);
+
+  let preSettleDebt = 0;
+  if (isViewingCurrentWeek && !debtAppliesThisWeek) {
+    if (stashMeta.last_settled_week === lastWeekKey) {
+      preSettleDebt = stashMeta.last_cover?.week === lastWeekKey
+        ? ((stashMeta.last_cover.steps?.find(s => s.source === 'next_week')?.amount ?? 0) + (stashMeta.last_cover.leftoverDebt ?? 0))
+        : 0;
+    } else if (lastWeekOverspend > 0) {
+      const plan = planOverspendCover({
+        overspend: lastWeekOverspend,
+        stash: (stashGoal as any) || null,
+        nextWeekFun: baseWeeklyFun,
+        goals: goals as any,
+        trips: trips as any,
+        meta: stashMeta,
+        now,
+      });
+      preSettleDebt = plan.nextWeekDeduction + plan.leftoverDebt;
+    }
+  }
+
+  const carryForwardDebt = debtAppliesThisWeek ? storedDebt : preSettleDebt;
   const effectiveDebt = !isTravelWeek ? carryForwardDebt : 0;
 
   // Deduct last week's overspend from this week's fun budget

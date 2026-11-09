@@ -40,6 +40,7 @@ export function FinanceDashboard() {
   const finance = useFinanceData();
   const { assumptions, loading: assumptionsLoading } = useFinanceAssumptions();
   const {
+    expenses: fixedExpenses,
     monthlyTotal: fixedExpensesMonthlyAll,
     monthlyTotalInternal: fixedExpensesMonthly,
   } = useFixedExpenses();
@@ -189,9 +190,43 @@ export function FinanceDashboard() {
     (tx: typeof finance.transactions[0]): boolean => {
       if (tx.is_fixed || tx.fixed_expense_id) return true;
       const cat = catMap.get(tx.category_id || '');
-      return cat?.type === 'fixed';
+      if (cat?.type === 'fixed') return true;
+
+      const amt = Math.abs(baseAmt(tx));
+      const desc = `${tx.merchant || ''} ${tx.description || ''} ${cat?.name || ''}`.toLowerCase();
+
+      // Explicit rent check (e.g. rent, flat, landlord, accommodation, tenancy)
+      if (desc.includes('rent') || desc.includes('flat') || desc.includes('landlord') || desc.includes('accommodation') || desc.includes('tenancy')) {
+        return true;
+      }
+
+      // Match against configured fixed expenses (e.g. UK Flat £720, subscriptions, etc.)
+      for (const fe of fixedExpenses) {
+        const feAmt = finance.convertToBase(fe.amount, fe.currency);
+        const amountClose = Math.abs(amt - feAmt) <= Math.max(2, feAmt * 0.05);
+        if (!amountClose) continue;
+
+        const feName = fe.name.toLowerCase();
+        const feTokens = feName.split(/\s+/).filter(w => w.length >= 3);
+        const nameMatches = feTokens.some(w => desc.includes(w));
+        if (nameMatches) return true;
+
+        if (feAmt >= 200 && amountClose) {
+          if (fe.due_day) {
+            const d = parseUkDate(tx.posted_at);
+            const day = getDate(d);
+            if (Math.abs(day - fe.due_day) <= 4 || Math.abs(day - (fe.due_day + 30)) <= 4) {
+              return true;
+            }
+          } else {
+            return true;
+          }
+        }
+      }
+
+      return false;
     },
-    [catMap]
+    [catMap, fixedExpenses, finance.convertToBase]
   );
 
   // Current week & month windows

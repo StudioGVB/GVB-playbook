@@ -40,6 +40,8 @@ function titleMatches(expenseName: string, txDesc: string): boolean {
   if (nTx.includes(nExp) || nExp.includes(nTx)) return true;
   if (/\b(lyca|lycamobile|mobile|phone|sim|vodafone|optus|telstra|ee|o2|giffgaff|three)\b/i.test(txDesc)
     && /\b(phone|mobile|sim|plan|bill)\b/i.test(expenseName)) return true;
+  if (/\b(rent|flat|landlord|accommodation|tenancy|standing order)\b/i.test(txDesc)
+    && /\b(rent|flat|housing|accommodation)\b/i.test(expenseName)) return true;
   const expTokens = tokens(expenseName);
   const txTokens = new Set(tokens(txDesc));
   return expTokens.some(t => txTokens.has(t));
@@ -114,8 +116,13 @@ export function useAutoLinkFixedBills(params: {
         const nativeMatches = expenseCurrency === (tx.currency || 'AUD') && amountMatches(Number(fe.amount), absAmt);
         const baseMatches = !!baseCurrency && expenseCurrency === baseCurrency && baseAbsAmt != null && amountMatches(Number(fe.amount), baseAbsAmt);
         if (!nativeMatches && !baseMatches) return false;
-        if (!titleMatches(`${fe.name} ${fe.notes || ''}`, `${tx.merchant || ''} ${tx.description || ''}`)) return false;
-        if (fe.due_day && !dayDiff(fe.due_day, tx.posted_at)) return false;
+        const descText = `${tx.merchant || ''} ${tx.description || ''}`;
+        const isRentExp = fe.name.toLowerCase().includes('rent') || fe.name.toLowerCase().includes('flat');
+        const descLower = descText.toLowerCase();
+        const hasRentKeyword = descLower.includes('rent') || descLower.includes('flat') || descLower.includes('landlord') || descLower.includes('accommodation') || descLower.includes('tenancy') || descLower.includes('standing order');
+        const titleOk = titleMatches(`${fe.name} ${fe.notes || ''}`, descText) || (isRentExp && hasRentKeyword);
+        if (!titleOk) return false;
+        if (fe.due_day && !dayDiff(fe.due_day, tx.posted_at, isRentExp ? 6 : 5)) return false;
         return true;
       });
       if (match) updates.push({ id: tx.id, fixed_expense_id: match.id });

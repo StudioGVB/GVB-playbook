@@ -165,12 +165,47 @@ export default function FinanceMonthly() {
     });
   }, [dedupedAllTxns, prevMonthStart, prevMonthEnd, getEffectiveTxMonthDateLocal]);
 
-  // Treat transaction as fixed bill if linked to fixed expense, has is_fixed flag, or belongs to fixed category
+  // Treat transaction as fixed bill if linked to fixed expense, has is_fixed flag, belongs to fixed category, or matches a recurring fixed bill (e.g. rent £720)
   const isFixedTx = useCallback((tx: any): boolean => {
     if (tx.is_fixed || tx.fixed_expense_id) return true;
     const cat = catMap.get(tx.category_id || '');
-    return cat?.type === 'fixed';
-  }, [catMap]);
+    if (cat?.type === 'fixed') return true;
+
+    const amt = Math.abs(baseAmt(tx));
+    const desc = `${tx.merchant || ''} ${tx.description || ''} ${cat?.name || ''}`.toLowerCase();
+
+    // Explicit rent check (e.g. rent, flat, landlord, accommodation, tenancy)
+    if (desc.includes('rent') || desc.includes('flat') || desc.includes('landlord') || desc.includes('accommodation') || desc.includes('tenancy')) {
+      return true;
+    }
+
+    // Match against configured fixed expenses (e.g. UK Flat £720, subscriptions, etc.)
+    for (const fe of fixedExpenses) {
+      const feAmt = finance.convertToBase(fe.amount, fe.currency);
+      const amountClose = Math.abs(amt - feAmt) <= Math.max(2, feAmt * 0.05);
+      if (!amountClose) continue;
+
+      const feName = fe.name.toLowerCase();
+      const feTokens = feName.split(/\s+/).filter(w => w.length >= 3);
+      const nameMatches = feTokens.some(w => desc.includes(w));
+      if (nameMatches) return true;
+
+      // If amount specifically matches rent (£720) or high fixed bill near due day
+      if (feAmt >= 200 && amountClose) {
+        if (fe.due_day) {
+          const d = parseUkDate(tx.posted_at);
+          const day = getDate(d);
+          if (Math.abs(day - fe.due_day) <= 4 || Math.abs(day - (fe.due_day + 30)) <= 4) {
+            return true;
+          }
+        } else {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }, [catMap, fixedExpenses, finance.convertToBase]);
 
   // Spending breakdown (strictly separating Fixed Bills from Variable Categories)
   const { essentialSpent, funSpent, fixedSpent, incomeTotal, variableCategoryBreakdown, paidFixedTxns, dailyData } = useMemo(() => {
@@ -1200,7 +1235,7 @@ export default function FinanceMonthly() {
                         </Badge>
                       </div>
                       <p className="text-xs text-slate-500 mt-0.5">
-                        Fixed bills ({fmt(fixedMonthly)}/mo) are separated so your daily pace only tracks controllable spending ({fmt(monthlyVariableBudget)}/mo budget).
+                        Fixed bills like rent ({fmt(fixedMonthly)}/mo) are fully separated and accounted for upfront, so your daily pace only tracks controllable spending ({fmt(monthlyVariableBudget)}/mo budget).
                       </p>
                     </div>
                   </div>

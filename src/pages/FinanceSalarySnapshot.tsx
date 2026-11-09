@@ -261,6 +261,7 @@ export default function FinanceSalarySnapshot() {
             committedBills={fixedAll}
             totalMonthlyIncome={totalMonthlyIncome}
             receivedIncomeSources={receivedIncomeSources}
+            fixedExpenses={fixedExpenses}
           />
         </TabsContent>
 

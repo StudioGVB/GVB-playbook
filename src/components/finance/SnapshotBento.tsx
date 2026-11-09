@@ -19,10 +19,11 @@ type Props = {
   committedBills: number; // GBP monthly committed
   totalMonthlyIncome: number;
   receivedIncomeSources: Array<{ label: string; total: number }>;
+  fixedExpenses?: any[];
 };
 
 export default function SnapshotBento({
-  assumptions, snapshot, takeHome, transactions, categories, committedBills, totalMonthlyIncome, receivedIncomeSources,
+  assumptions, snapshot, takeHome, transactions, categories, committedBills, totalMonthlyIncome, receivedIncomeSources, fixedExpenses = [],
 }: Props) {
   const now = new Date();
   const mStart = startOfMonth(now);
@@ -53,14 +54,38 @@ export default function SnapshotBento({
     for (const t of monthTx) {
       if (t.amount >= 0) continue;
       const gbpAmt = Math.abs(baseAmt(t as any));
-      if (t.fixed_expense_id) { bills += gbpAmt; continue; }
+      const desc = `${t.merchant || ''} ${t.description || ''}`.toLowerCase();
       const type = catType.get(t.category_id || '');
-      if (essentialCatIds.has(t.category_id || '')) { essentials += gbpAmt; continue; }
-      if (type === 'fixed') { bills += gbpAmt; continue; }
+
+      // Check fixed expenses: explicit link, category, keywords (rent, flat, landlord), or template match
+      const isFixed =
+        Boolean(t.fixed_expense_id) ||
+        Boolean((t as any).is_fixed) ||
+        type === 'fixed' ||
+        desc.includes('rent') ||
+        desc.includes('flat') ||
+        desc.includes('landlord') ||
+        desc.includes('accommodation') ||
+        desc.includes('tenancy') ||
+        (Array.isArray(fixedExpenses) && fixedExpenses.some((fe: any) => {
+          const feAmt = Number(fe.amount) || 0;
+          return Math.abs(gbpAmt - feAmt) <= Math.max(2, feAmt * 0.05);
+        }));
+
+      if (isFixed) {
+        bills += gbpAmt;
+        continue;
+      }
+
+      if (essentialCatIds.has(t.category_id || '')) {
+        essentials += gbpAmt;
+        continue;
+      }
+
       fun += gbpAmt;
     }
     return { bills, essentials, fun, total: bills + essentials + fun };
-  }, [monthTx, essentialCatIds, catType]);
+  }, [monthTx, essentialCatIds, catType, fixedExpenses]);
 
   const netMonth = totalMonthlyIncome > 0 ? totalMonthlyIncome : takeHome.netMonthly;
   const netWeekly = totalMonthlyIncome > 0 ? (totalMonthlyIncome * 12) / 52 : takeHome.netWeekly;
@@ -88,7 +113,11 @@ export default function SnapshotBento({
   const dayOfWeek = now.getDay();
   const daysLeftInWeek = ((7 - (dayOfWeek === 0 ? 7 : dayOfWeek)) % 7) + (dayOfWeek === 0 ? 0 : 1);
 
-  const expectedByNow = (committedBills + essentialAvgMonthly + funCapMonthly) * monthProgress;
+  // Early-month fixed bills (e.g. £720 rent on the 1st) are expected upfront when due/paid
+  // rather than prorated uniformly day-by-day.
+  const billsExpectedByNow = Math.min(committedBills, Math.max(monthSpend.bills, committedBills * monthProgress));
+  const variableExpectedByNow = (essentialAvgMonthly + funCapMonthly) * monthProgress;
+  const expectedByNow = billsExpectedByNow + variableExpectedByNow;
   const actualByNow = monthSpend.total;
   const paceDiff = actualByNow - expectedByNow;
 
@@ -234,8 +263,9 @@ export default function SnapshotBento({
         {(() => {
           const budgetTotal = committedBills + essentialAvgMonthly + funCapMonthly || 1;
           const pctSpent = Math.min(150, (actualByNow / budgetTotal) * 100);
-          const pctExpected = monthProgress * 100;
-          const onTrack = pctSpent <= pctExpected + 5;
+          const pctExpected = Math.min(100, (expectedByNow / budgetTotal) * 100);
+          // Account for fixed bills (rent on 1st); on track when actual spend is within expected spend + £15 buffer
+          const onTrack = actualByNow <= expectedByNow + 15 || pctSpent <= pctExpected + 3;
           const R = 28, C = 2 * Math.PI * R;
           const offset = C - (Math.min(100, pctSpent) / 100) * C;
           return (
