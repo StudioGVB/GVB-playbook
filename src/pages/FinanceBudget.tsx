@@ -1944,11 +1944,17 @@ function WeeklyPotFundDialog({
   goals,
   fmt,
   currentWeeklyBudget,
+  typicalWeeklySpend,
+  thisWeekSpentSoFar,
+  daysLeftThisWeek,
   onFundPot,
 }: {
   goals: ReturnType<typeof useFinanceData>['goals'];
   fmt: (n: number) => string;
   currentWeeklyBudget: number;
+  typicalWeeklySpend: number;
+  thisWeekSpentSoFar: number;
+  daysLeftThisWeek: number;
   onFundPot: (params: {
     mode: 'new' | 'existing';
     potName?: string;
@@ -1957,6 +1963,7 @@ function WeeklyPotFundDialog({
     weeksCount: number;
     startWhen: 'this_week' | 'next_week';
     color?: string;
+    saveForMonthlyPayday?: boolean;
   }) => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
@@ -1977,7 +1984,22 @@ function WeeklyPotFundDialog({
   const perWeek = parsedWeeks > 0 ? parsedTotal / parsedWeeks : 0;
   const projectedWeeklyBudget = Math.max(0, currentWeeklyBudget - perWeek);
 
-  const handleSubmit = async () => {
+  const advice = useMemo(
+    () =>
+      evaluateMidMonthPotFeasibility({
+        totalAmount: parsedTotal,
+        weeksCount: parsedWeeks,
+        startWhen,
+        weeklyBudget: currentWeeklyBudget,
+        typicalWeeklySpend,
+        thisWeekSpentSoFar,
+        daysLeftThisWeek,
+        fmt,
+      }),
+    [parsedTotal, parsedWeeks, startWhen, currentWeeklyBudget, typicalWeeklySpend, thisWeekSpentSoFar, daysLeftThisWeek, fmt]
+  );
+
+  const handleSubmit = async (saveForMonthlyPayday = false) => {
     if (parsedTotal <= 0) return;
     if (mode === 'new' && !potName.trim()) {
       toast.error('Please enter a name for your new pot');
@@ -1996,6 +2018,7 @@ function WeeklyPotFundDialog({
         totalAmount: parsedTotal,
         weeksCount: parsedWeeks,
         startWhen,
+        saveForMonthlyPayday,
       });
       setOpen(false);
       setPotName('');
@@ -2016,14 +2039,14 @@ function WeeklyPotFundDialog({
           <Sparkles className="w-3.5 h-3.5" /> Fund a Pot from Weekly Budgets
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Sparkles className="w-4 h-4 text-[#FF2EB8]" />
             Fund a Pot Mid-Month from Weekly Budgets
           </DialogTitle>
           <DialogDescription>
-            Create a new savings pot (or top up an existing one) and spread the cost across your upcoming weekly budgets — no need to wait for payday.
+            Create a new savings pot (or top up an existing one) and spread the cost across your upcoming weekly budgets — or let the advisor tell you if it's better to wait for payday.
           </DialogDescription>
         </DialogHeader>
 
@@ -2140,6 +2163,53 @@ function WeeklyPotFundDialog({
             </div>
           </div>
 
+          {/* === INTUITIVE SMART ADVISOR === */}
+          {parsedTotal > 0 && (
+            <div
+              className={cn(
+                "rounded-2xl border p-3.5 space-y-2 transition-all",
+                advice.verdict === 'great_fit' && "bg-emerald-50/80 border-emerald-200 text-emerald-950",
+                advice.verdict === 'adjust_weeks' && "bg-amber-50/90 border-amber-200 text-amber-950",
+                advice.verdict === 'wait_for_payday' && "bg-rose-50/90 border-rose-200 text-rose-950"
+              )}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <p className="text-xs font-display font-bold flex items-center gap-1.5">
+                  <span>
+                    {advice.verdict === 'great_fit'
+                      ? '✅'
+                      : advice.verdict === 'adjust_weeks'
+                      ? '💡'
+                      : '🗓️'}
+                  </span>
+                  <span>{advice.headline}</span>
+                </p>
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-white/80 border border-black/10 shrink-0 tabular-nums">
+                  Typical spend: ~{fmt(advice.typicalWeeklySpend)}/wk
+                </span>
+              </div>
+              <p className="text-[11px] leading-relaxed opacity-90">{advice.reason}</p>
+
+              {advice.verdict === 'adjust_weeks' && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    if (advice.recommendedWeeks) setWeeksCount(String(advice.recommendedWeeks));
+                    if (advice.recommendedStartWhen) setStartWhen(advice.recommendedStartWhen);
+                  }}
+                  className="w-full h-7 text-xs font-semibold bg-white hover:bg-amber-100/70 border-amber-300 text-amber-900"
+                >
+                  ✨ Apply suggestion:{' '}
+                  {advice.recommendedStartWhen === 'next_week' && startWhen !== 'next_week'
+                    ? 'Start Next Monday'
+                    : `Spread over ${advice.recommendedWeeks} weeks (${fmt(parsedTotal / (advice.recommendedWeeks || 1))}/wk)`}
+                </Button>
+              )}
+            </div>
+          )}
+
           {/* Live impact preview */}
           <div className="rounded-2xl bg-pink-50/70 border border-pink-200/80 p-3.5 space-y-1.5">
             <div className="flex items-center justify-between text-xs">
@@ -2150,20 +2220,59 @@ function WeeklyPotFundDialog({
               <span className="text-slate-600 font-medium">New weekly budget after deduction:</span>
               <span className="font-display font-bold text-slate-900 tabular-nums">{fmt(projectedWeeklyBudget)} / week</span>
             </div>
-            <p className="text-[11px] text-slate-500 pt-1 border-t border-pink-200/60">
-              {fmt(parsedTotal)} is placed straight into your pot in Money Pools, and {fmt(perWeek)} is automatically taken out of each of the {parsedWeeks} weekly budgets.
-            </p>
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-slate-600 font-medium">Your typical weekly spending:</span>
+              <span className="font-semibold text-slate-700 tabular-nums">~{fmt(advice.typicalWeeklySpend)} / week</span>
+            </div>
           </div>
 
-          <Button
-            onClick={handleSubmit}
-            disabled={submitting || parsedTotal <= 0}
-            className="w-full bg-[#FF2EB8] hover:bg-[#e0249f] text-white font-semibold"
-          >
-            {submitting
-              ? 'Saving...'
-              : `Save ${fmt(parsedTotal)} (${fmt(perWeek)}/wk for ${parsedWeeks} wk${parsedWeeks === 1 ? '' : 's'})`}
-          </Button>
+          {advice.verdict === 'wait_for_payday' ? (
+            <div className="space-y-2">
+              <Button
+                type="button"
+                onClick={() => handleSubmit(true)}
+                disabled={submitting || parsedTotal <= 0}
+                className="w-full bg-[#FF2EB8] hover:bg-[#e0249f] text-white font-semibold"
+              >
+                {submitting
+                  ? 'Saving...'
+                  : `🗓️ Save for Monthly Payday (${fmt(parsedTotal)} filled when paid)`}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => handleSubmit(false)}
+                disabled={submitting || parsedTotal <= 0}
+                className="w-full text-xs text-muted-foreground hover:text-foreground h-8"
+              >
+                Take {fmt(perWeek)}/wk from my weekly budgets anyway
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <Button
+                type="button"
+                onClick={() => handleSubmit(false)}
+                disabled={submitting || parsedTotal <= 0}
+                className="w-full bg-[#FF2EB8] hover:bg-[#e0249f] text-white font-semibold"
+              >
+                {submitting
+                  ? 'Saving...'
+                  : `Save ${fmt(parsedTotal)} (${fmt(perWeek)}/wk for ${parsedWeeks} wk${parsedWeeks === 1 ? '' : 's'})`}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => handleSubmit(true)}
+                disabled={submitting || parsedTotal <= 0}
+                className="w-full text-xs text-muted-foreground hover:text-foreground h-7"
+              >
+                Or save for Monthly Payday instead (keep weekly budget untouched)
+              </Button>
+            </div>
+          )}
         </div>
       </DialogContent>
     </Dialog>

@@ -76,7 +76,7 @@ import { useFinanceAssumptions } from '@/hooks/useFinanceAssumptions';
 import { useFixedExpenses } from '@/hooks/useFixedExpenses';
 import { useWeekTypes } from '@/hooks/useWeekTypes';
 import { useFinanceTrips } from '@/hooks/useFinanceTrips';
-import { computePolicySnapshot, computeTripSpent } from '@/lib/policyEngine';
+import { computePolicySnapshot, computeTripSpent, computeTypicalWeeklyVariableSpend, computeWeekVariableSpend, evaluateMidMonthPotFeasibility } from '@/lib/policyEngine';
 import { toast } from 'sonner';
 
 type PoolId = string; // goal id or virtual id
@@ -228,6 +228,36 @@ export default function FinancePoolsPage() {
   const essentialVariable = snapshot?.computedEssentialVariable ?? (assumptions as any)?.estimated_essential_variable ?? 0;
   const rawBufferMonths = assumptions?.buffer_months ?? 1;
   const actualMonthlySurvival = snapshot?.emergencySurvivalMonthly ?? snapshot?.survivalCostMonthly ?? (fixedMonthlyTotal + essentialVariable);
+
+  const newPoolMidMonthAdvice = useMemo(() => {
+    const rawAmt = parseFloat(newAmount) || 0;
+    const totalAmountBase = finance.convertToBase(rawAmt, newCurrency);
+    const numWeeks = Math.max(1, parseInt(newFundWeeks, 10) || 3);
+    const weeklyTotalAllowance = (essentialVariable / 4.33) + weeklyFromRemainder + totalBoostThisWeek;
+    const typicalWeeklySpend = computeTypicalWeeklyVariableSpend(
+      finance.transactions,
+      finance.categories,
+      wtMap,
+      trips,
+      new Date(),
+      4,
+    ) || (essentialVariable / 4.33 + weeklyFromRemainder * 0.65);
+    const thisWeekSpent = computeWeekVariableSpend(
+      finance.transactions,
+      finance.categories,
+      startOfWeek(new Date(), { weekStartsOn: 1 }),
+    );
+    const currentWeekRemaining = Math.max(0, weeklyTotalAllowance - (thisWeekSpent.essentialSpent + thisWeekSpent.funSpent));
+    return evaluateMidMonthPotFeasibility({
+      totalAmount: totalAmountBase,
+      selectedWeeks: numWeeks,
+      startWhen: newFundStartWhen,
+      weeklyTotalBudget: weeklyTotalAllowance,
+      typicalWeeklySpend,
+      currentWeekRemaining,
+      formatCurrency: fmt,
+    });
+  }, [newAmount, newCurrency, newFundWeeks, newFundStartWhen, essentialVariable, weeklyFromRemainder, totalBoostThisWeek, finance.transactions, finance.categories, finance.convertToBase, wtMap, trips, fmt]);
 
   // Paycheck Detection & Target Month
   const detectedPaycheck = useMemo(
@@ -2038,13 +2068,66 @@ export default function FinancePoolsPage() {
                   </div>
                 </div>
                 {parseFloat(newAmount) > 0 && (
-                  <p className="text-[11px] text-slate-600">
-                    Fills this pool with <strong>{formatCurrency(parseFloat(newAmount), newCurrency)}</strong> straight away and automatically deducts{' '}
-                    <strong className="text-[#FF2EB8]">
-                      {formatCurrency(parseFloat(newAmount) / Math.max(1, parseInt(newFundWeeks, 10) || 3), newCurrency)}/week
-                    </strong>{' '}
-                    from your next {newFundWeeks} weekly budgets.
-                  </p>
+                  <>
+                    <p className="text-[11px] text-slate-600">
+                      Fills this pool with <strong>{formatCurrency(parseFloat(newAmount), newCurrency)}</strong> straight away and automatically deducts{' '}
+                      <strong className="text-[#FF2EB8]">
+                        {formatCurrency(parseFloat(newAmount) / Math.max(1, parseInt(newFundWeeks, 10) || 3), newCurrency)}/week
+                      </strong>{' '}
+                      from your next {newFundWeeks} weekly budgets.
+                    </p>
+                    <div
+                      className={`rounded-xl border p-3 transition-all ${
+                        newPoolMidMonthAdvice.verdict === 'great_fit'
+                          ? 'bg-emerald-50/90 border-emerald-200 text-emerald-950'
+                          : newPoolMidMonthAdvice.verdict === 'adjust_weeks'
+                          ? 'bg-amber-50/90 border-amber-200 text-amber-950'
+                          : 'bg-rose-50/90 border-rose-200 text-rose-950'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-xs font-bold leading-snug">
+                          {newPoolMidMonthAdvice.verdict === 'great_fit' ? '✅ ' : newPoolMidMonthAdvice.verdict === 'adjust_weeks' ? '💡 ' : '🗓️ '}
+                          {newPoolMidMonthAdvice.headline}
+                        </p>
+                        <span className="shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-white/80 border border-black/5">
+                          Typical spend: {fmt(newPoolMidMonthAdvice.typicalWeeklySpend)}/wk
+                        </span>
+                      </div>
+                      <p className="text-[11px] mt-1 leading-relaxed opacity-90">
+                        {newPoolMidMonthAdvice.reason}
+                      </p>
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        {newPoolMidMonthAdvice.verdict === 'adjust_weeks' && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (newPoolMidMonthAdvice.recommendedWeeks) setNewFundWeeks(String(newPoolMidMonthAdvice.recommendedWeeks));
+                              if (newPoolMidMonthAdvice.recommendedStartWhen) setNewFundStartWhen(newPoolMidMonthAdvice.recommendedStartWhen);
+                            }}
+                            className="inline-flex items-center gap-1 rounded-lg bg-amber-600 text-white px-2.5 py-1 text-[11px] font-semibold hover:bg-amber-700 transition-colors"
+                          >
+                            ✨ Apply suggestion (
+                            {newPoolMidMonthAdvice.recommendedWeeks
+                              ? `${newPoolMidMonthAdvice.recommendedWeeks} ${newPoolMidMonthAdvice.recommendedWeeks === 1 ? 'week' : 'weeks'}`
+                              : ''}
+                            {newPoolMidMonthAdvice.recommendedWeeks && newPoolMidMonthAdvice.recommendedStartWhen ? ' · ' : ''}
+                            {newPoolMidMonthAdvice.recommendedStartWhen === 'next_week' ? 'Start Next Monday' : ''}
+                            )
+                          </button>
+                        )}
+                        {newPoolMidMonthAdvice.verdict === 'wait_for_payday' && (
+                          <button
+                            type="button"
+                            onClick={() => setNewFundMode('payday')}
+                            className="inline-flex items-center gap-1 rounded-lg bg-slate-900 text-white px-2.5 py-1 text-[11px] font-semibold hover:bg-slate-800 transition-colors"
+                          >
+                            🗓️ Save for Monthly Payday instead
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </>
                 )}
               </div>
             ) : (
