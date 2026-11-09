@@ -9,11 +9,11 @@ import { useFixedExpensePayments } from '@/hooks/useFixedExpensePayments';
 import { useWeeklyBoosts } from '@/hooks/useWeeklyBoosts';
 import { useWeekTypes } from '@/hooks/useWeekTypes';
 import { useFinanceTrips } from '@/hooks/useFinanceTrips';
-import { computePolicySnapshot, computeActualSpendingIncome, computeWeekVariableSpend } from '@/lib/policyEngine';
+import { computePolicySnapshot, computeActualSpendingIncome, computeWeekVariableSpend, computeTypicalWeeklyVariableSpend, evaluateMidMonthPotFeasibility } from '@/lib/policyEngine';
 import { deduplicateTransactions } from '@/lib/deduplication';
 import { parseCoverMeta, planOverspendCover, planUnderspendRepay, type CoverMeta, type CoverStep } from '@/lib/overspendCover';
 import { formatCurrency, baseAmt, parseUkDate } from '@/lib/financeUtils';
-import { subDays, startOfDay, startOfWeek, endOfWeek, differenceInDays, format, addWeeks, subWeeks, isSameWeek, addDays } from 'date-fns';
+import { subDays, startOfDay, startOfWeek, endOfWeek, endOfMonth, addMonths, differenceInDays, format, addWeeks, subWeeks, isSameWeek, addDays } from 'date-fns';
 import { Lock, ShoppingCart, PartyPopper, Zap, X, Info, TrendingDown, Calendar as CalendarIcon, Shield, Target, ChevronDown, History, Clock, Check, Plane, ChevronLeft, ChevronRight, RefreshCw, Sparkles, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { MetricCard } from '@/components/finance/MetricCard';
@@ -169,11 +169,43 @@ export default function FinanceBudget() {
     weeksCount: number;
     startWhen: 'this_week' | 'next_week';
     color?: string;
+    saveForMonthlyPayday?: boolean;
   }) => {
-    const { mode, potName, existingGoalId, totalAmount, weeksCount, startWhen, color } = params;
+    const { mode, potName, existingGoalId, totalAmount, weeksCount, startWhen, color, saveForMonthlyPayday } = params;
     const baseCur = (finance.settings?.base_currency || 'GBP').toUpperCase();
     let targetGoalId = existingGoalId || '';
     let targetGoalName = potName?.trim() || 'Savings Pot';
+
+    if (saveForMonthlyPayday) {
+      const nextMonthDeadline = format(endOfMonth(addMonths(new Date(), 1)), 'yyyy-MM-dd');
+      if (mode === 'new') {
+        await finance.addGoal({
+          name: targetGoalName,
+          description: 'Scheduled for Monthly Payday allocation',
+          target_amount: totalAmount,
+          assigned_amount: 0,
+          currency: baseCur,
+          priority: finance.goals.length + 1,
+          safety_mode: 'balanced',
+          color: color || '#FF2EB8',
+          deadline: nextMonthDeadline,
+        } as any);
+      } else if (existingGoalId) {
+        const existing = finance.goals.find(g => g.id === existingGoalId);
+        if (!existing) return;
+        targetGoalName = existing.name;
+        const newTarget = Math.round(((existing.target_amount || 0) + totalAmount) * 100) / 100;
+        await finance.updateGoal(existing.id, {
+          target_amount: newTarget,
+          deadline: existing.deadline || nextMonthDeadline,
+        } as any);
+      }
+      toast.success(
+        `Saved "${targetGoalName}" (${formatCurrency(totalAmount, baseCur)}) for your next Monthly Payday split — your weekly budget stays untouched! 🗓️`,
+        { duration: 7000 }
+      );
+      return;
+    }
 
     if (mode === 'new') {
       const created = await finance.addGoal({
@@ -1088,6 +1120,15 @@ export default function FinanceBudget() {
             goals={finance.goals}
             fmt={fmt}
             currentWeeklyBudget={totalWeeklyBudget}
+            typicalWeeklySpend={computeTypicalWeeklyVariableSpend(
+              dedupedTransactions,
+              finance.categories,
+              typeof wtMap === 'function' ? wtMap() : wtMap,
+              trips,
+              today,
+            )}
+            thisWeekSpentSoFar={totalWeeklySpent}
+            daysLeftThisWeek={daysLeft}
             onFundPot={handleFundPotFromWeeks}
           />
           {finance.goals.length > 0 && (

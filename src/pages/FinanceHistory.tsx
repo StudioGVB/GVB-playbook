@@ -177,11 +177,11 @@ export default function FinanceHistory() {
     boostByWeek,
   ]);
 
-  if (finance.loading || assumptionsLoading) {
+  if (finance.loading && !finance.hasLoadedOnce && finance.transactions.length === 0) {
     return (
       <div className="space-y-4">
         <h1 className="text-2xl font-bold text-foreground">Spending History</h1>
-        <div className="text-muted-foreground animate-pulse">Loading...</div>
+        <div className="text-muted-foreground animate-pulse">Loading spending history...</div>
       </div>
     );
   }

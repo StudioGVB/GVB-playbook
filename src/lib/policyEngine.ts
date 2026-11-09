@@ -1,7 +1,7 @@
 import { FinanceTransaction, FinanceCategory, FinanceAccount, FinanceGoal } from '@/hooks/useFinanceData';
 import { FinanceAssumptions } from '@/hooks/useFinanceAssumptions';
 import type { FinanceTrip } from '@/hooks/useFinanceTrips';
-import { startOfWeek, endOfWeek, subWeeks, differenceInCalendarDays, format, startOfMonth } from 'date-fns';
+import { startOfWeek, endOfWeek, subWeeks, addWeeks, differenceInCalendarDays, format, startOfMonth } from 'date-fns';
 import type { WeekType } from '@/hooks/useWeekTypes';
 import { isExcludedSpendDate, weekOverlapsExclusion, baseAmt, parseUkDate } from './financeUtils';
 import { calcTakeHome } from './ukTakeHome';
@@ -1226,4 +1226,229 @@ function computeRollingWeeklySpend(
   if (weeklyTotals.length === 0) return 0;
   return weeklyTotals.reduce((s, v) => s + v, 0) / weeklyTotals.length;
 }
+
+export interface MidMonthPotAdvice {
+  verdict: 'great_fit' | 'adjust_weeks' | 'wait_for_payday';
+  headline: string;
+  reason: string;
+  weeksLeftInMonth: number;
+  typicalWeeklySpend: number;
+  typicalWeeklyCushion: number;
+  perWeek: number;
+  projectedWeeklyBudget: number;
+  expectedWeeklyShortfall: number;
+  recommendedWeeks?: number;
+  recommendedStartWhen?: 'this_week' | 'next_week';
+  suggestMonthlyPayday?: boolean;
+}
+
+/**
+ * Computes the user's typical weekly variable spending (essentials + fun) over the last 4 normal completed weeks.
+ */
+export function computeTypicalWeeklyVariableSpend(
+  transactions: FinanceTransaction[],
+  categories: FinanceCategory[],
+  weekTypeMap?: Map<string, WeekType>,
+  trips: FinanceTrip[] = [],
+  referenceDate: Date = new Date(),
+): number {
+  const thisWeekStart = startOfWeek(referenceDate, { weekStartsOn: 1 });
+  const normalTotals: number[] = [];
+
+  for (let w = 1; w <= 10 && normalTotals.length < 4; w++) {
+    const ws = startOfWeek(subWeeks(thisWeekStart, w), { weekStartsOn: 1 });
+    const we = endOfWeek(ws, { weekStartsOn: 1 });
+    const weekKey = format(ws, 'yyyy-MM-dd');
+    const wt = weekTypeMap?.get(weekKey) || 'normal';
+    if (wt !== 'normal') continue;
+    if (weekOverlapsExclusion(ws, we)) continue;
+    const overlapsTrip = trips.some(t => {
+      if (!t.start_date || !t.end_date) return false;
+      const ts = parseUkDate(t.start_date);
+      const te = parseUkDate(t.end_date);
+      return ws <= te && we >= ts;
+    });
+    if (overlapsTrip) continue;
+
+    const spend = computeWeekVariableSpend(transactions, categories, ws, trips);
+    const total = spend.essentialSpent + spend.funSpent;
+    if (total > 0) {
+      normalTotals.push(total);
+    }
+  }
+
+  if (normalTotals.length === 0) return 0;
+  return normalTotals.reduce((s, v) => s + v, 0) / normalTotals.length;
+}
+
+/**
+ * Evaluates whether a mid-month pot deduction across upcoming weekly budgets is realistic
+ * given (1) how many weeks remain before payday and (2) the user's typical weekly spending.
+ */
+export function evaluateMidMonthPotFeasibility(params: {
+  totalAmount: number;
+  weeksCount: number;
+  startWhen: 'this_week' | 'next_week';
+  weeklyBudget: number;
+  typicalWeeklySpend: number;
+  thisWeekSpentSoFar?: number;
+  daysLeftThisWeek?: number;
+  fmt: (n: number) => string;
+  now?: Date;
+}): MidMonthPotAdvice {
+  const {
+    totalAmount,
+    weeksCount,
+    startWhen,
+    weeklyBudget,
+    typicalWeeklySpend,
+    thisWeekSpentSoFar = 0,
+    daysLeftThisWeek = 7,
+    fmt,
+    now = new Date(),
+  } = params;
+
+  const baseWeekStart = startOfWeek(now, { weekStartsOn: 1 });
+  const firstWeek = startWhen === 'next_week' ? addWeeks(baseWeekStart, 1) : baseWeekStart;
+
+  // Gamma pays on the last working day of the month (~28th-31st).
+  // Count how many weekly cycles starting from `firstWeek` begin on or before the 27th of the current month.
+  const paydayCutoff = new Date(now.getFullYear(), now.getMonth(), 27, 23, 59, 59, 999);
+  let weeksLeftInMonth = 0;
+  for (let i = 0; i < 6; i++) {
+    const wk = addWeeks(baseWeekStart, i);
+    if (wk <= paydayCutoff) {
+      weeksLeftInMonth++;
+    }
+  }
+  const availableWeeksFromStart = Math.max(
+    0,
+    startWhen === 'next_week' ? weeksLeftInMonth - 1 : weeksLeftInMonth
+  );
+
+  const effectiveTypical = typicalWeeklySpend > 0 ? typicalWeeklySpend : weeklyBudget * 0.78;
+  const typicalWeeklyCushion = Math.max(0, weeklyBudget - effectiveTypical);
+  // Allow a small mindful flex (~£12/wk) beyond raw cushion before warning of overspend
+  const comfortableWeeklyCap = Math.max(10, typicalWeeklyCushion + 12);
+
+  const perWeek = weeksCount > 0 ? totalAmount / weeksCount : totalAmount;
+  const projectedWeeklyBudget = Math.max(0, weeklyBudget - perWeek);
+  const expectedWeeklyShortfall = Math.max(0, effectiveTypical - projectedWeeklyBudget);
+
+  // Check if this week specifically has enough room left when starting this week
+  const thisWeekRemaining = Math.max(0, weeklyBudget - thisWeekSpentSoFar);
+  const expectedRestOfWeekSpend = (effectiveTypical / 7) * Math.max(0, daysLeftThisWeek - 1);
+  const thisWeekSafeRoom = Math.max(0, thisWeekRemaining - expectedRestOfWeekSpend * 0.75);
+  const thisWeekTooTight = startWhen === 'this_week' && perWeek > thisWeekSafeRoom && daysLeftThisWeek < 6;
+
+  // Minimum weeks needed so perWeek <= comfortableWeeklyCap
+  const minWeeksForSpend = comfortableWeeklyCap > 0
+    ? Math.ceil(totalAmount / comfortableWeeklyCap)
+    : 99;
+
+  // 1. Not enough time left in the month OR even spreading across all remaining weeks in the month would cause overspend
+  if (
+    availableWeeksFromStart <= 0 ||
+    minWeeksForSpend > Math.max(weeksLeftInMonth, 1)
+  ) {
+    const maxAffordableMidMonth = Math.round(comfortableWeeklyCap * Math.max(1, availableWeeksFromStart));
+    const reason =
+      availableWeeksFromStart <= 0
+        ? `Payday is almost here — there aren't enough weeks left in ${format(now, 'MMMM')} to spread ${fmt(totalAmount)} across weekly budgets. Save this for your Monthly Payday split instead.`
+        : `You have ${availableWeeksFromStart} week${availableWeeksFromStart === 1 ? '' : 's'} left before payday and typically spend ~${fmt(effectiveTypical)}/wk (out of your ${fmt(weeklyBudget)}/wk budget). Taking ${fmt(totalAmount)} mid-month would leave you ~${fmt(Math.max(1, totalAmount / availableWeeksFromStart - typicalWeeklyCushion))}/wk short of your normal spending${maxAffordableMidMonth >= 20 ? ` (max comfortable mid-month pot right now is ~${fmt(maxAffordableMidMonth)})` : ''}. Save it for your Monthly Payday allocation instead!`;
+
+    return {
+      verdict: 'wait_for_payday',
+      headline: 'Better to save this for Monthly Payday',
+      reason,
+      weeksLeftInMonth: availableWeeksFromStart,
+      typicalWeeklySpend: effectiveTypical,
+      typicalWeeklyCushion,
+      perWeek,
+      projectedWeeklyBudget,
+      expectedWeeklyShortfall,
+      suggestMonthlyPayday: true,
+    };
+  }
+
+  // 2. Fits before payday if we adjust the number of weeks or start week!
+  if (weeksCount > availableWeeksFromStart) {
+    const perWeekInRemaining = totalAmount / availableWeeksFromStart;
+    if (perWeekInRemaining <= comfortableWeeklyCap) {
+      return {
+        verdict: 'adjust_weeks',
+        headline: `Only ${availableWeeksFromStart} week${availableWeeksFromStart === 1 ? '' : 's'} left this month — spread over ${availableWeeksFromStart} wk${availableWeeksFromStart === 1 ? '' : 's'}`,
+        reason: `Spreading over ${weeksCount} weeks would spill into next month's pay cycle. You can comfortably fit ${fmt(totalAmount)} into the ${availableWeeksFromStart} week${availableWeeksFromStart === 1 ? '' : 's'} left this month at ${fmt(perWeekInRemaining)}/wk.`,
+        weeksLeftInMonth: availableWeeksFromStart,
+        typicalWeeklySpend: effectiveTypical,
+        typicalWeeklyCushion,
+        perWeek,
+        projectedWeeklyBudget,
+        expectedWeeklyShortfall,
+        recommendedWeeks: availableWeeksFromStart,
+        recommendedStartWhen: startWhen,
+      };
+    } else {
+      return {
+        verdict: 'wait_for_payday',
+        headline: 'Not enough weeks left this month — save for Monthly Payday',
+        reason: `There ${availableWeeksFromStart === 1 ? 'is only 1 week' : `are only ${availableWeeksFromStart} weeks`} left before payday, and taking ${fmt(perWeekInRemaining)}/wk would push your budget below your typical ${fmt(effectiveTypical)}/wk spend. Best to fund this on Payday!`,
+        weeksLeftInMonth: availableWeeksFromStart,
+        typicalWeeklySpend: effectiveTypical,
+        typicalWeeklyCushion,
+        perWeek,
+        projectedWeeklyBudget,
+        expectedWeeklyShortfall,
+        suggestMonthlyPayday: true,
+      };
+    }
+  }
+
+  if (perWeek > comfortableWeeklyCap && minWeeksForSpend <= availableWeeksFromStart) {
+    const recPerWeek = totalAmount / minWeeksForSpend;
+    return {
+      verdict: 'adjust_weeks',
+      headline: `Tight at ${fmt(perWeek)}/wk — spread over ${minWeeksForSpend} weeks instead`,
+      reason: `Based on your typical spend of ~${fmt(effectiveTypical)}/wk, taking ${fmt(perWeek)}/wk leaves only ${fmt(projectedWeeklyBudget)}/wk and could make you overspend. Spreading over ${minWeeksForSpend} weeks (${fmt(recPerWeek)}/wk) fits your normal habits.`,
+      weeksLeftInMonth: availableWeeksFromStart,
+      typicalWeeklySpend: effectiveTypical,
+      typicalWeeklyCushion,
+      perWeek,
+      projectedWeeklyBudget,
+      expectedWeeklyShortfall,
+      recommendedWeeks: minWeeksForSpend,
+      recommendedStartWhen: startWhen,
+    };
+  }
+
+  if (thisWeekTooTight && weeksLeftInMonth - 1 >= weeksCount) {
+    return {
+      verdict: 'adjust_weeks',
+      headline: `This week is already tight — start Next Monday instead`,
+      reason: `You only have ${fmt(thisWeekRemaining)} left for the rest of this week. Starting Next Monday gives you a fresh week and still finishes before payday.`,
+      weeksLeftInMonth: availableWeeksFromStart,
+      typicalWeeklySpend: effectiveTypical,
+      typicalWeeklyCushion,
+      perWeek,
+      projectedWeeklyBudget,
+      expectedWeeklyShortfall,
+      recommendedWeeks: weeksCount,
+      recommendedStartWhen: 'next_week',
+    };
+  }
+
+  // 3. Great fit!
+  return {
+    verdict: 'great_fit',
+    headline: `Easy mid-month fit (${availableWeeksFromStart} wk${availableWeeksFromStart === 1 ? '' : 's'} left this month)`,
+    reason: `You typically spend ~${fmt(effectiveTypical)}/wk out of your ${fmt(weeklyBudget)}/wk budget. Taking ${fmt(perWeek)}/wk for ${weeksCount} week${weeksCount === 1 ? '' : 's'} leaves you ${fmt(projectedWeeklyBudget)}/wk — comfortably within your usual habits.`,
+    weeksLeftInMonth: availableWeeksFromStart,
+    typicalWeeklySpend: effectiveTypical,
+    typicalWeeklyCushion,
+    perWeek,
+    projectedWeeklyBudget,
+    expectedWeeklyShortfall: 0,
+  };
+}
+
 

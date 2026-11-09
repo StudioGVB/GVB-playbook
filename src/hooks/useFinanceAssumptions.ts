@@ -32,9 +32,36 @@ export interface FinanceAssumptions {
 }
 
 
+const DEFAULT_ASSUMPTIONS: FinanceAssumptions = {
+  id: 'default-assumptions',
+  user_id: '',
+  future_monthly_survival_cost: 0,
+  buffer_months: 3,
+  weekly_fun_budget: 150,
+  expected_monthly_income: null,
+  discretionary_savings_cap: 0,
+  discretionary_start_date: null,
+  discretionary_end_date: null,
+  baseline_savings_percent: 10,
+  income_start_date: null,
+  estimated_essential_variable: 0,
+  target_savings: 0,
+  carry_forward_debt: 0,
+  last_debt_week: null,
+  travel_start_date: null,
+  travel_end_date: null,
+  travel_pool_amount: 0,
+  travel_checklist: [],
+  gross_annual_salary: 37000,
+  pension_percent: 0,
+  student_loan_plan: null,
+  created_at: new Date().toISOString(),
+  updated_at: new Date().toISOString(),
+};
+
 export function useFinanceAssumptionsState() {
   const { user } = useAuth();
-  const [assumptions, setAssumptions] = useState<FinanceAssumptions | null>(null);
+  const [assumptions, setAssumptions] = useState<FinanceAssumptions | null>(DEFAULT_ASSUMPTIONS);
   const [loading, setLoading] = useState(true);
 
   const fetch = useCallback(async () => {
@@ -43,6 +70,12 @@ export function useFinanceAssumptionsState() {
       return;
     }
     setLoading(true);
+
+    // Failsafe timer so assumptionsLoading never hangs the UI
+    const timer = setTimeout(() => {
+      setLoading(false);
+    }, 3500);
+
     try {
       const { data, error } = await supabase
         .from('finance_assumptions' as any)
@@ -138,6 +171,7 @@ export function useFinanceAssumptionsState() {
         });
       }
     } finally {
+      clearTimeout(timer);
       setLoading(false);
     }
   }, [user]);

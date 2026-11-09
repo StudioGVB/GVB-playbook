@@ -39,6 +39,12 @@ const PRESET_COLORS = [
 
 const INCOME_COLORS = ['#FF2EB8', '#4558ff', '#22C55E', '#F59E0B', '#8B5CF6', '#EC4899', '#06B6D4'];
 
+function safeLocaleDate(d: string | number | Date | null | undefined): string | null {
+  if (!d) return null;
+  const date = new Date(d);
+  return isNaN(date.getTime()) ? null : date.toLocaleString();
+}
+
 function CategoryColorPicker({ color, onChange }: { color: string | null; onChange: (c: string) => void }) {
   const [customColor, setCustomColor] = useState(color || '#3B82F6');
 
@@ -742,7 +748,7 @@ export default function FinanceSettingsPanel({ finance }: Props) {
                       )}
                     </div>
                     <p className="text-xs text-slate-500 mt-1">
-                      {upAccount?.last_synced_at ? `Last synced: ${new Date(upAccount.last_synced_at).toLocaleString()}` : 'Connects using UP_PERSONAL_TOKEN cloud secret.'}
+                      {safeLocaleDate(upAccount?.last_synced_at) ? `Last synced: ${safeLocaleDate(upAccount?.last_synced_at)}` : 'Connects using UP_PERSONAL_TOKEN cloud secret.'}
                     </p>
                   </div>
                   <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto pt-1 sm:pt-0">
@@ -786,7 +792,7 @@ export default function FinanceSettingsPanel({ finance }: Props) {
                       )}
                     </div>
                     <p className="text-xs text-slate-500 mt-1">
-                      {wiseAccount?.last_synced_at ? `Last synced: ${new Date(wiseAccount.last_synced_at).toLocaleString()}` : 'Supports multi-currency pots and balance synchronization.'}
+                      {safeLocaleDate(wiseAccount?.last_synced_at) ? `Last synced: ${safeLocaleDate(wiseAccount?.last_synced_at)}` : 'Supports multi-currency pots and balance synchronization.'}
                     </p>
                   </div>
                   <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto pt-1 sm:pt-0">
@@ -855,7 +861,7 @@ export default function FinanceSettingsPanel({ finance }: Props) {
                       )}
                     </div>
                     <p className="text-xs text-slate-500 mt-1">
-                      {monzoAccount?.last_synced_at ? `Last synced: ${new Date(monzoAccount.last_synced_at).toLocaleString()}` : 'Connects via Permanent Monzo OAuth or direct token.'}
+                      {safeLocaleDate(monzoAccount?.last_synced_at) ? `Last synced: ${safeLocaleDate(monzoAccount?.last_synced_at)}` : 'Connects via Permanent Monzo OAuth or direct token.'}
                     </p>
                   </div>
                   <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto pt-1 sm:pt-0">

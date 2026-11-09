@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Slider } from '@/components/ui/slider';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { ArrowUpRight, Wallet, Sparkles, Settings2, TrendingUp, Plus, Trash2, Briefcase, Pencil, Archive, ArchiveRestore, Check, X, Coins } from 'lucide-react';
+import { ArrowUpRight, Wallet, Sparkles, Settings2, TrendingUp, Plus, Trash2, Briefcase, Pencil, Archive, ArchiveRestore, Check, X, Coins, Loader2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { useFinanceData } from '@/hooks/useFinanceData';
 import { useFinanceAssumptions } from '@/hooks/useFinanceAssumptions';
@@ -49,21 +49,26 @@ export default function FinanceAccountsPage({ defaultTab }: { defaultTab?: strin
   const wtMap = useMemo(() => weekTypeMap(), [weekTypeMap]);
 
   const snapshot = useMemo(() => {
-    if (!assumptions || finance.loading) return null;
-    return computePolicySnapshot(
-      assumptions,
-      finance.accounts,
-      finance.transactions,
-      finance.categories,
-      finance.goals,
-      finance.convertToBase,
-      fixedMonthlyTotal,
-      undefined,
-      wtMap,
-      [],
-      fixedMonthlyTotalAll
-    );
-  }, [assumptions, finance.accounts, finance.transactions, finance.categories, finance.goals, finance.convertToBase, finance.loading, fixedMonthlyTotal, fixedMonthlyTotalAll, wtMap]);
+    if (!assumptions) return null;
+    try {
+      return computePolicySnapshot(
+        assumptions,
+        finance.accounts,
+        finance.transactions,
+        finance.categories,
+        finance.goals,
+        finance.convertToBase,
+        fixedMonthlyTotal,
+        undefined,
+        wtMap,
+        [],
+        fixedMonthlyTotalAll
+      );
+    } catch (e) {
+      console.error('Policy snapshot error:', e);
+      return null;
+    }
+  }, [assumptions, finance.accounts, finance.transactions, finance.categories, finance.goals, finance.convertToBase, fixedMonthlyTotal, fixedMonthlyTotalAll, wtMap]);
 
   const activeTab = useMemo(() => {
     if (defaultTab) return defaultTab;
@@ -80,16 +85,7 @@ export default function FinanceAccountsPage({ defaultTab }: { defaultTab?: strin
     else if (val === 'cost-of-living') navigate('/finance/cost-of-living');
   };
 
-  if (finance.loading || assumptionsLoading) {
-    return (
-      <div className="min-h-screen bg-[#FFF5FA] p-6">
-        <h1 className="text-2xl font-display font-bold text-slate-900">Accounts & Settings</h1>
-        <div className="text-slate-500 animate-pulse mt-4">Loading...</div>
-      </div>
-    );
-  }
-
-  const baseCurrency = finance.settings?.base_currency || 'AUD';
+  const baseCurrency = finance.settings?.base_currency || 'GBP';
   const totalLiquidity = finance.totalCashBase();
   const includedAccounts = finance.accounts.filter(a => !a.exclude_from_totals && a.provider !== 'external');
   const activeCount = includedAccounts.length;
@@ -100,8 +96,9 @@ export default function FinanceAccountsPage({ defaultTab }: { defaultTab?: strin
     : (snapshot?.emergencySurvivalMonthly ?? snapshot?.survivalCostMonthly ?? (fixedMonthlyTotal + 100));
 
   const bufferMonths = assumptions?.buffer_months || 3;
-  const runwayMonths = survivalMonthly > 0 ? totalLiquidity / survivalMonthly : (snapshot ? snapshot.runwayWeeks / 4.33 : 0);
-  const runwayPct = Math.min(100, Math.round((runwayMonths / bufferMonths) * 100));
+  const rawRunwayMonths = survivalMonthly > 0 ? totalLiquidity / survivalMonthly : (snapshot ? snapshot.runwayWeeks / 4.33 : 0);
+  const runwayMonths = isNaN(rawRunwayMonths) ? 0 : rawRunwayMonths;
+  const runwayPct = Math.min(100, Math.max(0, Math.round((runwayMonths / Math.max(1, bufferMonths)) * 100)));
   const runwayOnTrack = runwayMonths >= bufferMonths;
 
   return (
@@ -109,9 +106,14 @@ export default function FinanceAccountsPage({ defaultTab }: { defaultTab?: strin
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
         <div>
-          <h1 className="text-3xl sm:text-4xl font-display font-bold text-slate-900 tracking-tight">
-            Accounts & Settings
-          </h1>
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-3xl sm:text-4xl font-display font-bold text-slate-900 tracking-tight">
+              Accounts & Settings
+            </h1>
+            {(finance.loading || assumptionsLoading) && (
+              <Loader2 className="w-5 h-5 text-[#FF2EB8] animate-spin shrink-0" />
+            )}
+          </div>
           <p className="text-slate-500 mt-1">Your money, your rules — all in one candy jar.</p>
         </div>
       </div>

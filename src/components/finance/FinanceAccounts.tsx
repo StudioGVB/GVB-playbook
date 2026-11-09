@@ -36,8 +36,15 @@ const PROVIDER_META: Record<string, { label: string; icon: typeof Building2; tin
   manual: { label: 'Manual', icon: Wallet, tint: 'bg-muted text-muted-foreground' },
 };
 
-function isConnectedAccount(acc: { source_type?: string }) {
-  return acc.source_type === 'bank';
+function safeFormatDate(d: string | number | Date | null | undefined, pattern: string): string {
+  if (!d) return '';
+  const date = new Date(d);
+  if (isNaN(date.getTime())) return '';
+  try {
+    return format(date, pattern);
+  } catch {
+    return '';
+  }
 }
 
 export default function FinanceAccounts({ finance }: Props) {
@@ -644,16 +651,25 @@ export default function FinanceAccounts({ finance }: Props) {
       {accounts.length === 0 ? (
         <Card>
           <CardContent className="p-8 text-center">
-            <Wallet className="w-10 h-10 text-muted-foreground/40 mx-auto mb-3" />
-            <p className="text-sm text-muted-foreground">No accounts yet. Add your bank accounts to start tracking.</p>
+            {finance.loading ? (
+              <>
+                <Loader2 className="w-8 h-8 text-[#FF2EB8] animate-spin mx-auto mb-3" />
+                <p className="text-sm text-slate-500 font-medium">Loading bank accounts...</p>
+              </>
+            ) : (
+              <>
+                <Wallet className="w-10 h-10 text-muted-foreground/40 mx-auto mb-3" />
+                <p className="text-sm text-muted-foreground">No accounts yet. Add your bank accounts to start tracking.</p>
+              </>
+            )}
           </CardContent>
         </Card>
       ) : (
         <Accordion type="single" collapsible defaultValue={defaultOpen} className="space-y-2">
           {providerKeys.map(provKey => {
             const provAccounts = grouped[provKey];
-            const meta = PROVIDER_META[provKey] || PROVIDER_META.manual;
-            const Icon = meta.icon;
+            const meta = PROVIDER_META[(provKey || '').toLowerCase()] || PROVIDER_META.manual || { label: provKey || 'Manual', icon: Wallet, tint: 'bg-muted text-muted-foreground' };
+            const Icon = meta.icon || Wallet;
             const totalBalance = provAccounts.reduce((s, a) => s + ((a as any).exclude_from_totals ? 0 : a.balance), 0);
             const mainCurrency = provKey === 'monzo' ? 'GBP' : (provAccounts[0]?.currency || 'AUD');
             const lastSynced = provAccounts
@@ -672,9 +688,9 @@ export default function FinanceAccounts({ finance }: Props) {
                     </Badge>
                     <div className="flex items-center gap-4 ml-auto mr-4">
                       <span className="text-sm font-bold">{formatCurrency(totalBalance, mainCurrency)}</span>
-                      {lastSynced && (
+                      {lastSynced && safeFormatDate(lastSynced, 'dd MMM HH:mm') && (
                         <span className="text-[10px] text-muted-foreground hidden sm:inline">
-                          Synced {format(new Date(lastSynced), 'dd MMM HH:mm')}
+                          Synced {safeFormatDate(lastSynced, 'dd MMM HH:mm')}
                         </span>
                       )}
                     </div>
@@ -687,9 +703,9 @@ export default function FinanceAccounts({ finance }: Props) {
                         <div className="flex items-center gap-1.5 text-pink-900 font-medium">
                           <Sparkles className="w-3.5 h-3.5 text-[#FF2EB8]" />
                           <span>Monzo Live Sync</span>
-                          {lastSynced && (
+                          {lastSynced && safeFormatDate(lastSynced, 'dd MMM HH:mm') && (
                             <span className="text-slate-500 font-normal">
-                              • Last synced {format(new Date(lastSynced), 'dd MMM HH:mm')}
+                              • Last synced {safeFormatDate(lastSynced, 'dd MMM HH:mm')}
                             </span>
                           )}
                         </div>
@@ -804,7 +820,7 @@ export default function FinanceAccounts({ finance }: Props) {
                                    </div>
                                    <div className="flex items-center gap-3 shrink-0 text-muted-foreground">
                                      <span>{log.transactions_imported} imported</span>
-                                     <span>{format(new Date(log.created_at), 'dd MMM yyyy')}</span>
+                                     <span>{safeFormatDate(log.created_at, 'dd MMM yyyy')}</span>
                                      <Button
                                        variant="ghost"
                                        size="sm"
