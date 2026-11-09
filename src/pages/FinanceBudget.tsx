@@ -173,10 +173,15 @@ export default function FinanceBudget() {
     return isCurrentWeek ? today : weekStart;
   }, [isCurrentWeek, today, weekStart]);
 
+  const { cleaned: dedupedTransactions } = useMemo(
+    () => deduplicateTransactions(finance.transactions),
+    [finance.transactions]
+  );
+
   const snapshot = useMemo(() => {
     if (!assumptions || !allDataReady) return null;
     const computed = computePolicySnapshot(
-      assumptions, finance.accounts, finance.transactions,
+      assumptions, finance.accounts, dedupedTransactions,
       finance.categories, finance.goals, finance.convertToBase,
       fixedExpensesMonthly, boostAmount, typeof wtMap === 'function' ? wtMap() : wtMap, trips, fixedExpensesMonthlyAll,
       referenceDateForEngine
@@ -198,7 +203,7 @@ export default function FinanceBudget() {
       }
     }
     return computed;
-  }, [assumptions, allDataReady, finance.accounts, finance.transactions, finance.categories, finance.goals, finance.convertToBase, fixedExpensesMonthly, fixedExpensesMonthlyAll, boostAmount, wtMap, trips, referenceDateForEngine, isCurrentWeek, selectedDate, today, stashGoal?.description, weekStartKey]);
+  }, [assumptions, allDataReady, finance.accounts, dedupedTransactions, finance.categories, finance.goals, finance.convertToBase, fixedExpensesMonthly, fixedExpensesMonthlyAll, boostAmount, wtMap, trips, referenceDateForEngine, isCurrentWeek, selectedDate, today, stashGoal?.description, weekStartKey]);
 
   // Emergency Fund Goal: find existing goal marked with is_emergency or named "Emergency"
   const emergencyGoal = useMemo(() => finance.goals.find(g => (g as any).is_emergency === true || g.name.toLowerCase().includes('emergency')), [finance.goals]);
@@ -227,12 +232,12 @@ export default function FinanceBudget() {
   useEffect(() => {
     if (!snapshot || !allDataReady || !assumptions) return;
     const todayWeekStart = startOfWeek(today, { weekStartsOn: 1 });
+    const thisWeekKey = format(todayWeekStart, 'yyyy-MM-dd');
     const prevWeekStart = startOfWeek(subDays(todayWeekStart, 1), { weekStartsOn: 1 });
     const prevWeekKey = format(prevWeekStart, 'yyyy-MM-dd');
-    const SETTLE_VERSION = 11;
+    const SETTLE_VERSION = 12;
 
-    const { cleaned: dedupedTxsForSettle } = deduplicateTransactions(finance.transactions);
-    const prevWeekSpend = computeWeekVariableSpend(dedupedTxsForSettle, finance.categories, prevWeekStart, trips);
+    const prevWeekSpend = computeWeekVariableSpend(dedupedTransactions, finance.categories, prevWeekStart, trips);
     const prevEssentialSpent = prevWeekSpend.essentialSpent;
     const prevFunSpent = prevWeekSpend.funSpent;
     const prevWeekBoost = boosts
@@ -241,7 +246,7 @@ export default function FinanceBudget() {
     const prevWeekSnapshot = computePolicySnapshot(
       assumptions,
       finance.accounts,
-      dedupedTxsForSettle,
+      dedupedTransactions,
       finance.categories,
       finance.goals,
       finance.convertToBase,
@@ -264,12 +269,15 @@ export default function FinanceBudget() {
       meta.last_settled_week === prevWeekKey &&
       meta.settled_version === SETTLE_VERSION;
 
-    const expectedStashDelta = netDifference > 0 ? netDifference : 0;
-    const expectedOverspend = netDifference < 0 ? Math.abs(netDifference) : 0;
+    const closedPrev = meta.closed_weeks?.[prevWeekKey];
     const deltaMatches =
       isCurrentVersionSettled &&
-      Math.abs((meta.last_settled_stash_delta ?? 0) - expectedStashDelta) <= 0.02 &&
-      Math.abs((meta.last_cover?.overspend ?? 0) - expectedOverspend) <= 0.02;
+      assumptions.last_debt_week === thisWeekKey &&
+      closedPrev !== undefined &&
+      Math.abs((closedPrev.netDifference ?? 0) - netDifference) <= 0.02 &&
+      (netDifference >= 0
+        ? Math.abs((meta.last_settled_stash_delta ?? 0) - netDifference) <= 0.02
+        : Math.abs((meta.last_cover?.overspend ?? 0) - Math.abs(netDifference)) <= 0.02);
 
     const settleKey = `${prevWeekKey}_v${SETTLE_VERSION}_${netDifference.toFixed(2)}`;
     if (settleRef.current === settleKey) return;
@@ -279,16 +287,17 @@ export default function FinanceBudget() {
       return;
     }
 
+    const isFirstSettleForWeek = meta.last_settled_week !== prevWeekKey;
+
     const doSettle = async () => {
       settleRef.current = settleKey;
-      const thisWeekKey = format(todayWeekStart, 'yyyy-MM-dd');
       let stashDelta = 0;
       let newBorrowed = { ...(meta.borrowed || {}) };
       let steps: CoverStep[] = [];
       let carryDebt = 0;
       const potDeltas: Record<string, number> = {};
 
-      // If prevWeekKey was previously settled (e.g. under v3 before the spend calculation fix, or with an older transaction set),
+      // If prevWeekKey was previously settled (e.g. under an older version or transaction set),
       // reverse its previous stash/pot adjustments before applying the true settlement.
       if (meta.last_settled_week === prevWeekKey) {
         if (typeof meta.last_settled_stash_delta === 'number') {
@@ -316,12 +325,21 @@ export default function FinanceBudget() {
         stashDelta += netDifference;
         recordedStashDelta = netDifference;
       } else if (netDifference < 0) {
+        // Restore pre-settle stash & goal balances before running planOverspendCover so re-settling is idempotent
+        const restoredStash = stashGoal
+          ? { ...stashGoal, assigned_amount: Math.max(0, (stashGoal.assigned_amount || 0) + stashDelta) }
+          : null;
+        const restoredGoals = finance.goals.map(g =>
+          potDeltas[g.id]
+            ? { ...g, assigned_amount: Math.max(0, (g.assigned_amount || 0) + potDeltas[g.id]) }
+            : g
+        );
         // OVERSPENT: Stash -> next week (capped) -> pots lowest priority first -> leftover debt
         const plan = planOverspendCover({
           overspend: Math.abs(netDifference),
-          stash: (stashGoal as any) || null,
+          stash: (restoredStash as any) || null,
           nextWeekFun: snapshot.baseWeeklyFun,
-          goals: finance.goals as any,
+          goals: restoredGoals as any,
           trips: trips as any,
           meta: { ...meta, borrowed: newBorrowed },
           now: new Date(),
@@ -448,13 +466,15 @@ export default function FinanceBudget() {
       // Debt for this week (engine only uses stored debt once a settle has run for this week)
       await updateAssumptions({ carry_forward_debt: carryDebt, last_debt_week: thisWeekKey }, true);
 
-      // Summary toast
-      if (netDifference < 0) {
-        const parts = steps.map(s => `${fmt(s.amount)} ${s.source === 'next_week' ? 'from next week' : `from ${s.name}`}`);
-        const left = carryDebt - (steps.find(s => s.source === 'next_week')?.amount || 0);
-        toast.warning(`Overspent ${fmt(Math.abs(netDifference))} last week → covered ${parts.join(', ')}${left > 0.01 ? ` · ${fmt(left)} still carried` : ''}`, { duration: 10000 });
-      } else if (netDifference > 0) {
-        toast.success(`Underspent ${fmt(netDifference)} last week → ${fmt(netDifference)} added to Savings Stash 💰`);
+      // Summary toast — only show when settling this week for the first time, never on repeat page loads
+      if (isFirstSettleForWeek) {
+        if (netDifference < 0) {
+          const parts = steps.map(s => `${fmt(s.amount)} ${s.source === 'next_week' ? 'from next week' : `from ${s.name}`}`);
+          const left = carryDebt - (steps.find(s => s.source === 'next_week')?.amount || 0);
+          toast.warning(`Overspent ${fmt(Math.abs(netDifference))} last week → covered ${parts.join(', ')}${left > 0.01 ? ` · ${fmt(left)} still carried` : ''}`, { duration: 10000 });
+        } else if (netDifference > 0) {
+          toast.success(`Underspent ${fmt(netDifference)} last week → ${fmt(netDifference)} added to Savings Stash 💰`);
+        }
       }
 
       localStorage.setItem(localKey, 'true');
@@ -462,7 +482,7 @@ export default function FinanceBudget() {
 
     doSettle();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [snapshot, finance.loading, assumptionsLoading, today, stashGoal?.id, stashGoal?.description]);
+  }, [snapshot, allDataReady, today, stashGoal?.id, stashGoal?.description]);
 
   // Fixed expenses normalized to weekly
   const fixedWeeklyItems = useMemo(() => {
@@ -484,7 +504,7 @@ export default function FinanceBudget() {
   // Categorize transactions from last 28 days + unified weekly variable spend
   const { essentials, funCategories, allVariableCategories, essentialSpentThisWeek, funSpentThisWeek, thisWeekByCategory, thisWeekTxns, dailySpendingStacked } = useMemo(() => {
     const cutoff = startOfDay(subDays(weekEnd, 28));
-    const { cleaned: transactions } = deduplicateTransactions(finance.transactions);
+    const transactions = dedupedTransactions;
 
     const weekSummary = computeWeekVariableSpend(transactions, finance.categories, weekStart, trips);
 
@@ -564,7 +584,7 @@ export default function FinanceBudget() {
       thisWeekTxns,
       dailySpendingStacked,
     };
-  }, [finance.transactions, finance.categories, weekStart, weekEnd, trips, catMap, essentialCatIds]);
+  }, [dedupedTransactions, finance.categories, weekStart, weekEnd, trips, catMap, essentialCatIds]);
 
   const [selectedCategory, setSelectedCategory] = useState<any | null>(null);
   const [selectedDayIndex, setSelectedDayIndex] = useState<number | null>(null);
@@ -641,7 +661,7 @@ export default function FinanceBudget() {
     return result;
   }, [funCategories, thisWeekByCategory, boostAmount]);
 
-  if (finance.loading || assumptionsLoading) {
+  if (!allDataReady) {
     return (
       <div className="space-y-4">
         <h1 className="text-2xl font-bold text-foreground">Weekly Budget</h1>

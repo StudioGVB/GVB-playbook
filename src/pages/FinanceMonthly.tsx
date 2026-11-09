@@ -89,10 +89,11 @@ const MONTHLY_PEER_BENCHMARKS = [
 export default function FinanceMonthly() {
   const finance = useFinanceData();
   const { assumptions, loading: assumptionsLoading, update: updateAssumptions } = useFinanceAssumptions();
-  const { expenses: fixedExpenses, monthlyTotalInternal: fixedExpensesMonthly, monthlyTotal: fixedExpensesMonthlyAll, reimbursementsOn } = useFixedExpenses();
-  const { totalBoostThisWeek, boosts } = useWeeklyBoosts();
-  const { trips } = useFinanceTrips();
-  const { weekTypeMap: wtMap } = useWeekTypes();
+  const { expenses: fixedExpenses, loading: fixedExpensesLoading, monthlyTotalInternal: fixedExpensesMonthly, monthlyTotal: fixedExpensesMonthlyAll, reimbursementsOn } = useFixedExpenses();
+  const { totalBoostThisWeek, boosts, loading: boostsLoading } = useWeeklyBoosts();
+  const { trips, loading: tripsLoading } = useFinanceTrips();
+  const { weekTypeMap: wtMap, loading: weekTypesLoading } = useWeekTypes();
+  const allDataReady = !finance.loading && !assumptionsLoading && !fixedExpensesLoading && !boostsLoading && !weekTypesLoading && !tripsLoading;
 
   const [selectedMonth, setSelectedMonth] = useState(new Date());
   const [activeTab, setActiveTab] = useState<string>('overview');
@@ -102,7 +103,7 @@ export default function FinanceMonthly() {
   const monthLabel = format(monthStart, 'MMMM yyyy');
 
   const snapshot = useMemo(() => {
-    if (!assumptions) return null;
+    if (!assumptions || !allDataReady) return null;
     const midMonthRef = new Date(selectedMonth.getFullYear(), selectedMonth.getMonth(), 15);
     return computePolicySnapshot(
       assumptions, finance.accounts, finance.transactions,
@@ -110,7 +111,7 @@ export default function FinanceMonthly() {
       fixedExpensesMonthly, totalBoostThisWeek, wtMap(), trips, fixedExpensesMonthlyAll,
       midMonthRef,
     );
-  }, [assumptions, finance.accounts, finance.transactions, finance.categories, finance.goals, finance.convertToBase, fixedExpensesMonthly, fixedExpensesMonthlyAll, totalBoostThisWeek, wtMap, trips, selectedMonth]);
+  }, [assumptions, allDataReady, finance.accounts, finance.transactions, finance.categories, finance.goals, finance.convertToBase, fixedExpensesMonthly, fixedExpensesMonthlyAll, totalBoostThisWeek, wtMap, trips, selectedMonth]);
 
   const baseCurrency = finance.settings?.base_currency || 'GBP';
   const fmt = (n: number) => formatCurrency(n, baseCurrency);
@@ -939,7 +940,7 @@ export default function FinanceMonthly() {
 
   const maxDaily = Math.max(...dailyData.map(d => d.essential + d.fun), targetDailyVariable * 1.2, 1);
 
-  if (finance.loading || assumptionsLoading) {
+  if (!allDataReady) {
     return (
       <div className="space-y-4">
         <h1 className="text-2xl font-bold text-foreground">Monthly Overview</h1>

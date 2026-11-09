@@ -101,10 +101,11 @@ interface CapOverflowInfo {
 export default function FinancePoolsPage() {
   const finance = useFinanceData();
   const { assumptions, loading: assumptionsLoading, update: updateAssumptions } = useFinanceAssumptions();
-  const { expenses: fixedExpenses, monthlyTotalInternal: fixedMonthlyTotal, monthlyTotal: fixedMonthlyTotalAll } = useFixedExpenses();
-  const { totalBoostThisWeek } = useWeeklyBoosts();
-  const { weekTypeMap } = useWeekTypes();
-  const { trips } = useFinanceTrips();
+  const { expenses: fixedExpenses, loading: fixedExpensesLoading, monthlyTotalInternal: fixedMonthlyTotal, monthlyTotal: fixedMonthlyTotalAll } = useFixedExpenses();
+  const { totalBoostThisWeek, loading: boostsLoading } = useWeeklyBoosts();
+  const { weekTypeMap, loading: weekTypesLoading } = useWeekTypes();
+  const { trips, loading: tripsLoading } = useFinanceTrips();
+  const allDataReady = !finance.loading && !assumptionsLoading && !fixedExpensesLoading && !boostsLoading && !weekTypesLoading && !tripsLoading;
   const [searchParams] = useSearchParams();
   const initialTab = searchParams.get('tab') || 'pools';
 
@@ -197,7 +198,7 @@ export default function FinancePoolsPage() {
   }, [finance.goals, finance.loading]);
 
   const snapshot = useMemo(() => {
-    if (!assumptions || finance.loading) return null;
+    if (!assumptions || !allDataReady) return null;
     const now = new Date();
     const poolRefDate = now.getDate() >= 24
       ? new Date(now.getFullYear(), now.getMonth() + 1, 15)
@@ -207,7 +208,7 @@ export default function FinancePoolsPage() {
       finance.goals, finance.convertToBase, fixedMonthlyTotal, undefined, wtMap, trips, fixedMonthlyTotalAll,
       poolRefDate,
     );
-  }, [assumptions, finance.accounts, finance.transactions, finance.categories, finance.goals, finance.convertToBase, finance.loading, fixedMonthlyTotal, fixedMonthlyTotalAll, wtMap, trips]);
+  }, [assumptions, allDataReady, finance.accounts, finance.transactions, finance.categories, finance.goals, finance.convertToBase, fixedMonthlyTotal, fixedMonthlyTotalAll, wtMap, trips]);
 
   const totalCash = snapshot?.totalLiquidCash ?? 0;
   const weeksUntilIncome = snapshot?.weeksUntilIncome ?? 0;
@@ -961,7 +962,7 @@ export default function FinancePoolsPage() {
     }
   };
 
-  if (finance.loading || assumptionsLoading) {
+  if (!allDataReady) {
     return (
       <div className="space-y-6 w-full font-body">
         <h1 className="text-2xl sm:text-4xl font-display font-bold text-slate-900 tracking-tight">Money Pools</h1>
