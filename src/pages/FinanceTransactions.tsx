@@ -30,7 +30,14 @@ export default function FinanceTransactionsPage() {
       if (finance.syncWiseTransactions) {
         syncTasks.push(finance.syncWiseTransactions(undefined, { skipAutoCategorize: true }));
       }
-      if (finance.syncMonzoTransactions && finance.accounts.some(a => a.provider === 'monzo')) {
+      if (
+        finance.syncMonzoTransactions &&
+        (finance.accounts.some(a => a.provider?.toLowerCase() === 'monzo' || a.account_name?.toLowerCase().includes('monzo')) ||
+          !!(finance.settings as any)?.bank_tokens?.monzo ||
+          !!(finance.settings as any)?.bank_tokens?.monzo_refresh ||
+          !!localStorage.getItem('gvb_monzo_access_token') ||
+          !!localStorage.getItem('gvb_monzo_refresh_token'))
+      ) {
         syncTasks.push(finance.syncMonzoTransactions(undefined, { skipAutoCategorize: true }));
       }
 

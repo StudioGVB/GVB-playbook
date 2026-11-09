@@ -43,9 +43,14 @@ function isConnectedAccount(acc: { source_type?: string }) {
 export default function FinanceAccounts({ finance }: Props) {
   const navigate = useNavigate();
   const { accounts, transactions, importTransactions, addAccount, updateAccount, deleteAccount, syncUpTransactions, syncWiseTransactions, syncMonzoTransactions, connectMonzo, categorizeTransactions, matchTransfers, importLogs, addImportLog, deleteImportLog, refetch } = finance;
-  const hasUpAccounts = accounts.some(a => a.provider === 'up');
-  const hasWiseAccounts = accounts.some(a => a.provider === 'wise');
-  const hasMonzoAccounts = accounts.some(a => a.provider === 'monzo');
+  const hasUpAccounts = accounts.some(a => a.provider === 'up' || a.account_name?.toLowerCase().includes('up')) || !!(finance.settings as any)?.bank_tokens?.up;
+  const hasWiseAccounts = accounts.some(a => a.provider === 'wise' || a.account_name?.toLowerCase().includes('wise')) || !!(finance.settings as any)?.bank_tokens?.wise;
+  const hasMonzoAccounts =
+    accounts.some(a => a.provider?.toLowerCase() === 'monzo' || a.account_name?.toLowerCase().includes('monzo')) ||
+    !!(finance.settings as any)?.bank_tokens?.monzo ||
+    !!(finance.settings as any)?.bank_tokens?.monzo_refresh ||
+    !!localStorage.getItem('gvb_monzo_access_token') ||
+    !!localStorage.getItem('gvb_monzo_refresh_token');
   const [syncing, setSyncing] = useState(false);
   const [wiseSyncing, setWiseSyncing] = useState(false);
   const [monzoSyncing, setMonzoSyncing] = useState(false);
@@ -108,20 +113,35 @@ export default function FinanceAccounts({ finance }: Props) {
 
   const handleSync = async () => {
     setSyncing(true);
-    await syncUpTransactions();
-    setSyncing(false);
+    try {
+      await syncUpTransactions();
+    } catch (e) {
+      console.error('Up sync failed:', e);
+    } finally {
+      setSyncing(false);
+    }
   };
 
   const handleWiseSync = async () => {
     setWiseSyncing(true);
-    await syncWiseTransactions();
-    setWiseSyncing(false);
+    try {
+      await syncWiseTransactions();
+    } catch (e) {
+      console.error('Wise sync failed:', e);
+    } finally {
+      setWiseSyncing(false);
+    }
   };
 
   const handleMonzoSync = async () => {
     setMonzoSyncing(true);
-    await syncMonzoTransactions();
-    setMonzoSyncing(false);
+    try {
+      await syncMonzoTransactions();
+    } catch (e) {
+      console.error('Monzo sync failed:', e);
+    } finally {
+      setMonzoSyncing(false);
+    }
   };
 
   const handleLiveMonzoConnect = async () => {
@@ -425,37 +445,37 @@ export default function FinanceAccounts({ finance }: Props) {
       <input ref={fileRef} type="file" accept=".csv,.txt,.md,.pdf" className="hidden" onChange={handleFileUpload} />
       <input ref={snapshotRef} type="file" accept="image/jpeg,image/png,image/webp,application/pdf" className="hidden" onChange={handleSnapshotUpload} />
 
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <h2 className="text-lg font-semibold">Accounts</h2>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
           <Button
             size="sm"
             variant="outline"
             onClick={() => snapshotRef.current?.click()}
             disabled={snapshotParsing}
-            className="gap-1"
+            className="gap-1 touch-manipulation cursor-pointer h-9 px-3 text-xs"
           >
             {snapshotParsing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Camera className="w-4 h-4" />}
             {snapshotParsing ? 'Reading...' : 'Update Balances'}
           </Button>
           {hasUpAccounts && (
-            <Button size="sm" variant="outline" onClick={handleSync} disabled={syncing}>
+            <Button size="sm" variant="outline" onClick={handleSync} disabled={syncing} className="touch-manipulation cursor-pointer h-9 px-3 text-xs">
               {syncing ? <><Loader2 className="w-4 h-4 mr-1 animate-spin" /> Syncing...</> : <><RefreshCw className="w-4 h-4 mr-1" /> Sync Up</>}
             </Button>
           )}
           {hasWiseAccounts && (
-            <Button size="sm" variant="outline" onClick={handleWiseSync} disabled={wiseSyncing}>
+            <Button size="sm" variant="outline" onClick={handleWiseSync} disabled={wiseSyncing} className="touch-manipulation cursor-pointer h-9 px-3 text-xs">
               {wiseSyncing ? <><Loader2 className="w-4 h-4 mr-1 animate-spin" /> Syncing...</> : <><RefreshCw className="w-4 h-4 mr-1" /> Sync Wise</>}
             </Button>
           )}
           {hasMonzoAccounts && (
-            <Button size="sm" variant="outline" onClick={handleMonzoSync} disabled={monzoSyncing}>
+            <Button size="sm" variant="outline" onClick={handleMonzoSync} disabled={monzoSyncing} className="touch-manipulation cursor-pointer h-9 px-3 text-xs bg-pink-50 hover:bg-pink-100 text-pink-700 border-pink-200 font-semibold">
               {monzoSyncing ? <><Loader2 className="w-4 h-4 mr-1 animate-spin" /> Syncing...</> : <><RefreshCw className="w-4 h-4 mr-1" /> Sync Monzo</>}
             </Button>
           )}
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
-              <Button size="sm" data-add-account-trigger><Plus className="w-4 h-4 mr-1" /> Add Account</Button>
+              <Button size="sm" data-add-account-trigger className="touch-manipulation cursor-pointer h-9 px-3 text-xs"><Plus className="w-4 h-4 mr-1" /> Add Account</Button>
             </DialogTrigger>
             <DialogContent>
               <DialogHeader>
@@ -662,6 +682,28 @@ export default function FinanceAccounts({ finance }: Props) {
                 </AccordionTrigger>
                 <AccordionContent className="px-4 pb-3">
                   <div className="space-y-3">
+                    {provKey === 'monzo' && (
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-2.5 rounded-lg bg-pink-50/70 border border-pink-100 text-xs">
+                        <div className="flex items-center gap-1.5 text-pink-900 font-medium">
+                          <Sparkles className="w-3.5 h-3.5 text-[#FF2EB8]" />
+                          <span>Monzo Live Sync</span>
+                          {lastSynced && (
+                            <span className="text-slate-500 font-normal">
+                              • Last synced {format(new Date(lastSynced), 'dd MMM HH:mm')}
+                            </span>
+                          )}
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={(e) => { e.stopPropagation(); handleMonzoSync(); }}
+                          disabled={monzoSyncing}
+                          className="h-8 px-3 text-xs font-semibold bg-white hover:bg-pink-100/60 text-[#FF2EB8] border-[#FF2EB8]/30 touch-manipulation cursor-pointer shrink-0"
+                        >
+                          {monzoSyncing ? <><Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> Syncing Monzo...</> : <><RefreshCw className="w-3.5 h-3.5 mr-1.5" /> Sync Monzo</>}
+                        </Button>
+                      </div>
+                    )}
                     {provAccounts.map(acc => {
                       const connected = isConnectedAccount(acc);
                       const accLogs = logsByAccount[acc.id] || [];

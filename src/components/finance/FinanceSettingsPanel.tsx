@@ -190,14 +190,20 @@ export default function FinanceSettingsPanel({ finance }: Props) {
     });
   }, [activeMonthsNum, targetMonthsNum, monthlySurvivalCost, totalLiquidCash, finance.goals, finance.convertToBase]);
 
-  const upAccount = accounts.find(a => a.provider === 'up');
-  const isUpConnected = !!upAccount || upStatus?.connected === true;
+  const upAccount = accounts.find(a => a.provider?.toLowerCase() === 'up' || a.account_name?.toLowerCase().includes('up'));
+  const isUpConnected = !!upAccount || upStatus?.connected === true || !!(settings as any)?.bank_tokens?.up;
 
-  const wiseAccount = accounts.find(a => a.provider === 'wise');
-  const isWiseConnected = !!wiseAccount || wiseStatus?.connected === true;
+  const wiseAccount = accounts.find(a => a.provider?.toLowerCase() === 'wise' || a.account_name?.toLowerCase().includes('wise'));
+  const isWiseConnected = !!wiseAccount || wiseStatus?.connected === true || !!(settings as any)?.bank_tokens?.wise;
 
-  const monzoAccount = accounts.find(a => a.provider === 'monzo');
-  const isMonzoConnected = !!monzoAccount || monzoStatus?.connected === true;
+  const monzoAccount = accounts.find(a => a.provider?.toLowerCase() === 'monzo' || a.account_name?.toLowerCase().includes('monzo'));
+  const isMonzoConnected =
+    !!monzoAccount ||
+    monzoStatus?.connected === true ||
+    !!(settings as any)?.bank_tokens?.monzo ||
+    !!(settings as any)?.bank_tokens?.monzo_refresh ||
+    !!localStorage.getItem('gvb_monzo_access_token') ||
+    !!localStorage.getItem('gvb_monzo_refresh_token');
 
   const activeIncomeCats = useMemo(() => {
     return categories.filter(c => c.type === 'income' && !c.is_archived);
@@ -739,13 +745,24 @@ export default function FinanceSettingsPanel({ finance }: Props) {
                       {upAccount?.last_synced_at ? `Last synced: ${new Date(upAccount.last_synced_at).toLocaleString()}` : 'Connects using UP_PERSONAL_TOKEN cloud secret.'}
                     </p>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Button size="sm" variant="outline" onClick={handleUpVerify} disabled={upChecking} className="text-xs font-semibold h-8">
-                      {upChecking ? <><Loader2 className="h-3 w-3 animate-spin mr-1" /> Checking...</> : 'Verify Connection'}
+                  <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto pt-1 sm:pt-0">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={handleUpVerify}
+                      disabled={upChecking}
+                      className="text-xs font-semibold h-9 px-3 touch-manipulation cursor-pointer flex-1 sm:flex-initial"
+                    >
+                      {upChecking ? <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> Checking...</> : 'Verify Connection'}
                     </Button>
                     {isUpConnected && (
-                      <Button size="sm" onClick={handleUpSync} disabled={upSyncing} className="bg-[#FF2EB8] hover:bg-[#e5299f] text-white font-semibold text-xs h-8">
-                        {upSyncing ? <><Loader2 className="h-3 w-3 animate-spin mr-1" /> Syncing...</> : 'Sync Now'}
+                      <Button
+                        size="sm"
+                        onClick={handleUpSync}
+                        disabled={upSyncing}
+                        className="bg-[#FF2EB8] hover:bg-[#e5299f] text-white font-semibold text-xs h-9 px-3.5 touch-manipulation cursor-pointer flex-1 sm:flex-initial"
+                      >
+                        {upSyncing ? <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> Syncing...</> : <><RefreshCw className="h-3.5 w-3.5 mr-1.5" /> Sync Up</>}
                       </Button>
                     )}
                   </div>
@@ -772,13 +789,24 @@ export default function FinanceSettingsPanel({ finance }: Props) {
                       {wiseAccount?.last_synced_at ? `Last synced: ${new Date(wiseAccount.last_synced_at).toLocaleString()}` : 'Supports multi-currency pots and balance synchronization.'}
                     </p>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Button size="sm" variant="outline" onClick={handleWiseVerify} disabled={wiseChecking} className="text-xs font-semibold h-8">
-                      {wiseChecking ? <><Loader2 className="h-3 w-3 animate-spin mr-1" /> Checking...</> : 'Verify Connection'}
+                  <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto pt-1 sm:pt-0">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={handleWiseVerify}
+                      disabled={wiseChecking}
+                      className="text-xs font-semibold h-9 px-3 touch-manipulation cursor-pointer flex-1 sm:flex-initial"
+                    >
+                      {wiseChecking ? <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> Checking...</> : 'Verify Connection'}
                     </Button>
                     {isWiseConnected && (
-                      <Button size="sm" onClick={handleWiseSync} disabled={wiseSyncing} className="bg-[#FF2EB8] hover:bg-[#e5299f] text-white font-semibold text-xs h-8">
-                        {wiseSyncing ? <><Loader2 className="h-3 w-3 animate-spin mr-1" /> Syncing...</> : 'Sync Now'}
+                      <Button
+                        size="sm"
+                        onClick={handleWiseSync}
+                        disabled={wiseSyncing}
+                        className="bg-[#FF2EB8] hover:bg-[#e5299f] text-white font-semibold text-xs h-9 px-3.5 touch-manipulation cursor-pointer flex-1 sm:flex-initial"
+                      >
+                        {wiseSyncing ? <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> Syncing...</> : <><RefreshCw className="h-3.5 w-3.5 mr-1.5" /> Sync Wise</>}
                       </Button>
                     )}
                   </div>
@@ -830,15 +858,24 @@ export default function FinanceSettingsPanel({ finance }: Props) {
                       {monzoAccount?.last_synced_at ? `Last synced: ${new Date(monzoAccount.last_synced_at).toLocaleString()}` : 'Connects via Permanent Monzo OAuth or direct token.'}
                     </p>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Button size="sm" variant="outline" onClick={handleMonzoVerify} disabled={monzoChecking} className="text-xs font-semibold h-8">
-                      {monzoChecking ? <><Loader2 className="h-3 w-3 animate-spin mr-1" /> Checking...</> : 'Verify Connection'}
+                  <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto pt-1 sm:pt-0">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={handleMonzoVerify}
+                      disabled={monzoChecking}
+                      className="text-xs font-semibold h-9 px-3 touch-manipulation cursor-pointer flex-1 sm:flex-initial"
+                    >
+                      {monzoChecking ? <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> Checking...</> : 'Verify Connection'}
                     </Button>
-                    {isMonzoConnected && (
-                      <Button size="sm" onClick={handleMonzoSync} disabled={monzoSyncing} className="bg-[#FF2EB8] hover:bg-[#e5299f] text-white font-semibold text-xs h-8">
-                        {monzoSyncing ? <><Loader2 className="h-3 w-3 animate-spin mr-1" /> Syncing...</> : 'Sync Now'}
-                      </Button>
-                    )}
+                    <Button
+                      size="sm"
+                      onClick={handleMonzoSync}
+                      disabled={monzoSyncing}
+                      className="bg-[#FF2EB8] hover:bg-[#e5299f] text-white font-semibold text-xs h-9 px-3.5 touch-manipulation cursor-pointer flex-1 sm:flex-initial"
+                    >
+                      {monzoSyncing ? <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> Syncing...</> : <><RefreshCw className="h-3.5 w-3.5 mr-1.5" /> Sync Monzo</>}
+                    </Button>
                   </div>
                 </div>
 
