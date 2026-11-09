@@ -32,7 +32,7 @@ export default function FinanceTransactionsPage() {
       }
       if (
         finance.syncMonzoTransactions &&
-        (finance.accounts.some(a => a.provider?.toLowerCase() === 'monzo' || a.account_name?.toLowerCase().includes('monzo')) ||
+        (finance.accounts.some(a => (a.provider || '').toLowerCase() === 'monzo' || (a.account_name || '').toLowerCase().includes('monzo')) ||
           !!(finance.settings as any)?.bank_tokens?.monzo ||
           !!(finance.settings as any)?.bank_tokens?.monzo_refresh ||
           !!localStorage.getItem('gvb_monzo_access_token') ||

@@ -190,13 +190,13 @@ export default function FinanceSettingsPanel({ finance }: Props) {
     });
   }, [activeMonthsNum, targetMonthsNum, monthlySurvivalCost, totalLiquidCash, finance.goals, finance.convertToBase]);
 
-  const upAccount = accounts.find(a => a.provider?.toLowerCase() === 'up' || a.account_name?.toLowerCase().includes('up'));
+  const upAccount = accounts.find(a => (a.provider || '').toLowerCase() === 'up' || (a.account_name || '').toLowerCase().includes('up'));
   const isUpConnected = !!upAccount || upStatus?.connected === true || !!(settings as any)?.bank_tokens?.up;
 
-  const wiseAccount = accounts.find(a => a.provider?.toLowerCase() === 'wise' || a.account_name?.toLowerCase().includes('wise'));
+  const wiseAccount = accounts.find(a => (a.provider || '').toLowerCase() === 'wise' || (a.account_name || '').toLowerCase().includes('wise'));
   const isWiseConnected = !!wiseAccount || wiseStatus?.connected === true || !!(settings as any)?.bank_tokens?.wise;
 
-  const monzoAccount = accounts.find(a => a.provider?.toLowerCase() === 'monzo' || a.account_name?.toLowerCase().includes('monzo'));
+  const monzoAccount = accounts.find(a => (a.provider || '').toLowerCase() === 'monzo' || (a.account_name || '').toLowerCase().includes('monzo'));
   const isMonzoConnected =
     !!monzoAccount ||
     monzoStatus?.connected === true ||

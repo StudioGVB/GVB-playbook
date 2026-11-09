@@ -43,10 +43,10 @@ function isConnectedAccount(acc: { source_type?: string }) {
 export default function FinanceAccounts({ finance }: Props) {
   const navigate = useNavigate();
   const { accounts, transactions, importTransactions, addAccount, updateAccount, deleteAccount, syncUpTransactions, syncWiseTransactions, syncMonzoTransactions, connectMonzo, categorizeTransactions, matchTransfers, importLogs, addImportLog, deleteImportLog, refetch } = finance;
-  const hasUpAccounts = accounts.some(a => a.provider === 'up' || a.account_name?.toLowerCase().includes('up')) || !!(finance.settings as any)?.bank_tokens?.up;
-  const hasWiseAccounts = accounts.some(a => a.provider === 'wise' || a.account_name?.toLowerCase().includes('wise')) || !!(finance.settings as any)?.bank_tokens?.wise;
+  const hasUpAccounts = accounts.some(a => (a.provider || '').toLowerCase() === 'up' || (a.account_name || '').toLowerCase().includes('up')) || !!(finance.settings as any)?.bank_tokens?.up;
+  const hasWiseAccounts = accounts.some(a => (a.provider || '').toLowerCase() === 'wise' || (a.account_name || '').toLowerCase().includes('wise')) || !!(finance.settings as any)?.bank_tokens?.wise;
   const hasMonzoAccounts =
-    accounts.some(a => a.provider?.toLowerCase() === 'monzo' || a.account_name?.toLowerCase().includes('monzo')) ||
+    accounts.some(a => (a.provider || '').toLowerCase() === 'monzo' || (a.account_name || '').toLowerCase().includes('monzo')) ||
     !!(finance.settings as any)?.bank_tokens?.monzo ||
     !!(finance.settings as any)?.bank_tokens?.monzo_refresh ||
     !!localStorage.getItem('gvb_monzo_access_token') ||

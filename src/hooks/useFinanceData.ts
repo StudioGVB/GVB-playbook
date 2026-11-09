@@ -240,9 +240,8 @@ export function useFinanceDataState() {
   }, [user]);
 
   const fetchAll = useCallback(async () => {
-    if (authLoading) return;
     if (!user) {
-      setLoading(false);
+      if (!authLoading) setLoading(false);
       return;
     }
     if (!hasLoadedOnce.current) setLoading(true);
@@ -1975,8 +1974,7 @@ export function useFinanceDataState() {
   };
 
   return {
-    accounts, categories, transactions, goals, goalPlans, settings,
-    loading: loading || authLoading || (!hasLoadedOnce.current && !!user),
+    accounts, categories, transactions, goals, goalPlans, settings, loading,
     hasLoadedOnce: hasLoadedOnce.current,
     importLogs, addImportLog, deleteImportLog,
     incomeSourceTags, addIncomeSourceTag, deleteIncomeSourceTag,

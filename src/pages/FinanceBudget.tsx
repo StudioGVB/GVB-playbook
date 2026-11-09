@@ -752,7 +752,7 @@ export default function FinanceBudget() {
       const bSpent = thisWeekByCategory.get(b.catId) || 0;
       return bSpent - aSpent;
     });
-    let boostRemaining = boostAmount;
+    let boostRemaining = Math.max(0, boostAmount);
     const result = new Map<string, number>();
     for (const cat of sorted) {
       const actual = thisWeekByCategory.get(cat.catId) || 0;
@@ -1003,7 +1003,11 @@ export default function FinanceBudget() {
         <div className="bg-white rounded-2xl border-2 border-[#FF7AD1]/40 p-4 sm:p-5 shadow-[4px_4px_0px_0px_rgba(255,46,184,0.15)]">
           <p className="text-[#FF2EB8] text-[10px] font-display font-bold uppercase tracking-[0.15em] mb-2">Weekly Budget</p>
           <p className="text-slate-900 font-display font-black tabular-nums text-2xl sm:text-3xl leading-none">{fmt(totalWeeklyBudget)}</p>
-          <p className="text-[11px] text-slate-500 mt-1.5 font-medium">{fmt(essentialWeeklyBudget)} essentials · {fmt(snapshot.weeklyFunBudget)} fun</p>
+          <p className="text-[11px] text-slate-500 mt-1.5 font-medium">
+            {fmt(essentialWeeklyBudget)} essentials · {fmt(snapshot.weeklyFunBudget)} fun
+            {boostAmount < 0 && ` (−${fmt(Math.abs(boostAmount))} pot save)`}
+            {boostAmount > 0 && ` (+${fmt(boostAmount)} boost)`}
+          </p>
         </div>
         <div className={cn(
           "bg-white rounded-2xl border-2 p-4 sm:p-5",
@@ -1037,6 +1041,58 @@ export default function FinanceBudget() {
           <p className="text-[11px] text-slate-500 mt-1.5 font-medium">
             {!isCurrentWeek ? 'actual avg / day' : 'target / day'}
           </p>
+        </div>
+      </div>
+
+      {/* === MID-MONTH POT FUNDING & BOOSTS BAR === */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 bg-white/85 backdrop-blur-sm rounded-2xl border-2 border-[#FF7AD1]/35 p-3 sm:px-4 shadow-[3px_3px_0px_0px_rgba(255,46,184,0.1)]">
+        <div className="flex flex-wrap items-center gap-2">
+          {weekBoostEntries.length > 0 ? (
+            weekBoostEntries.map(b => {
+              const g = finance.goals.find(x => x.id === b.goal_id);
+              const isDeduction = b.amount < 0;
+              return (
+                <div
+                  key={b.id}
+                  className={cn(
+                    "inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold border",
+                    isDeduction
+                      ? "bg-pink-50/90 border-pink-200 text-[#FF2EB8]"
+                      : "bg-emerald-50/90 border-emerald-200 text-emerald-700"
+                  )}
+                >
+                  <span>
+                    {isDeduction
+                      ? `🐷 −${fmt(Math.abs(b.amount))} → ${b.note || g?.name || 'Savings Pot'}`
+                      : `⚡ +${fmt(b.amount)} from ${g?.name || 'Goal'}`}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveBoost(b.id)}
+                    className="p-0.5 rounded-md hover:bg-black/10 transition-colors"
+                    title={isDeduction ? "Cancel this week's deduction & return to budget" : "Remove boost"}
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              );
+            })
+          ) : (
+            <span className="text-xs text-slate-600 font-medium">
+              💡 Budget looking healthy? Carve out a mid-month pot (e.g. £33/wk × 3 weeks) straight from your weekly allowance.
+            </span>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <WeeklyPotFundDialog
+            goals={finance.goals}
+            fmt={fmt}
+            currentWeeklyBudget={totalWeeklyBudget}
+            onFundPot={handleFundPotFromWeeks}
+          />
+          {finance.goals.length > 0 && (
+            <BoostDialog goals={finance.goals} fmt={fmt} onAddBoost={handleAddBoost} />
+          )}
         </div>
       </div>
 
@@ -1801,8 +1857,8 @@ function BoostDialog({ goals, fmt, onAddBoost }: {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="w-full border-dashed gap-1.5">
-          <Zap className="w-3.5 h-3.5" /> Boost This Week from a Goal
+        <Button variant="outline" size="sm" className="border-dashed gap-1.5 h-8 text-xs">
+          <Zap className="w-3.5 h-3.5" /> Boost from a Goal
         </Button>
       </DialogTrigger>
       <DialogContent>
@@ -1837,6 +1893,236 @@ function BoostDialog({ goals, fmt, onAddBoost }: {
             <Input value={note} onChange={e => setNote(e.target.value)} placeholder="e.g. extra this week" />
           </div>
           <Button onClick={handleSubmit} className="w-full">Add Boost</Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function WeeklyPotFundDialog({
+  goals,
+  fmt,
+  currentWeeklyBudget,
+  onFundPot,
+}: {
+  goals: ReturnType<typeof useFinanceData>['goals'];
+  fmt: (n: number) => string;
+  currentWeeklyBudget: number;
+  onFundPot: (params: {
+    mode: 'new' | 'existing';
+    potName?: string;
+    existingGoalId?: string;
+    totalAmount: number;
+    weeksCount: number;
+    startWhen: 'this_week' | 'next_week';
+    color?: string;
+  }) => Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<'new' | 'existing'>('new');
+  const [potName, setPotName] = useState('');
+  const [existingGoalId, setExistingGoalId] = useState('');
+  const [totalAmount, setTotalAmount] = useState('100');
+  const [weeksCount, setWeeksCount] = useState('3');
+  const [startWhen, setStartWhen] = useState<'this_week' | 'next_week'>('this_week');
+  const [submitting, setSubmitting] = useState(false);
+
+  const nonEmergencyGoals = goals.filter(
+    g => !(g as any).is_emergency && !g.name.toLowerCase().includes('emergency')
+  );
+
+  const parsedTotal = Math.max(0, parseFloat(totalAmount) || 0);
+  const parsedWeeks = Math.max(1, Math.min(12, parseInt(weeksCount, 10) || 1));
+  const perWeek = parsedWeeks > 0 ? parsedTotal / parsedWeeks : 0;
+  const projectedWeeklyBudget = Math.max(0, currentWeeklyBudget - perWeek);
+
+  const handleSubmit = async () => {
+    if (parsedTotal <= 0) return;
+    if (mode === 'new' && !potName.trim()) {
+      toast.error('Please enter a name for your new pot');
+      return;
+    }
+    if (mode === 'existing' && !existingGoalId) {
+      toast.error('Please select a pot to top up');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await onFundPot({
+        mode,
+        potName: potName.trim(),
+        existingGoalId,
+        totalAmount: parsedTotal,
+        weeksCount: parsedWeeks,
+        startWhen,
+      });
+      setOpen(false);
+      setPotName('');
+      setTotalAmount('100');
+      setWeeksCount('3');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button
+          size="sm"
+          className="h-8 text-xs font-semibold gap-1.5 bg-[#FF2EB8] hover:bg-[#e0249f] text-white rounded-xl shadow-2xs"
+        >
+          <Sparkles className="w-3.5 h-3.5" /> Fund a Pot from Weekly Budgets
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-[#FF2EB8]" />
+            Fund a Pot Mid-Month from Weekly Budgets
+          </DialogTitle>
+          <DialogDescription>
+            Create a new savings pot (or top up an existing one) and spread the cost across your upcoming weekly budgets — no need to wait for payday.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4 pt-1">
+          {/* Mode toggle */}
+          <div className="grid grid-cols-2 gap-1.5 p-1 bg-muted rounded-xl">
+            <button
+              type="button"
+              onClick={() => setMode('new')}
+              className={cn(
+                "py-1.5 px-3 rounded-lg text-xs font-semibold transition-all",
+                mode === 'new' ? "bg-white text-[#FF2EB8] shadow-xs" : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              ✨ Create New Pot
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode('existing')}
+              className={cn(
+                "py-1.5 px-3 rounded-lg text-xs font-semibold transition-all",
+                mode === 'existing' ? "bg-white text-[#FF2EB8] shadow-xs" : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              🐷 Top Up Existing Pot
+            </button>
+          </div>
+
+          {mode === 'new' ? (
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-foreground">New Pot Name</label>
+              <Input
+                value={potName}
+                onChange={e => setPotName(e.target.value)}
+                placeholder="e.g. Lip Filler"
+              />
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-foreground">Select Existing Pot</label>
+              <Select value={existingGoalId} onValueChange={setExistingGoalId}>
+                <SelectTrigger><SelectValue placeholder="Choose a pot" /></SelectTrigger>
+                <SelectContent>
+                  {nonEmergencyGoals.map(g => (
+                    <SelectItem key={g.id} value={g.id}>
+                      {g.name} ({fmt(g.assigned_amount || 0)} / {fmt(g.target_amount || 0)})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-foreground">Total Amount</label>
+              <Input
+                type="number"
+                min="1"
+                step="1"
+                value={totalAmount}
+                onChange={e => setTotalAmount(e.target.value)}
+                placeholder="e.g. 100"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-foreground">Spread Over</label>
+              <Select value={weeksCount} onValueChange={setWeeksCount}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {[1, 2, 3, 4, 5, 6, 8].map(n => (
+                    <SelectItem key={n} value={String(n)}>
+                      {n} {n === 1 ? 'week' : 'weeks'} ({fmt(parsedTotal / n)}/wk)
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-foreground">When should deductions start?</label>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setStartWhen('this_week')}
+                className={cn(
+                  "p-2.5 rounded-xl border text-left transition-all",
+                  startWhen === 'this_week'
+                    ? "border-[#FF2EB8] bg-pink-50/60 text-slate-900"
+                    : "border-border hover:bg-muted/50 text-muted-foreground"
+                )}
+              >
+                <p className="text-xs font-bold text-foreground">Start This Week</p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  Uses this week + next {Math.max(0, parsedWeeks - 1)} wk{parsedWeeks - 1 === 1 ? '' : 's'}
+                </p>
+              </button>
+              <button
+                type="button"
+                onClick={() => setStartWhen('next_week')}
+                className={cn(
+                  "p-2.5 rounded-xl border text-left transition-all",
+                  startWhen === 'next_week'
+                    ? "border-[#FF2EB8] bg-pink-50/60 text-slate-900"
+                    : "border-border hover:bg-muted/50 text-muted-foreground"
+                )}
+              >
+                <p className="text-xs font-bold text-foreground">Start Next Monday</p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  Keep this week untouched
+                </p>
+              </button>
+            </div>
+          </div>
+
+          {/* Live impact preview */}
+          <div className="rounded-2xl bg-pink-50/70 border border-pink-200/80 p-3.5 space-y-1.5">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-slate-600 font-medium">Weekly deduction ({parsedWeeks} {parsedWeeks === 1 ? 'wk' : 'wks'}):</span>
+              <span className="font-display font-black text-[#FF2EB8] tabular-nums">−{fmt(perWeek)} / week</span>
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-slate-600 font-medium">New weekly budget after deduction:</span>
+              <span className="font-display font-bold text-slate-900 tabular-nums">{fmt(projectedWeeklyBudget)} / week</span>
+            </div>
+            <p className="text-[11px] text-slate-500 pt-1 border-t border-pink-200/60">
+              {fmt(parsedTotal)} is placed straight into your pot in Money Pools, and {fmt(perWeek)} is automatically taken out of each of the {parsedWeeks} weekly budgets.
+            </p>
+          </div>
+
+          <Button
+            onClick={handleSubmit}
+            disabled={submitting || parsedTotal <= 0}
+            className="w-full bg-[#FF2EB8] hover:bg-[#e0249f] text-white font-semibold"
+          >
+            {submitting
+              ? 'Saving...'
+              : `Save ${fmt(parsedTotal)} (${fmt(perWeek)}/wk for ${parsedWeeks} wk${parsedWeeks === 1 ? '' : 's'})`}
+          </Button>
         </div>
       </DialogContent>
     </Dialog>
