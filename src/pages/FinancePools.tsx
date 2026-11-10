@@ -2007,93 +2007,6 @@ export default function FinancePoolsPage() {
           );
         })}
 
-        {/* Unallocated Surplus Pot Card (visible whenever there is unassigned cash above living & emergency) */}
-        {unallocatedSurplusCash > 0.01 && (
-          <div className="bg-pink-50/70 rounded-2xl border-2 border-[#FF2EB8]/40 p-5 shadow-[4px_4px_0px_0px_rgba(255,46,184,0.12)] transition-all hover:scale-[1.01] flex flex-col justify-between">
-            <div className="space-y-3 w-full">
-              <div className="flex items-start justify-between gap-2">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-[#FF2EB8] text-white flex items-center justify-center flex-shrink-0 shadow-xs">
-                    <Wallet className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <h3 className="text-sm font-bold text-slate-900">Unallocated Surplus</h3>
-                      <Badge className="bg-[#FF2EB8]/15 text-[#FF2EB8] border border-[#FF2EB8]/30 font-bold text-[10px] px-2 py-0.5 rounded-full">
-                        Ready to Assign
-                      </Badge>
-                    </div>
-                    <p className="text-[11px] text-slate-600 mt-0.5 leading-tight">
-                      Free cash in your accounts above your pots, Emergency Floor &amp; {targetMonthLabel} Living Budget
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="pt-1">
-                <span className="text-3xl font-display font-black text-[#FF2EB8] tracking-tight">
-                  {fmt(unallocatedSurplusCash)}
-                </span>
-                <p className="text-[11px] text-slate-600 font-medium mt-1 leading-relaxed">
-                  Exact breakdown of where this figure comes from:
-                </p>
-                <div className="mt-2 p-2.5 rounded-xl bg-white/80 border border-[#FF2EB8]/20 text-[11px] space-y-1 text-slate-600">
-                  <div className="flex justify-between font-semibold text-slate-800">
-                    <span>Total Bank Balances:</span>
-                    <span>{fmt(totalCash)}</span>
-                  </div>
-                  {finance.accounts.filter(a => !(a as any).exclude_from_totals && Math.abs(a.balance || 0) > 0.01).map(acc => (
-                    <div key={acc.id} className="flex justify-between text-[10px] text-slate-500 pl-2">
-                      <span className="truncate pr-2">• {acc.account_name} ({acc.currency})</span>
-                      <span className="shrink-0">{fmt(finance.convertToBase(acc.balance, acc.currency))}</span>
-                    </div>
-                  ))}
-                  <div className="flex justify-between pt-1 border-t border-slate-100">
-                    <span>− Assigned to Goal Pots:</span>
-                    <span className="font-semibold text-slate-800">−{fmt(assignedOtherGoalsTotal)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>− {targetMonthLabel} Living Reserve Left:</span>
-                    <span className="font-semibold text-slate-800">−{fmt(livingPoolReserved)}</span>
-                  </div>
-                  {(fixedPaidSoFar + variableSpentSoFar) > 0.01 && (
-                    <div className="flex justify-between text-[10px] text-slate-400 pl-2">
-                      <span>(Full month {fmt(monthlyLivingTarget)} − {fmt(fixedPaidSoFar + variableSpentSoFar)} already spent)</span>
-                    </div>
-                  )}
-                  <div className="flex justify-between">
-                    <span>− Emergency Floor (Lvl {bufferMonths}):</span>
-                    <span className="font-semibold text-slate-800">−{fmt(currentEmergencyFunded)}</span>
-                  </div>
-                  <div className="flex justify-between pt-1 border-t border-[#FF2EB8]/20 font-bold text-[#FF2EB8]">
-                    <span>= Unallocated Surplus:</span>
-                    <span>{fmt(unallocatedSurplusCash)}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex gap-2 pt-3 mt-3 border-t border-[#FF2EB8]/20 w-full">
-              <Button
-                size="sm"
-                className="h-8 text-xs font-bold gap-1.5 flex-1 bg-[#FF2EB8] hover:bg-[#e0209e] text-white shadow-xs transition-colors"
-                onClick={() => {
-                  setMoveFrom(UNALLOCATED);
-                  const defaultDest =
-                    sortedNonEmergencyGoals.find(g => isSystemSavingsGoal(g) || isSystemStashGoal(g))?.id ||
-                    sortedNonEmergencyGoals[0]?.id ||
-                    '';
-                  setMoveTo(defaultDest);
-                  setMoveAmount(String(Math.floor(unallocatedSurplusCash * 100) / 100));
-                  setMoveOpen(true);
-                }}
-              >
-                <ArrowRightLeft className="w-3.5 h-3.5" /> Assign to a Pot
-              </Button>
-            </div>
-          </div>
-        )}
-
         {/* Add Pool Card */}
         <div
           className="bg-white/45 rounded-2xl border-2 border-dashed border-[#FF2EB8]/30 hover:border-[#FF2EB8]/60 p-5 hover:bg-white/70 hover:scale-[1.01] transition-all flex flex-col items-center justify-center text-slate-500 hover:text-slate-900 cursor-pointer min-h-[170px]"
@@ -2128,8 +2041,8 @@ export default function FinancePoolsPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {(() => {
             const totalLivingSpentSoFar = fixedPaidSoFar + variableSpentSoFar;
-            const totalLivingCovered = livingPoolReserved + totalLivingSpentSoFar;
-            const isLivingCovered = totalLivingCovered >= monthlyLivingTarget - 0.01 || livingPoolReserved >= remainingLivingReserve - 0.01;
+            const totalLivingCovered = livingPoolCash + totalLivingSpentSoFar;
+            const isLivingCovered = totalLivingCovered >= monthlyLivingTarget - 0.01 || livingPoolCash >= remainingLivingReserve - 0.01;
             const isSurvivalCovered = totalLivingCovered >= effectiveFixedMonthly + essentialVariable - 0.01;
             const livingShortfall = Math.max(0, monthlyLivingTarget - totalLivingCovered);
             const livingPct = monthlyLivingTarget > 0 ? Math.min(100, (totalLivingCovered / monthlyLivingTarget) * 100) : 100;
@@ -2184,10 +2097,10 @@ export default function FinancePoolsPage() {
                     <div className="flex items-baseline justify-between flex-wrap gap-1 mb-2">
                       <div>
                         <span className="text-2xl font-display font-black text-slate-900 tracking-tight">
-                          {fmt(livingPoolReserved)}
+                          {fmt(livingPoolCash)}
                         </span>
                         <span className="text-xs text-slate-500 ml-1 font-semibold">
-                          in reserve / {fmt(monthlyLivingTarget)} locked for {targetMonthLabel}
+                          in reserve / {fmt(monthlyLivingTarget)} for {targetMonthLabel}
                         </span>
                       </div>
                       <span className="text-xs font-bold tabular-nums text-sky-700">
@@ -2220,57 +2133,31 @@ export default function FinancePoolsPage() {
                     <div className="flex justify-between">
                       <span className="text-slate-500 font-semibold">3. Fun Money Allowance:</span>
                       <span className="font-extrabold text-pink-600">
-                        {fmt(monthlyFunAllowance)}/mo ({fmt(snapshot?.baseWeeklyFun ?? 0)}/wk)
+                        {fmt(monthlyFunAllowance)}/mo ({fmt(effectiveWeeklyFun)}/wk)
                       </span>
                     </div>
-                    {unallocatedSurplusCash > 0.01 ? (
-                      <div className="flex justify-between pt-1 border-t border-slate-200/50">
-                        <span className="text-emerald-700 font-bold">Unlocked Surplus Above Living:</span>
-                        <span className="font-extrabold text-emerald-700">
-                          +{fmt(unallocatedSurplusCash)}
-                        </span>
-                      </div>
-                    ) : (
-                      <div className="flex justify-between pt-1 border-t border-slate-200/50">
-                        <span className="text-slate-500 font-semibold">Protection Status:</span>
-                        <span className="font-bold text-emerald-700">🔒 Locked for Living (Untouchable)</span>
-                      </div>
-                    )}
+                    <div className="flex justify-between pt-1 border-t border-slate-200/50">
+                      <span className="text-slate-500 font-semibold">Protection Status:</span>
+                      <span className="font-bold text-emerald-700">🔒 Locked for Living (Untouchable)</span>
+                    </div>
                   </div>
                 </div>
 
                 <div className="flex gap-2 pt-3 mt-2 w-full">
-                  {unallocatedSurplusCash > 0.01 ? (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-8 text-xs font-bold gap-1.5 flex-1 border-emerald-300 bg-white/90 text-emerald-800 hover:bg-emerald-50 transition-colors"
-                      onClick={() => {
-                        setMoveFrom(UNALLOCATED);
-                        const firstGoal = sortedNonEmergencyGoals[0]?.id || '';
-                        setMoveTo(firstGoal);
-                        setMoveAmount(String(Math.floor(unallocatedSurplusCash)));
-                        setMoveOpen(true);
-                      }}
-                    >
-                      <Sparkles className="w-3.5 h-3.5 text-emerald-600" /> Allocate {fmt(unallocatedSurplusCash)} Surplus
-                    </Button>
-                  ) : (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-8 text-xs font-semibold gap-1.5 flex-1 border-slate-200/80 bg-white/80 hover:bg-white transition-colors"
-                      onClick={() => {
-                        const defaultSource = poolOptions.find(p => p.available > 0 && p.id !== LIVING_POOL)?.id || '';
-                        setMoveFrom(defaultSource);
-                        setMoveTo(LIVING_POOL);
-                        setMoveAmount('');
-                        setMoveOpen(true);
-                      }}
-                    >
-                      <Plus className="w-3.5 h-3.5" /> Top up from Pool
-                    </Button>
-                  )}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-8 text-xs font-semibold gap-1.5 flex-1 border-slate-200/80 bg-white/80 hover:bg-white transition-colors"
+                    onClick={() => {
+                      const defaultSource = poolOptions.find(p => p.available > 0 && p.id !== LIVING_POOL)?.id || '';
+                      setMoveFrom(defaultSource);
+                      setMoveTo(LIVING_POOL);
+                      setMoveAmount('');
+                      setMoveOpen(true);
+                    }}
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Top up from Pool
+                  </Button>
                 </div>
               </div>
             );
