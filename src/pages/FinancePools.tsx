@@ -1915,9 +1915,42 @@ export default function FinancePoolsPage() {
                 <span className="text-3xl font-display font-black text-[#FF2EB8] tracking-tight">
                   {fmt(unallocatedSurplusCash)}
                 </span>
-                <p className="text-[11px] text-slate-600 font-medium mt-1.5 leading-relaxed">
-                  This money is sitting in your bank accounts without a pot assigned yet (e.g. from recent VA/side-hustle payments, unallocated cash, or reduced pot targets).
+                <p className="text-[11px] text-slate-600 font-medium mt-1 leading-relaxed">
+                  Exact breakdown of where this figure comes from:
                 </p>
+                <div className="mt-2 p-2.5 rounded-xl bg-white/80 border border-[#FF2EB8]/20 text-[11px] space-y-1 text-slate-600">
+                  <div className="flex justify-between font-semibold text-slate-800">
+                    <span>Total Bank Balances:</span>
+                    <span>{fmt(totalCash)}</span>
+                  </div>
+                  {finance.accounts.filter(a => !(a as any).exclude_from_totals && Math.abs(a.balance || 0) > 0.01).map(acc => (
+                    <div key={acc.id} className="flex justify-between text-[10px] text-slate-500 pl-2">
+                      <span className="truncate pr-2">• {acc.account_name} ({acc.currency})</span>
+                      <span className="shrink-0">{fmt(finance.convertToBase(acc.balance, acc.currency))}</span>
+                    </div>
+                  ))}
+                  <div className="flex justify-between pt-1 border-t border-slate-100">
+                    <span>− Assigned to Goal Pots:</span>
+                    <span className="font-semibold text-slate-800">−{fmt(assignedOtherGoalsTotal)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>− {targetMonthLabel} Living Reserve Left:</span>
+                    <span className="font-semibold text-slate-800">−{fmt(livingPoolReserved)}</span>
+                  </div>
+                  {(fixedPaidSoFar + variableSpentSoFar) > 0.01 && (
+                    <div className="flex justify-between text-[10px] text-slate-400 pl-2">
+                      <span>(Full month {fmt(monthlyLivingTarget)} − {fmt(fixedPaidSoFar + variableSpentSoFar)} already spent)</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between">
+                    <span>− Emergency Floor (Lvl {bufferMonths}):</span>
+                    <span className="font-semibold text-slate-800">−{fmt(currentEmergencyFunded)}</span>
+                  </div>
+                  <div className="flex justify-between pt-1 border-t border-[#FF2EB8]/20 font-bold text-[#FF2EB8]">
+                    <span>= Unallocated Surplus:</span>
+                    <span>{fmt(unallocatedSurplusCash)}</span>
+                  </div>
+                </div>
               </div>
             </div>
 
