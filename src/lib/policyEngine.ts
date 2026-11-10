@@ -658,7 +658,8 @@ export function computePolicySnapshot(
   const lastWeekBaseFun = lastWeekSplit.weeklyFunAmount + (lastWeekActualIncome.total > 0 ? lastWeekActualIncome.otherWeeklyBonus : 0);
 
   const lastWeekKey = format(lastWeekStart, 'yyyy-MM-dd');
-  const stashGoal = goals.find(g => (g as any).is_stash === true || g.name.toLowerCase().includes('stash')) || null;
+  const stashes = goals.filter(g => (g as any).is_stash === true || (g.name || '').toLowerCase().includes('stash'));
+  const stashGoal = stashes.find(g => (g.assigned_amount || 0) > 0) || stashes[0] || null;
   const stashMeta = parseCoverMeta((stashGoal as any)?.description);
   const lockedLastWeek = stashMeta.closed_weeks?.[lastWeekKey];
   const effectiveLastWeekBudget = lockedLastWeek && lockedLastWeek.totalBudget > 0

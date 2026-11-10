@@ -299,7 +299,9 @@ export default function FinanceBudget() {
   // Savings Stash: find existing goal named "Savings Stash" or marked with is_stash
   const stashGoal = useMemo(() => {
     const stashes = finance.goals.filter(g => (g as any).is_stash === true || g.name.toLowerCase().includes('stash'));
-    return stashes.find(g => g.currency === baseCurrency) || stashes[0];
+    return stashes.find(g => (g.assigned_amount || 0) > 0)
+      || stashes.find(g => g.currency === baseCurrency)
+      || stashes[0];
   }, [finance.goals, baseCurrency]);
   const stashBalance = stashGoal?.assigned_amount || 0;
 
@@ -459,9 +461,10 @@ export default function FinanceBudget() {
         stashDelta += netDifference;
         recordedStashDelta = netDifference;
       } else if (netDifference < 0) {
-        // Restore pre-settle stash & goal balances before running planOverspendCover so re-settling is idempotent
+        // Ensure stash funds actually present are available to cover the overspend
+        const currentStashBal = Math.max(0, stashGoal?.assigned_amount || 0);
         const restoredStash = stashGoal
-          ? { ...stashGoal, assigned_amount: Math.max(0, (stashGoal.assigned_amount || 0) + stashDelta) }
+          ? { ...stashGoal, assigned_amount: currentStashBal }
           : null;
         const restoredGoals = finance.goals.map(g =>
           potDeltas[g.id]
@@ -500,10 +503,10 @@ export default function FinanceBudget() {
       }
 
       // Calculate post-settle Stash balance
-      let nextStashAmount = Math.max(
-        0,
-        Math.round(((stashGoal?.assigned_amount || 0) + stashDelta) * 100) / 100
-      );
+      const stashTaken = steps.find(s => s.source === 'stash')?.amount || 0;
+      let nextStashAmount = netDifference < 0
+        ? Math.max(0, Math.round(((stashGoal?.assigned_amount || 0) - stashTaken) * 100) / 100)
+        : Math.max(0, Math.round(((stashGoal?.assigned_amount || 0) + stashDelta) * 100) / 100);
 
       // End-of-Month Sweep: if we have entered a new calendar month relative to prevWeekStart
       // (i.e. prevWeekStart's month has now ended) and we haven't swept that month yet,
@@ -866,6 +869,33 @@ export default function FinanceBudget() {
           ? "Fun Money budget reduced this week to settle the gap"
           : `Spending pace is ${fmt(combinedDailyPace)}/day — within budget`);
 
+  const handleCoverFromStash = async () => {
+    if (!stashGoal) return;
+    const debt = snapshot?.carryForwardDebt || assumptions?.carry_forward_debt || 0;
+    if (debt <= 0) return;
+    const currentStashBal = stashGoal.assigned_amount || 0;
+    const takeFromStash = Math.min(debt, currentStashBal);
+    const newStashBal = Math.max(0, Math.round((currentStashBal - takeFromStash) * 100) / 100);
+    const remainingDebt = Math.max(0, Math.round((debt - takeFromStash) * 100) / 100);
+
+    // Deduct from stash
+    await finance.updateGoal(stashGoal.id, {
+      assigned_amount: newStashBal,
+    } as any);
+
+    // Update assumptions debt
+    await updateAssumptions({
+      carry_forward_debt: remainingDebt,
+      last_debt_week: remainingDebt > 0 ? format(startOfWeek(today, { weekStartsOn: 1 }), 'yyyy-MM-dd') : (null as any),
+    }, true);
+
+    if (remainingDebt === 0) {
+      toast.success(`Covered ${fmt(takeFromStash)} from Savings Stash! Full weekly budget restored 💰`);
+    } else {
+      toast.success(`Covered ${fmt(takeFromStash)} from Savings Stash · ${fmt(remainingDebt)} remaining on weekly budget`);
+    }
+  };
+
   const handleForgiveCarriedDebt = async () => {
     await updateAssumptions({ carry_forward_debt: 0, last_debt_week: null as any }, true);
     toast.success('Carried overspend cleared! Your full weekly budget has been restored.');
@@ -1208,14 +1238,25 @@ export default function FinanceBudget() {
             </div>
           </div>
           {isCurrentWeek && snapshot.carryForwardDebt > 0 && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleForgiveCarriedDebt}
-              className="text-xs h-7 px-2.5 rounded-lg border-amber-300 text-amber-900 bg-amber-50 hover:bg-amber-100 font-semibold shrink-0 cursor-pointer"
-            >
-              Reset & Restore
-            </Button>
+            <div className="flex items-center gap-1.5 flex-wrap shrink-0">
+              {stashBalance > 0 && (
+                <Button
+                  size="sm"
+                  onClick={handleCoverFromStash}
+                  className="text-xs h-7 px-3 rounded-lg bg-[#FF2EB8] hover:bg-[#E026A2] text-white font-semibold cursor-pointer shadow-xs"
+                >
+                  Pay from Stash ({fmt(stashBalance)})
+                </Button>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleForgiveCarriedDebt}
+                className="text-xs h-7 px-2.5 rounded-lg border-amber-300 text-amber-900 bg-amber-50 hover:bg-amber-100 font-semibold shrink-0 cursor-pointer"
+              >
+                Reset & Restore
+              </Button>
+            </div>
           )}
           <Badge variant="outline" className="text-[10px] whitespace-nowrap hidden sm:inline-flex">
             {!isCurrentWeek ? 'Closed' : `Resets in ${daysUntilReset}d`}
