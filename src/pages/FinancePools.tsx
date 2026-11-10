@@ -85,6 +85,23 @@ const LIVING_POOL = '__living_pool__';
 const EMERGENCY_VIRTUAL = '__emergency_virtual__';
 const isVirtualPool = (id: PoolId) => id === UNALLOCATED || id === LIVING_POOL || id === EMERGENCY_VIRTUAL;
 
+export const isSystemStashGoal = (g?: { name?: string; is_stash?: boolean } | null) => {
+  if (!g) return false;
+  return (g as any).is_stash === true || /stash/i.test(g.name || '');
+};
+
+export const isSystemSavingsGoal = (g?: { name?: string; is_stash?: boolean; is_emergency?: boolean } | null) => {
+  if (!g) return false;
+  if ((g as any).is_stash === true || (g as any).is_emergency === true) return false;
+  const name = (g.name || '').trim().toLowerCase();
+  return (name === 'savings' || name === 'core savings') && !name.includes('stash') && !name.includes('emergency');
+};
+
+export const isProtectedSystemGoal = (g?: { name?: string; is_stash?: boolean; is_emergency?: boolean } | null) => {
+  if (!g) return false;
+  return isSystemStashGoal(g) || isSystemSavingsGoal(g) || (g as any).is_emergency === true || /emergency/i.test(g.name || '');
+};
+
 interface CapOverflowInfo {
   goalId: string | null;
   isEmergencyVirtual?: boolean;
@@ -170,35 +187,91 @@ export default function FinancePoolsPage() {
   const fmt = (n: number) => formatCurrency(n, baseCurrency);
   const wtMap = useMemo(() => weekTypeMap(), [weekTypeMap]);
 
-  // Auto-consolidate duplicate stashes if any exist
-  const consolidateRef = useRef(false);
+  // Auto-consolidate and guarantee fixed permanent system pots (Savings Stash & Savings)
+  const systemPotsInitializedRef = useRef(false);
   useEffect(() => {
-    if (finance.loading || consolidateRef.current) return;
-    const stashes = finance.goals.filter(
-      g => (g as any).is_stash === true || g.name.toLowerCase().includes('stash')
-    );
-    if (stashes.length > 1) {
-      consolidateRef.current = true;
-      const primary = stashes[0];
-      const duplicates = stashes.slice(1);
-      const extraAssigned = duplicates.reduce((sum, d) => sum + (d.assigned_amount || 0), 0);
+    if (finance.loading || systemPotsInitializedRef.current) return;
 
-      const runConsolidation = async () => {
+    const runInitSystemPots = async () => {
+      systemPotsInitializedRef.current = true;
+
+      // 1. Savings Stash (Fixed Pot)
+      const stashes = finance.goals.filter(isSystemStashGoal);
+      if (stashes.length > 1) {
+        const primary = stashes[0];
+        const duplicates = stashes.slice(1);
+        const extraAssigned = duplicates.reduce((sum, d) => sum + (d.assigned_amount || 0), 0);
         await finance.updateGoal(primary.id, {
+          name: 'Savings Stash',
           assigned_amount: (primary.assigned_amount || 0) + extraAssigned,
           is_stash: true,
         } as any);
-
         for (const dup of duplicates) {
           await finance.deleteGoal(dup.id);
         }
         toast.success(`Consolidated ${stashes.length} Savings Stashes into 1 pool`);
-      };
-      runConsolidation();
-    } else if (stashes.length === 1 && !(stashes[0] as any).is_stash) {
-      finance.updateGoal(stashes[0].id, { is_stash: true } as any);
-    }
-  }, [finance.goals, finance.loading]);
+      } else if (stashes.length === 1) {
+        const s = stashes[0];
+        if (!(s as any).is_stash || s.name !== 'Savings Stash') {
+          await finance.updateGoal(s.id, {
+            name: 'Savings Stash',
+            is_stash: true,
+          } as any);
+        }
+      } else {
+        await finance.addGoal({
+          name: 'Savings Stash',
+          description: 'Permanent pot for weekly budget surpluses and overspend coverage',
+          target_amount: 1000,
+          assigned_amount: 0,
+          currency: baseCurrency,
+          priority: 2,
+          safety_mode: 'balanced',
+          color: '#10b981',
+          is_stash: true,
+          percent_allocation: 0,
+        } as any);
+      }
+
+      // 2. Savings Pot (Fixed Pot)
+      const savingsGoals = finance.goals.filter(isSystemSavingsGoal);
+      if (savingsGoals.length > 1) {
+        const primary = savingsGoals[0];
+        const duplicates = savingsGoals.slice(1);
+        const extraAssigned = duplicates.reduce((sum, d) => sum + (d.assigned_amount || 0), 0);
+        await finance.updateGoal(primary.id, {
+          name: 'Savings',
+          assigned_amount: (primary.assigned_amount || 0) + extraAssigned,
+          percent_allocation: primary.percent_allocation || 10,
+        } as any);
+        for (const dup of duplicates) {
+          await finance.deleteGoal(dup.id);
+        }
+      } else if (savingsGoals.length === 1) {
+        const s = savingsGoals[0];
+        if (s.name !== 'Savings' || !(s.percent_allocation > 0)) {
+          await finance.updateGoal(s.id, {
+            name: 'Savings',
+            percent_allocation: s.percent_allocation || 10,
+          } as any);
+        }
+      } else {
+        await finance.addGoal({
+          name: 'Savings',
+          description: 'Permanent fixed pot for 10% income savings',
+          target_amount: 5000,
+          assigned_amount: 0,
+          currency: baseCurrency,
+          priority: 3,
+          safety_mode: 'balanced',
+          color: '#6366f1',
+          percent_allocation: 10,
+        } as any);
+      }
+    };
+
+    runInitSystemPots();
+  }, [finance.goals, finance.loading, baseCurrency]);
 
   const snapshot = useMemo(() => {
     if (!assumptions || !allDataReady) return null;
@@ -424,9 +497,14 @@ export default function FinancePoolsPage() {
     });
   }, [newAmount, newCurrency, newDeadline, newStartDate, newName, finance.goals, finance.transactions, finance.categories, fixedMonthlyTotal, essentialVariable, assumptions, expectedMonthlyIncomeVal, finance.convertToBase]);
 
+  const editingGoal = useMemo(() => {
+    return editGoalId ? finance.goals.find(g => g.id === editGoalId) || null : null;
+  }, [editGoalId, finance.goals]);
+  const isEditingProtected = isProtectedSystemGoal(editingGoal);
+
   const editFeasibility = useMemo(() => {
     const targetVal = finance.convertToBase(parseFloat(editTarget) || 0, editCurrency);
-    const goal = editGoalId ? finance.goals.find(g => g.id === editGoalId) : null;
+    const goal = editingGoal;
     const assignedVal = goal ? finance.convertToBase(goal.assigned_amount || 0, goal.currency) : 0;
 
     return evaluatePoolFeasibility({
@@ -483,7 +561,18 @@ export default function FinancePoolsPage() {
         return aHit ? 1 : -1;
       }
 
-      // 2. Soonest due date first
+      // 2. Fixed system pots (Savings Stash, Savings) stay visible at top of active pools
+      const aIsStash = isSystemStashGoal(a);
+      const bIsStash = isSystemStashGoal(b);
+      if (aIsStash && !bIsStash) return -1;
+      if (!aIsStash && bIsStash) return 1;
+
+      const aIsSavings = isSystemSavingsGoal(a);
+      const bIsSavings = isSystemSavingsGoal(b);
+      if (aIsSavings && !bIsSavings) return -1;
+      if (!aIsSavings && bIsSavings) return 1;
+
+      // 3. Soonest due date first
       const aHasDeadline = !!a.deadline;
       const bHasDeadline = !!b.deadline;
 
@@ -761,16 +850,28 @@ export default function FinancePoolsPage() {
     }
   };
 
+  const handleDeleteGoal = async (id: string) => {
+    const target = finance.goals.find(g => g.id === id);
+    if (target && isProtectedSystemGoal(target)) {
+      toast.error('Savings and Savings Stash are permanent core pots and cannot be deleted');
+      return;
+    }
+    await finance.deleteGoal(id);
+  };
+
   const handleEditGoal = async () => {
     if (!editGoalId || !editName.trim() || !editTarget) return;
-    // If marking as stash, clear is_stash from any other goal first
-    if (editIsStash) {
-      const currentStash = finance.goals.find(g => (g as any).is_stash === true && g.id !== editGoalId);
-      if (currentStash) {
-        await finance.updateGoal(currentStash.id, { is_stash: false } as any);
-      }
-    }
     const existingGoal = finance.goals.find(g => g.id === editGoalId);
+    const isProtected = isProtectedSystemGoal(existingGoal);
+    const isStash = isSystemStashGoal(existingGoal);
+    const isSavings = isSystemSavingsGoal(existingGoal);
+
+    // Fixed system pots maintain their identity and name
+    const finalName = isProtected
+      ? (isStash ? 'Savings Stash' : isSavings ? 'Savings' : (existingGoal?.name || editName.trim()))
+      : editName.trim();
+    const finalIsStash = isProtected ? isStash : (existingGoal as any)?.is_stash === true;
+
     const existingRawDesc = (existingGoal?.description || '').trim();
     const isInternalJson = existingRawDesc.startsWith('{');
     let nextDescription: string | null = editDescription.trim() || null;
@@ -779,20 +880,20 @@ export default function FinancePoolsPage() {
         const parsed = JSON.parse(existingRawDesc);
         nextDescription = JSON.stringify({
           ...parsed,
-          user_description: editDescription.trim() || 'Cash surplus',
+          user_description: editDescription.trim() || (isStash ? 'Cash surplus' : ''),
         });
       } catch {
         nextDescription = existingRawDesc;
       }
     }
     await finance.updateGoal(editGoalId, {
-      name: editName.trim(),
+      name: finalName,
       description: nextDescription,
       target_amount: parseFloat(editTarget),
       currency: editCurrency,
       color: editColor,
-      is_stash: editIsStash,
-      percent_allocation: parseFloat(editPercentAllocation) || 0,
+      is_stash: finalIsStash,
+      percent_allocation: isSavings ? (parseFloat(editPercentAllocation) || 10) : (parseFloat(editPercentAllocation) || 0),
       start_date: editStartDate && editStartDate.trim() ? editStartDate.trim().split('T')[0] : null,
       deadline: editDeadline && editDeadline.trim() ? editDeadline.trim().split('T')[0] : null,
     } as any);
@@ -1533,7 +1634,8 @@ export default function FinancePoolsPage() {
                         <h3 className="text-sm font-bold text-slate-900 truncate">{goal.name}</h3>
                         {tripInfo && <Badge variant="outline" className="text-[9px] px-1.5 py-0 border-sky-200 text-sky-600 bg-sky-50">Trip</Badge>}
                         {isHit && <Badge variant="outline" className="text-[9px] px-1.5 py-0 border-emerald-300 text-emerald-800 bg-emerald-100 font-bold">✓ Goal Hit!</Badge>}
-                        {(goal as any).is_stash && <Badge variant="secondary" className="text-[9px] px-1.5 py-0 bg-slate-100 text-slate-600 border border-slate-200">Stash</Badge>}
+                        {isSystemStashGoal(goal) && <Badge variant="secondary" className="text-[9px] px-1.5 py-0 bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold">Fixed Stash</Badge>}
+                        {isSystemSavingsGoal(goal) && <Badge variant="secondary" className="text-[9px] px-1.5 py-0 bg-indigo-50 text-indigo-700 border border-indigo-200 font-semibold">Fixed Savings</Badge>}
                         {cardFeasibility && cardFeasibility.isFeasible && cardFeasibility.requiredMonthlyPace > 0 && !isHit && (
                           <Badge
                             variant="outline"
@@ -1562,18 +1664,19 @@ export default function FinancePoolsPage() {
                         )}
                       </div>
                       {(() => {
-                        const isStashGoal = (goal as any).is_stash === true || /stash/i.test(goal.name);
+                        const isStashGoal = isSystemStashGoal(goal);
+                        const isSavingsGoal = isSystemSavingsGoal(goal);
                         const rawDesc = (goal.description || '').trim();
                         const visibleDescription = rawDesc.startsWith('{')
                           ? (() => {
                               try {
                                 const parsed = JSON.parse(rawDesc);
-                                return parsed?.user_description || (isStashGoal ? 'Cash surplus' : '');
+                                return parsed?.user_description || (isStashGoal ? 'Surplus buffer & overspend absorber' : isSavingsGoal ? '10% income core savings' : '');
                               } catch {
-                                return isStashGoal ? 'Cash surplus' : '';
+                                return isStashGoal ? 'Surplus buffer & overspend absorber' : isSavingsGoal ? '10% income core savings' : '';
                               }
                             })()
-                          : (rawDesc || (isStashGoal ? 'Cash surplus' : ''));
+                          : (rawDesc || (isStashGoal ? 'Surplus buffer & overspend absorber' : isSavingsGoal ? '10% income core savings' : ''));
                         return visibleDescription ? (
                           <p className="text-[11px] text-slate-500 font-normal mt-0.5 line-clamp-2 leading-tight">
                             {visibleDescription}
@@ -1590,12 +1693,19 @@ export default function FinancePoolsPage() {
                     >
                       <Pencil className="w-3.5 h-3.5" />
                     </Button>
-                    <Button
-                      variant="ghost" size="icon" className="h-8 w-8 rounded-lg text-slate-400 hover:text-destructive hover:bg-red-50 transition-colors"
-                      onClick={() => finance.deleteGoal(goal.id)}
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </Button>
+                    {!isProtectedSystemGoal(goal) ? (
+                      <Button
+                        variant="ghost" size="icon" className="h-8 w-8 rounded-lg text-slate-400 hover:text-destructive hover:bg-red-50 transition-colors"
+                        onClick={() => handleDeleteGoal(goal.id)}
+                        title="Delete pool"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </Button>
+                    ) : (
+                      <div className="h-8 w-8 flex items-center justify-center text-slate-300" title="Fixed permanent system pool (cannot be deleted)">
+                        <Lock className="w-3.5 h-3.5" />
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -1685,19 +1795,28 @@ export default function FinancePoolsPage() {
                       </>
                     );
                   })() : (() => {
-                    const isStash = (goal as any).is_stash || goal.name.toLowerCase().includes('stash');
+                    const isStash = isSystemStashGoal(goal);
+                    const isSavings = isSystemSavingsGoal(goal);
                     return (
                       <>
                         <div className="flex justify-between">
-                          <span className="text-slate-500 font-semibold">{isStash ? 'Funding Mode:' : 'Proportional Allocation:'}</span>
+                          <span className="text-slate-500 font-semibold">
+                            {isStash ? 'Funding Mode:' : isSavings ? 'Allocation Rule:' : 'Proportional Allocation:'}
+                          </span>
                           <span className="font-bold text-slate-800">
-                            {isStash ? 'Week-end Surplus Sweep' : `${goal.percent_allocation || 0}%`}
+                            {isStash ? 'Week-end Surplus Sweep' : isSavings ? '10% of Income' : `${goal.percent_allocation || 0}%`}
                           </span>
                         </div>
                         {isStash && (
                           <div className="flex justify-between">
-                            <span className="text-slate-500 font-semibold">Month-End Rule:</span>
-                            <span className="font-bold text-emerald-700">Shifts to Savings Pool</span>
+                            <span className="text-slate-500 font-semibold">Protection:</span>
+                            <span className="font-bold text-emerald-700">Absorbs Overspend First</span>
+                          </div>
+                        )}
+                        {isSavings && (
+                          <div className="flex justify-between">
+                            <span className="text-slate-500 font-semibold">Core Purpose:</span>
+                            <span className="font-bold text-indigo-700">Protected Wealth Growth</span>
                           </div>
                         )}
                       </>
@@ -1756,6 +1875,60 @@ export default function FinancePoolsPage() {
             </div>
           );
         })}
+
+        {/* Unallocated Surplus Pot Card (visible whenever there is unassigned cash above living & emergency) */}
+        {unallocatedSurplusCash > 0.01 && (
+          <div className="bg-pink-50/70 rounded-2xl border-2 border-[#FF2EB8]/40 p-5 shadow-[4px_4px_0px_0px_rgba(255,46,184,0.12)] transition-all hover:scale-[1.01] flex flex-col justify-between">
+            <div className="space-y-3 w-full">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-[#FF2EB8] text-white flex items-center justify-center flex-shrink-0 shadow-xs">
+                    <Wallet className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <h3 className="text-sm font-bold text-slate-900">Unallocated Surplus</h3>
+                      <Badge className="bg-[#FF2EB8]/15 text-[#FF2EB8] border border-[#FF2EB8]/30 font-bold text-[10px] px-2 py-0.5 rounded-full">
+                        Ready to Assign
+                      </Badge>
+                    </div>
+                    <p className="text-[11px] text-slate-600 mt-0.5 leading-tight">
+                      Free cash in your accounts above your pots, Emergency Floor &amp; {targetMonthLabel} Living Budget
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="pt-1">
+                <span className="text-3xl font-display font-black text-[#FF2EB8] tracking-tight">
+                  {fmt(unallocatedSurplusCash)}
+                </span>
+                <p className="text-[11px] text-slate-600 font-medium mt-1.5 leading-relaxed">
+                  This money is sitting in your bank accounts without a pot assigned yet (e.g. from recent VA/side-hustle payments, unallocated cash, or reduced pot targets).
+                </p>
+              </div>
+            </div>
+
+            <div className="flex gap-2 pt-3 mt-3 border-t border-[#FF2EB8]/20 w-full">
+              <Button
+                size="sm"
+                className="h-8 text-xs font-bold gap-1.5 flex-1 bg-[#FF2EB8] hover:bg-[#e0209e] text-white shadow-xs transition-colors"
+                onClick={() => {
+                  setMoveFrom(UNALLOCATED);
+                  const defaultDest =
+                    sortedNonEmergencyGoals.find(g => isSystemSavingsGoal(g) || isSystemStashGoal(g))?.id ||
+                    sortedNonEmergencyGoals[0]?.id ||
+                    '';
+                  setMoveTo(defaultDest);
+                  setMoveAmount(String(Math.floor(unallocatedSurplusCash * 100) / 100));
+                  setMoveOpen(true);
+                }}
+              >
+                <ArrowRightLeft className="w-3.5 h-3.5" /> Assign to a Pot
+              </Button>
+            </div>
+          </div>
+        )}
 
         {/* Add Pool Card */}
         <div
