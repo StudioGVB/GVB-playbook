@@ -645,16 +645,46 @@ export default function FinancePoolsPage() {
     return finance.convertToBase(emergencyGoal.assigned_amount || 0, emergencyGoal.currency);
   }, [emergencyGoal, finance.convertToBase]);
 
+  const baseOtherGoalTotal = useMemo(() => {
+    return finance.goals
+      .filter(g => !(g as any).is_emergency && !g.name.toLowerCase().includes('emergency'))
+      .reduce((s, g) => s + finance.convertToBase(g.assigned_amount || 0, g.currency), 0);
+  }, [finance.goals, finance.convertToBase]);
+
+  const unassignedCash = Math.max(0, totalCash - baseOtherGoalTotal);
+
+  // Ring-fence Living & Monthly Budget Pool FIRST so next month's living is never starved
+  // Once bills (like rent) are paid in the month, reserve only the remaining unpaid living expenses
+  const livingPoolReserved = Math.min(unassignedCash, livingReserveToProtect);
+  const cashAfterLivingReserve = Math.max(0, unassignedCash - livingPoolReserved);
+
+  // Cash for emergency includes explicitly assigned emergency funds + remaining cash after Living Pool reserve
+  const cashForEmergency = Math.max(emergencyGoalAssigned, cashAfterLivingReserve);
+  const currentEmergencyFunded = Math.min(emergencyFloor, cashForEmergency);
+  const emergencyShortfallAmt = Math.max(0, emergencyFloor - currentEmergencyFunded);
+  const isEmergencyFull = emergencyShortfallAmt <= 0.01;
+
+  // Any remaining cash in bank accounts above [Specific Goal Pots + Living Reserve + Emergency Floor]
+  // automatically sits inside the core Savings pot so there is no unallocated surplus bucket
+  // and Living & Monthly Budget is never artificially inflated.
+  const extraSavingsCash = Math.max(0, unassignedCash - livingPoolReserved - currentEmergencyFunded);
+  const livingPoolCash = livingPoolReserved;
+  const unallocatedSurplusCash = 0;
+
   const otherGoalSegments = useMemo(() => {
     return finance.goals
       .filter(g => !(g as any).is_emergency && !g.name.toLowerCase().includes('emergency'))
-      .filter(g => (g.assigned_amount || 0) > 0)
-      .map(g => ({
-        label: g.name,
-        amount: finance.convertToBase(g.assigned_amount || 0, g.currency),
-        color: g.color || '#4558ff',
-      }));
-  }, [finance.goals, finance.convertToBase]);
+      .map(g => {
+        const baseAmtVal = finance.convertToBase(g.assigned_amount || 0, g.currency);
+        const totalAmtVal = isSystemSavingsGoal(g) ? baseAmtVal + extraSavingsCash : baseAmtVal;
+        return {
+          label: g.name,
+          amount: totalAmtVal,
+          color: g.color || '#4558ff',
+        };
+      })
+      .filter(seg => seg.amount > 0.01);
+  }, [finance.goals, finance.convertToBase, extraSavingsCash]);
 
   const sortedNonEmergencyGoals = useMemo(() => {
     const nonEmergency = finance.goals.filter(
@@ -709,32 +739,10 @@ export default function FinancePoolsPage() {
   }, [finance.goals, goalTripSpent]);
 
   const assignedOtherGoalsTotal = otherGoalSegments.reduce((s, seg) => s + seg.amount, 0);
-  const unassignedCash = Math.max(0, totalCash - assignedOtherGoalsTotal);
-
-  // Ring-fence Living & Monthly Budget Pool FIRST so next month's living is never starved
-  // Once bills (like rent) are paid in the month, reserve only the remaining unpaid living expenses
-  const livingPoolReserved = Math.min(unassignedCash, livingReserveToProtect);
-  const cashAfterLivingReserve = Math.max(0, unassignedCash - livingPoolReserved);
-
-  // Cash for emergency includes explicitly assigned emergency funds + remaining cash after Living Pool reserve
-  const cashForEmergency = Math.max(emergencyGoalAssigned, cashAfterLivingReserve);
-  const currentEmergencyFunded = Math.min(emergencyFloor, cashForEmergency);
-  const emergencyShortfallAmt = Math.max(0, emergencyFloor - currentEmergencyFunded);
-  const isEmergencyFull = emergencyShortfallAmt <= 0.01;
 
   // Stacked bar segments
-  const goalSegments = finance.goals
-    .filter(g => (g.assigned_amount || 0) > 0)
-    .map(g => ({
-      label: g.name,
-      amount: finance.convertToBase(g.assigned_amount || 0, g.currency),
-      color: g.color || '#4558ff',
-    }));
+  const goalSegments = otherGoalSegments;
   const assignedGoalsTotal = goalSegments.reduce((s, seg) => s + seg.amount, 0);
-
-  // All cash not in Goal Pots or Emergency Reserve belongs to the Living & Budget Pool
-  const livingPoolCash = Math.max(0, unassignedCash - currentEmergencyFunded);
-  const unallocatedSurplusCash = 0;
 
   // Build pool options for the move dialog
   const poolOptions: { id: PoolId; label: string; available: number; cap?: number }[] = useMemo(() => {
@@ -742,7 +750,7 @@ export default function FinancePoolsPage() {
     opts.push({
       id: LIVING_POOL,
       label: 'Living & Monthly Budget Pool',
-      available: livingPoolCash,
+      available: livingPoolReserved,
     });
 
     // Emergency Reserve pool option
@@ -760,15 +768,16 @@ export default function FinancePoolsPage() {
       const isStash = isSystemStashGoal(g);
       const isSavings = isSystemSavingsGoal(g);
       const extraLabel = isStash ? ' (Fixed Stash)' : isSavings ? ' (Fixed Savings)' : '';
+      const baseAvailable = finance.convertToBase(g.assigned_amount || 0, g.currency);
       opts.push({
         id: g.id,
         label: `${g.name}${extraLabel}`,
-        available: finance.convertToBase(g.assigned_amount || 0, g.currency),
+        available: isSavings ? baseAvailable + extraSavingsCash : baseAvailable,
         cap: finance.convertToBase(g.target_amount, g.currency),
       });
     });
     return opts;
-  }, [finance.goals, livingPoolCash, emergencyGoal, emergencyGoalAssigned, currentEmergencyFunded, emergencyFloor, finance.convertToBase]);
+  }, [finance.goals, livingPoolReserved, extraSavingsCash, emergencyGoal, emergencyGoalAssigned, currentEmergencyFunded, emergencyFloor, finance.convertToBase]);
 
   const emergencyMonthsCovered = actualMonthlySurvival > 0 ? (currentEmergencyFunded / actualMonthlySurvival) : 0;
   const isEmergencyShort = emergencyShortfallAmt > 0.01;
@@ -776,7 +785,7 @@ export default function FinancePoolsPage() {
 
   const segments = [
     ...(currentEmergencyFunded > 0 ? [{ label: 'Emergency Reserve', amount: currentEmergencyFunded, color: emergencySegColor }] : []),
-    ...(livingPoolCash > 0.01 ? [{ label: 'Living & Budget Pool', amount: livingPoolCash, color: '#0ea5e9' }] : []),
+    ...(livingPoolReserved > 0.01 ? [{ label: 'Living & Budget Pool', amount: livingPoolReserved, color: '#0ea5e9' }] : []),
     ...otherGoalSegments,
   ];
   const totalForBar = Math.max(totalCash, segments.reduce((s, seg) => s + seg.amount, 0)) || 1;
@@ -1197,14 +1206,24 @@ export default function FinancePoolsPage() {
 
     // Execute: decrease source, increase destination
     const updates: Promise<any>[] = [];
+    const destGoalObj = !isVirtualPool(moveTo) ? finance.goals.find(g => g.id === moveTo) : null;
+    const isDestCoreSavings = isSystemSavingsGoal(destGoalObj);
 
     if (!isVirtualPool(moveFrom)) {
       const goal = finance.goals.find(g => g.id === moveFrom);
       if (goal) {
-        const deltaNative = toGoalCurrency(val, goal.currency);
-        updates.push(
-          finance.updateGoal(goal.id, { assigned_amount: Math.max(0, (goal.assigned_amount || 0) - deltaNative) } as any)
-        );
+        const isSourceCoreSavings = isSystemSavingsGoal(goal);
+        // When moving out of Core Savings into another goal pot, the first `extraSavingsCash` portion
+        // is automatically absorbed as `baseOtherGoalTotal` increases, so only deduct any amount beyond `extraSavingsCash`.
+        const effectiveDeductBase = isSourceCoreSavings
+          ? Math.max(0, val - extraSavingsCash)
+          : val;
+        if (effectiveDeductBase > 0) {
+          const deltaNative = toGoalCurrency(effectiveDeductBase, goal.currency);
+          updates.push(
+            finance.updateGoal(goal.id, { assigned_amount: Math.max(0, (goal.assigned_amount || 0) - deltaNative) } as any)
+          );
+        }
       }
     }
     // Virtual sources (Fun Money / Living Pool) have no DB update — they're derived.
@@ -1222,7 +1241,10 @@ export default function FinancePoolsPage() {
           is_emergency: true,
         } as any)
       );
-    } else if (!isVirtualPool(moveTo)) {
+    } else if (!isVirtualPool(moveTo) && !isDestCoreSavings) {
+      // Moving into a specific goal pot increases its assigned_amount.
+      // (If moving from another goal pot into Core Savings, reducing the source pot's assigned_amount
+      // automatically increases extraSavingsCash by `val`, so Core Savings increases by `val` without double-adding.)
       const goal = finance.goals.find(g => g.id === moveTo);
       if (goal) {
         const deltaNative = toGoalCurrency(val, goal.currency);
@@ -1693,7 +1715,10 @@ export default function FinancePoolsPage() {
 
         {/* Goal Pool Cards */}
         {sortedNonEmergencyGoals.map(goal => {
-          const rawAssigned = goal.assigned_amount || 0;
+          const isCoreSavings = isSystemSavingsGoal(goal);
+          const oneInBase = finance.convertToBase(1, goal.currency) || 1;
+          const extraSavingsNative = isCoreSavings ? (extraSavingsCash / oneInBase) : 0;
+          const rawAssigned = (goal.assigned_amount || 0) + extraSavingsNative;
           const tripInfo = goalTripSpent.get(goal.id);
           const tripSpent = tripInfo?.spent || 0;
           const directSpentInfo = goalDirectSpent.get(goal.id);
