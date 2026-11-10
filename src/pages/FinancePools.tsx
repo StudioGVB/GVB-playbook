@@ -138,6 +138,47 @@ export default function FinancePoolsPage() {
     return map;
   }, [trips, finance.transactions]);
 
+  // Map goal_id → direct pool expenses (assigned via goal_id or matching pool category)
+  const goalDirectSpent = useMemo(() => {
+    const map = new Map<string, { spentBase: number; spentNative: number; count: number; unlinkedTxIds: string[] }>();
+    const catByLowerName = new Map<string, string>();
+    finance.categories.forEach(c => {
+      if (c.name) catByLowerName.set(c.name.trim().toLowerCase(), c.id);
+    });
+
+    finance.goals.forEach(g => {
+      if (isProtectedSystemGoal(g)) return;
+      const matchingCatId = catByLowerName.get((g.name || '').trim().toLowerCase());
+      let spentBase = 0;
+      let count = 0;
+      const unlinkedTxIds: string[] = [];
+
+      for (const tx of finance.transactions) {
+        if (tx.amount >= 0 || tx.is_transfer) continue;
+        if ((tx as any).transfer_status === 'confirmed' || (tx as any).transfer_status === 'auto_confirmed') continue;
+        const isDirectGoal = (tx as any).goal_id === g.id;
+        const isMatchingCat = Boolean(matchingCatId && tx.category_id === matchingCatId && !(tx as any).goal_id);
+        if (!isDirectGoal && !isMatchingCat) continue;
+
+        spentBase += Math.abs(baseAmt(tx));
+        count += 1;
+        if (isMatchingCat) unlinkedTxIds.push(tx.id);
+      }
+
+      if (count > 0) {
+        const oneInBase = finance.convertToBase(1, g.currency) || 1;
+        const spentNative = Math.round((spentBase / oneInBase) * 100) / 100;
+        map.set(g.id, {
+          spentBase: Math.round(spentBase * 100) / 100,
+          spentNative,
+          count,
+          unlinkedTxIds,
+        });
+      }
+    });
+    return map;
+  }, [finance.goals, finance.transactions, finance.categories, finance.convertToBase]);
+
   // Create pool dialog
   const [selectedGoalForExpenses, setSelectedGoalForExpenses] = useState<FinanceGoal | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
@@ -167,7 +208,8 @@ export default function FinancePoolsPage() {
   const [editName, setEditName] = useState('');
   const [editDescription, setEditDescription] = useState('');
   const [editTarget, setEditTarget] = useState('');
-  const [editCurrency, setEditCurrency] = useState('AUD');
+  const [editAssigned, setEditAssigned] = useState('');
+  const [editCurrency, setEditCurrency] = useState('GBP');
   const [editColor, setEditColor] = useState(POOL_COLORS[0]);
   const [editIsStash, setEditIsStash] = useState(false);
   const [editPercentAllocation, setEditPercentAllocation] = useState('0');
@@ -275,6 +317,44 @@ export default function FinancePoolsPage() {
     runInitSystemPots();
   }, [finance.goals, finance.loading, baseCurrency]);
 
+  // Auto-reconcile spending pools (e.g. Office Set Up) where expenses were assigned (e.g. £28 + £90 = £118)
+  // against a funded target (e.g. £150), but assigned_amount was wiped to 0
+  const reconciledPoolsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!allDataReady) return;
+
+    const runReconcile = async () => {
+      for (const g of finance.goals) {
+        if (isProtectedSystemGoal(g) || goalTripSpent.has(g.id)) continue;
+        const spentInfo = goalDirectSpent.get(g.id);
+        if (!spentInfo || spentInfo.spentNative <= 0) continue;
+
+        const targetNative = g.target_amount || 0;
+        const assignedNative = g.assigned_amount || 0;
+        const expectedRemaining = Math.max(0, Math.round((targetNative - spentInfo.spentNative) * 100) / 100);
+        const reconcileKey = `${g.id}_${spentInfo.spentNative}_${targetNative}`;
+
+        if (reconciledPoolsRef.current.has(reconcileKey)) continue;
+
+        // Link any category-matched transactions that were missing goal_id
+        for (const txId of spentInfo.unlinkedTxIds) {
+          await finance.updateTransaction(txId, { goal_id: g.id } as any);
+        }
+
+        // If the pool has expenses < target (e.g. £118 spent out of £150 = £32 left) but assigned_amount is 0, restore it
+        const manualZero = localStorage.getItem(`gvb_pool_manual_zero_${g.id}`) === 'true';
+        if (assignedNative <= 0 && expectedRemaining > 0 && !manualZero) {
+          reconciledPoolsRef.current.add(reconcileKey);
+          await finance.updateGoal(g.id, { assigned_amount: expectedRemaining } as any);
+        } else if (spentInfo.unlinkedTxIds.length > 0) {
+          reconciledPoolsRef.current.add(reconcileKey);
+        }
+      }
+    };
+
+    runReconcile();
+  }, [allDataReady, finance.goals, goalDirectSpent, goalTripSpent]);
+
   const snapshot = useMemo(() => {
     if (!assumptions || !allDataReady) return null;
     const now = new Date();
@@ -353,7 +433,8 @@ export default function FinancePoolsPage() {
 
   // Living & Monthly Budget Pool target (Priority #1: must be ring-fenced before Emergency Fund ladder upgrades)
   const effectiveFixedMonthly = fixedMonthlyTotalAll || fixedMonthlyTotal;
-  const monthlyFunAllowance = (snapshot?.baseWeeklyFun ?? 0) * 4.33;
+  const effectiveWeeklyFun = snapshot?.weeklyFunBudget ?? snapshot?.baseWeeklyFun ?? 0;
+  const monthlyFunAllowance = effectiveWeeklyFun * 4.33;
   const monthlyLivingTarget = effectiveFixedMonthly + essentialVariable + monthlyFunAllowance;
 
   // Track living expenses already paid so far this month (Fixed Bills / Rent, Essentials, Discretionary)
@@ -617,25 +698,18 @@ export default function FinancePoolsPage() {
     }));
   const assignedGoalsTotal = goalSegments.reduce((s, seg) => s + seg.amount, 0);
 
-  const unallocatedSurplusCash = Math.max(0, unassignedCash - livingPoolReserved - currentEmergencyFunded);
-  const unassignedCashAmount = livingPoolReserved + unallocatedSurplusCash;
-  const livingPoolCash = unassignedCashAmount;
+  // All cash not in Goal Pots or Emergency Reserve belongs to the Living & Budget Pool
+  const livingPoolCash = Math.max(0, unassignedCash - currentEmergencyFunded);
+  const unallocatedSurplusCash = 0;
 
-  // Build pool options for the move dialog — Living Pool reserve is untouchable; only surplus above it is movable
+  // Build pool options for the move dialog
   const poolOptions: { id: PoolId; label: string; available: number; cap?: number }[] = useMemo(() => {
     const opts: { id: PoolId; label: string; available: number; cap?: number }[] = [];
     opts.push({
       id: LIVING_POOL,
-      label: 'Living Pool Surplus (above Ring-Fenced Month Budget)',
-      available: unallocatedSurplusCash,
+      label: 'Living & Monthly Budget Pool',
+      available: livingPoolCash,
     });
-    if (unallocatedSurplusCash > 0.01) {
-      opts.push({
-        id: UNALLOCATED,
-        label: 'Unallocated Surplus (above Living Budget)',
-        available: unallocatedSurplusCash,
-      });
-    }
 
     // Emergency Reserve pool option
     const emId = emergencyGoal ? emergencyGoal.id : EMERGENCY_VIRTUAL;
@@ -660,7 +734,7 @@ export default function FinancePoolsPage() {
       });
     });
     return opts;
-  }, [finance.goals, livingPoolCash, unallocatedSurplusCash, emergencyGoal, emergencyGoalAssigned, currentEmergencyFunded, emergencyFloor, finance.convertToBase]);
+  }, [finance.goals, livingPoolCash, emergencyGoal, emergencyGoalAssigned, currentEmergencyFunded, emergencyFloor, finance.convertToBase]);
 
   const emergencyMonthsCovered = actualMonthlySurvival > 0 ? (currentEmergencyFunded / actualMonthlySurvival) : 0;
   const isEmergencyShort = emergencyShortfallAmt > 0.01;
@@ -668,9 +742,8 @@ export default function FinancePoolsPage() {
 
   const segments = [
     ...(currentEmergencyFunded > 0 ? [{ label: 'Emergency Reserve', amount: currentEmergencyFunded, color: emergencySegColor }] : []),
-    ...(livingPoolReserved > 0.01 ? [{ label: 'Living & Budget Pool', amount: livingPoolReserved, color: '#0ea5e9' }] : []),
+    ...(livingPoolCash > 0.01 ? [{ label: 'Living & Budget Pool', amount: livingPoolCash, color: '#0ea5e9' }] : []),
     ...otherGoalSegments,
-    ...(unallocatedSurplusCash > 0.01 ? [{ label: 'Unallocated Surplus', amount: unallocatedSurplusCash, color: '#FFB8E6' }] : []),
   ];
   const totalForBar = Math.max(totalCash, segments.reduce((s, seg) => s + seg.amount, 0)) || 1;
 
@@ -891,10 +964,18 @@ export default function FinancePoolsPage() {
         nextDescription = existingRawDesc;
       }
     }
+    const parsedAssigned = editAssigned.trim() !== '' ? Math.max(0, parseFloat(editAssigned) || 0) : (existingGoal?.assigned_amount || 0);
+    if (parsedAssigned === 0) {
+      localStorage.setItem(`gvb_pool_manual_zero_${editGoalId}`, 'true');
+    } else {
+      localStorage.removeItem(`gvb_pool_manual_zero_${editGoalId}`);
+    }
+
     await finance.updateGoal(editGoalId, {
       name: finalName,
       description: nextDescription,
       target_amount: parseFloat(editTarget),
+      assigned_amount: parsedAssigned,
       currency: editCurrency,
       color: editColor,
       is_stash: finalIsStash,
@@ -922,7 +1003,20 @@ export default function FinancePoolsPage() {
     } else {
       setEditDescription(rawDesc || (isStashGoal ? 'Cash surplus' : ''));
     }
+    const spentInfo = goalDirectSpent.get(goal.id);
+    const rawAssigned = goal.assigned_amount || 0;
+    const effectiveAssigned =
+      !isProtectedSystemGoal(goal) &&
+      !goalTripSpent.has(goal.id) &&
+      rawAssigned <= 0 &&
+      spentInfo &&
+      spentInfo.spentNative > 0 &&
+      (goal.target_amount || 0) > spentInfo.spentNative &&
+      localStorage.getItem(`gvb_pool_manual_zero_${goal.id}`) !== 'true'
+        ? Math.max(0, Math.round(((goal.target_amount || 0) - spentInfo.spentNative) * 100) / 100)
+        : rawAssigned;
     setEditTarget(String(goal.target_amount));
+    setEditAssigned(String(effectiveAssigned));
     setEditCurrency(goal.currency);
     setEditColor(goal.color || POOL_COLORS[0]);
     setEditIsStash((goal as any).is_stash === true);
@@ -1565,19 +1659,36 @@ export default function FinancePoolsPage() {
 
         {/* Goal Pool Cards */}
         {sortedNonEmergencyGoals.map(goal => {
-          const assigned = goal.assigned_amount || 0;
+          const rawAssigned = goal.assigned_amount || 0;
           const tripInfo = goalTripSpent.get(goal.id);
           const tripSpent = tripInfo?.spent || 0;
+          const directSpentInfo = goalDirectSpent.get(goal.id);
+          const directSpentNative = directSpentInfo?.spentNative || 0;
+          const directSpentBase = directSpentInfo?.spentBase || 0;
+          const manualZero = localStorage.getItem(`gvb_pool_manual_zero_${goal.id}`) === 'true';
+
+          // If a spending pool has logged expenses < target (e.g. £28 + £90 = £118 out of £150 = £32 left)
+          // and assigned_amount was wiped to 0, immediately show the reconciled remaining balance (£32)
+          const assigned =
+            !isProtectedSystemGoal(goal) &&
+            !tripInfo &&
+            rawAssigned <= 0 &&
+            directSpentNative > 0 &&
+            (goal.target_amount || 0) > directSpentNative &&
+            !manualZero
+              ? Math.max(0, Math.round(((goal.target_amount || 0) - directSpentNative) * 100) / 100)
+              : rawAssigned;
+
           const remaining = Math.max(0, assigned - tripSpent);
           const displayAmount = tripInfo ? remaining : assigned;
           const pct = goal.target_amount > 0 ? Math.min((displayAmount / goal.target_amount) * 100, 100) : 0;
-          const isHit = goal.target_amount > 0 && displayAmount >= goal.target_amount;
+          const isHit = goal.target_amount > 0 && (displayAmount >= goal.target_amount || (!tripInfo && assigned + directSpentNative >= goal.target_amount));
           const iconColor = goal.color || '#4558ff';
           const goalColor = isHit ? '#10b981' : iconColor;
           const GoalIcon = getPoolIcon(goal.name);
           const cardFeasibility = goal.deadline ? evaluatePoolFeasibility({
             targetAmount: finance.convertToBase(goal.target_amount || 0, goal.currency),
-            currentAssigned: finance.convertToBase(goal.assigned_amount || 0, goal.currency),
+            currentAssigned: finance.convertToBase(assigned + directSpentNative, goal.currency),
             deadline: goal.deadline || null,
             startDate: goal.start_date || null,
             existingGoals: finance.goals,
@@ -1638,7 +1749,7 @@ export default function FinancePoolsPage() {
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <h3 className="text-sm font-bold text-slate-900 truncate">{goal.name}</h3>
                         {tripInfo && <Badge variant="outline" className="text-[9px] px-1.5 py-0 border-sky-200 text-sky-600 bg-sky-50">Trip</Badge>}
-                        {isHit && <Badge variant="outline" className="text-[9px] px-1.5 py-0 border-emerald-300 text-emerald-800 bg-emerald-100 font-bold">✓ Goal Hit!</Badge>}
+                        {isHit && <Badge variant="outline" className="text-[9px] px-1.5 py-0 border-emerald-300 text-emerald-800 bg-emerald-100 font-bold">✓ {directSpentNative > 0 ? 'Funded' : 'Goal Hit!'}</Badge>}
                         {isSystemStashGoal(goal) && <Badge variant="secondary" className="text-[9px] px-1.5 py-0 bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold">Fixed Stash</Badge>}
                         {isSystemSavingsGoal(goal) && <Badge variant="secondary" className="text-[9px] px-1.5 py-0 bg-indigo-50 text-indigo-700 border border-indigo-200 font-semibold">Fixed Savings</Badge>}
                         {cardFeasibility && cardFeasibility.isFeasible && cardFeasibility.requiredMonthlyPace > 0 && !isHit && (
@@ -1744,6 +1855,14 @@ export default function FinancePoolsPage() {
                       {formatCurrency(finance.convertToBase(assigned, goal.currency), baseCurrency)} funded − {formatCurrency(finance.convertToBase(tripSpent, goal.currency), baseCurrency)} spent on trip
                     </p>
                   )}
+                  {!tripInfo && directSpentBase > 0 && (
+                    <p className="text-[11px] text-slate-600 font-medium mt-2">
+                      {formatCurrency(finance.convertToBase(assigned + directSpentNative, goal.currency), baseCurrency)} funded −{' '}
+                      <span className="text-rose-600 font-semibold">{formatCurrency(directSpentBase, baseCurrency)} spent</span>{' '}
+                      ({directSpentInfo?.count} {directSpentInfo?.count === 1 ? 'item' : 'items'}) ={' '}
+                      <span className="font-bold text-slate-900">{formatCurrency(finance.convertToBase(displayAmount, goal.currency), baseCurrency)} left</span>
+                    </p>
+                  )}
                 </div>
 
                 {/* Start date, Due date & required allocation stats */}
@@ -1770,7 +1889,7 @@ export default function FinancePoolsPage() {
                         : `${daysRemaining}d left`;
                     const daysRemainingClamped = Math.max(1, daysRemaining);
                     const targetVal = finance.convertToBase(goal.target_amount || 0, goal.currency);
-                    const assignedVal = finance.convertToBase(goal.assigned_amount || 0, goal.currency);
+                    const assignedVal = finance.convertToBase(assigned + directSpentNative, goal.currency);
                     const remaining = Math.max(0, targetVal - assignedVal);
 
                     let weeklyRequired = 0;
@@ -2439,18 +2558,22 @@ export default function FinancePoolsPage() {
               <Input value={editDescription} onChange={e => setEditDescription(e.target.value)} placeholder="What is this fund for?" />
               <p className="text-[10px] text-muted-foreground">Included in AI financial summaries so your AI knows what the fund is for.</p>
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="space-y-2">
+                <Label>Current Balance</Label>
+                <Input type="number" step="0.01" value={editAssigned} onChange={e => setEditAssigned(e.target.value)} />
+              </div>
               <div className="space-y-2">
                 <Label>Target Amount</Label>
-                <Input type="number" value={editTarget} onChange={e => setEditTarget(e.target.value)} />
+                <Input type="number" step="0.01" value={editTarget} onChange={e => setEditTarget(e.target.value)} />
               </div>
               <div className="space-y-2">
                 <Label>Currency</Label>
                 <Select value={editCurrency} onValueChange={setEditCurrency}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="AUD">AUD</SelectItem>
                     <SelectItem value="GBP">GBP</SelectItem>
+                    <SelectItem value="AUD">AUD</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

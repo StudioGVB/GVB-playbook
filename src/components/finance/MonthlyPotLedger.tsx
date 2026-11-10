@@ -307,6 +307,12 @@ export default function MonthlyPotLedger({
 
       const selectedMonthData = getMonthDeltaForGoal(g, selectedMonth);
 
+      // Reconcile standard spending pools (e.g. Office Set Up) where expenses were logged against a funded target
+      const manualZero = localStorage.getItem(`gvb_pool_manual_zero_${g.id}`) === 'true';
+      if (!isEmergency && !isStash && currentAssigned <= 0 && selectedMonthData.spend > 0 && targetBase > selectedMonthData.spend && !manualZero) {
+        currentAssigned = Math.max(0, Math.round((targetBase - selectedMonthData.spend) * 100) / 100);
+      }
+
       // If funds were situated this month and no prior activity:
       const mStart = startOfMonth(selectedMonth);
       const isCreatedThisMonth = g.created_at && new Date(g.created_at) >= mStart;
@@ -321,8 +327,11 @@ export default function MonthlyPotLedger({
 
       if (isCurrentMonth) {
         endBalance = currentAssigned;
-        // If created this month or newly situated, start balance is 0 and difference is the situated amount
-        if (isCreatedThisMonth || selectedMonthData.netDelta >= currentAssigned) {
+        if (!isEmergency && !isStash && selectedMonthData.spend > 0 && isCreatedThisMonth) {
+          startBalance = 0;
+          selectedMonthData.contributions = Math.max(selectedMonthData.contributions, currentAssigned + selectedMonthData.spend);
+          selectedMonthData.netDelta = endBalance;
+        } else if (isCreatedThisMonth || selectedMonthData.netDelta >= currentAssigned) {
           startBalance = 0;
           selectedMonthData.netDelta = endBalance;
         } else {
