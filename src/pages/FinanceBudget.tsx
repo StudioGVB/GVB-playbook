@@ -866,6 +866,11 @@ export default function FinanceBudget() {
           ? "Fun Money budget reduced this week to settle the gap"
           : `Spending pace is ${fmt(combinedDailyPace)}/day — within budget`);
 
+  const handleForgiveCarriedDebt = async () => {
+    await updateAssumptions({ carry_forward_debt: 0, last_debt_week: null as any }, true);
+    toast.success('Carried overspend cleared! Your full weekly budget has been restored.');
+  };
+
   return (
     <div className="space-y-6 sm:space-y-8 w-full font-body">
       {/* Utility bar */}
@@ -1192,7 +1197,7 @@ export default function FinanceBudget() {
               {insightTone === 'warn' && <History className="w-4 h-4 sm:w-5 sm:h-5 text-amber-600" />}
               {insightTone === 'bad' && <Sparkles className="w-4 h-4 sm:w-5 sm:h-5 text-amber-600" />}
             </div>
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <p className={cn(
                 "text-sm font-semibold truncate",
                 insightTone === 'good' && "text-foreground",
@@ -1202,6 +1207,16 @@ export default function FinanceBudget() {
               <p className="text-xs text-muted-foreground line-clamp-2 sm:line-clamp-none">{insightSubtitle}</p>
             </div>
           </div>
+          {isCurrentWeek && snapshot.carryForwardDebt > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleForgiveCarriedDebt}
+              className="text-xs h-7 px-2.5 rounded-lg border-amber-300 text-amber-900 bg-amber-50 hover:bg-amber-100 font-semibold shrink-0 cursor-pointer"
+            >
+              Reset & Restore
+            </Button>
+          )}
           <Badge variant="outline" className="text-[10px] whitespace-nowrap hidden sm:inline-flex">
             {!isCurrentWeek ? 'Closed' : `Resets in ${daysUntilReset}d`}
           </Badge>
