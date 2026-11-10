@@ -371,7 +371,7 @@ export default function FinanceBudget() {
     const thisWeekKey = format(todayWeekStart, 'yyyy-MM-dd');
     const prevWeekStart = startOfWeek(subDays(todayWeekStart, 1), { weekStartsOn: 1 });
     const prevWeekKey = format(prevWeekStart, 'yyyy-MM-dd');
-    const SETTLE_VERSION = 12;
+    const SETTLE_VERSION = 13;
 
     const prevWeekSpend = computeWeekVariableSpend(dedupedTransactions, finance.categories, prevWeekStart, trips);
     const prevEssentialSpent = prevWeekSpend.essentialSpent;
@@ -423,7 +423,7 @@ export default function FinanceBudget() {
       return;
     }
 
-    const isFirstSettleForWeek = meta.last_settled_week !== prevWeekKey;
+    const isFirstSettleForWeek = meta.last_settled_week !== prevWeekKey || meta.settled_version !== SETTLE_VERSION;
 
     const doSettle = async () => {
       settleRef.current = settleKey;
@@ -462,7 +462,11 @@ export default function FinanceBudget() {
         recordedStashDelta = netDifference;
       } else if (netDifference < 0) {
         // Ensure stash funds actually present are available to cover the overspend
-        const currentStashBal = Math.max(0, stashGoal?.assigned_amount || 0);
+        // If a previous settle run already took from stash for this week, restore it to find pre-settle balance
+        const prevStashTaken = (meta.last_settled_week === prevWeekKey && meta.last_cover?.week === prevWeekKey)
+          ? (meta.last_cover.steps?.find(s => s.source === 'stash')?.amount || 0)
+          : 0;
+        const currentStashBal = Math.max(0, (stashGoal?.assigned_amount || 0) + prevStashTaken);
         const restoredStash = stashGoal
           ? { ...stashGoal, assigned_amount: currentStashBal }
           : null;
@@ -505,7 +509,7 @@ export default function FinanceBudget() {
       // Calculate post-settle Stash balance
       const stashTaken = steps.find(s => s.source === 'stash')?.amount || 0;
       let nextStashAmount = netDifference < 0
-        ? Math.max(0, Math.round(((stashGoal?.assigned_amount || 0) - stashTaken) * 100) / 100)
+        ? Math.max(0, Math.round((currentStashBal - stashTaken) * 100) / 100)
         : Math.max(0, Math.round(((stashGoal?.assigned_amount || 0) + stashDelta) * 100) / 100);
 
       // End-of-Month Sweep: if we have entered a new calendar month relative to prevWeekStart

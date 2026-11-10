@@ -699,10 +699,15 @@ export function computePolicySnapshot(
     }
   }
 
-  const carryForwardDebt = debtAppliesThisWeek ? storedDebt : preSettleDebt;
+  const rawCarryDebt = debtAppliesThisWeek ? storedDebt : preSettleDebt;
+  // If the user has funds in their Savings Stash, the stash absorbs last week's overspend first
+  // so this week's weekly fun budget is NOT docked if the stash can cover it!
+  const currentStashAvailable = Math.max(0, (stashGoal as any)?.assigned_amount || 0);
+  const unabsorbedDebt = Math.max(0, rawCarryDebt - currentStashAvailable);
+  const carryForwardDebt = unabsorbedDebt;
   const effectiveDebt = !isTravelWeek ? carryForwardDebt : 0;
 
-  // Deduct last week's overspend from this week's fun budget
+  // Deduct remaining unabsorbed overspend (only if stash was insufficient) from this week's fun budget
   weeklyFunBudget = Math.max(0, weeklyFunBudget - effectiveDebt);
 
   // Underspent rollover is NOT added to weeklyFunBudget (it is swept into Savings Stash by auto-settle)
