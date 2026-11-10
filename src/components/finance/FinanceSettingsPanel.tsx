@@ -401,9 +401,9 @@ export default function FinanceSettingsPanel({ finance }: Props) {
   const handleUpSync = async () => {
     setUpSyncing(true);
     try {
-      const res = await syncUpTransactions();
-      if (res.error) toast.error(res.error);
-      else toast.success(`Synced ${res.inserted || 0} Up Bank transactions!`);
+      const res: any = await syncUpTransactions();
+      if (res?.error) toast.error(res.error);
+      else if (res && typeof res.inserted === 'number') toast.success(`Synced ${res.inserted} Up Bank transactions!`);
     } catch (err: any) {
       toast.error('Up Bank sync failed');
     } finally {
@@ -428,9 +428,9 @@ export default function FinanceSettingsPanel({ finance }: Props) {
   const handleWiseSync = async () => {
     setWiseSyncing(true);
     try {
-      const res = await syncWiseTransactions();
-      if (res.error) toast.error(res.error);
-      else toast.success(`Synced ${res.inserted || 0} Wise transactions!`);
+      const res: any = await syncWiseTransactions();
+      if (res?.error) toast.error(res.error);
+      else if (res && typeof res.inserted === 'number') toast.success(`Synced ${res.inserted} Wise transactions!`);
     } catch (err: any) {
       toast.error('Wise sync failed');
     } finally {
@@ -441,9 +441,9 @@ export default function FinanceSettingsPanel({ finance }: Props) {
   const handleWiseConnectManual = async () => {
     if (!wiseToken.trim()) { toast.error('Please enter a Wise API token'); return; }
     try {
-      const res = await connectWise(wiseToken.trim());
-      if (res.error) toast.error(res.error);
-      else {
+      const res: any = await connectWise(wiseToken.trim());
+      if (res?.error) toast.error(res.error);
+      else if (res !== false) {
         toast.success('Wise connected via token!');
         setWiseToken('');
         handleWiseVerify();

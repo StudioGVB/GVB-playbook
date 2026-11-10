@@ -29,7 +29,7 @@ export interface MonthlyPotLedgerProps {
   monthlyFunBudget: number;
   funSpent: number;
   paidFixedTxns?: { name: string; amount: number; date?: any }[];
-  variableCategoryBreakdown?: Record<string, number>;
+  variableCategoryBreakdown?: Record<string, number> | { catId?: string; name: string; color?: string; total: number; isEssential?: boolean }[];
   goals: FinanceGoal[];
   transactions: FinanceTransaction[];
   accounts?: FinanceAccount[];
@@ -562,7 +562,7 @@ export default function MonthlyPotLedger({
                 <span className="text-lg font-black text-purple-950 tabular-nums">{fmt(essentialSpent)}</span>
                 <p className="text-[11px] text-purple-700 mt-0.5">Groceries & transport</p>
               </div>
-              {Object.keys(variableCategoryBreakdown).length > 0 && (
+              {(Array.isArray(variableCategoryBreakdown) ? variableCategoryBreakdown.length > 0 : Object.keys(variableCategoryBreakdown).length > 0) && (
                 <button
                   type="button"
                   onClick={() => setShowVariableDetails(!showVariableDetails)}
@@ -624,16 +624,19 @@ export default function MonthlyPotLedger({
           )}
 
           {/* Expandable Variable Categories List */}
-          {showVariableDetails && Object.keys(variableCategoryBreakdown).length > 0 && (
+          {showVariableDetails && (Array.isArray(variableCategoryBreakdown) ? variableCategoryBreakdown.length > 0 : Object.keys(variableCategoryBreakdown).length > 0) && (
             <div className="rounded-2xl bg-purple-50/60 p-4 border border-purple-200/70 animate-in fade-in-50 duration-200">
               <h4 className="text-xs font-black text-purple-900 uppercase tracking-wider mb-2">
                 Variable Spend by Category in {monthLabel}
               </h4>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
-                {Object.entries(variableCategoryBreakdown).map(([catName, amt]) => (
+                {(Array.isArray(variableCategoryBreakdown)
+                  ? variableCategoryBreakdown.map(item => [item.name, item.total] as const)
+                  : Object.entries(variableCategoryBreakdown)
+                ).map(([catName, amt]) => (
                   <div key={catName} className="bg-white px-3 py-2 rounded-xl border border-purple-100 text-xs flex items-center justify-between">
                     <span className="text-slate-600 truncate mr-1.5">{catName}</span>
-                    <span className="font-bold text-slate-900 tabular-nums">{fmt(amt)}</span>
+                    <span className="font-bold text-slate-900 tabular-nums">{fmt(Number(amt) || 0)}</span>
                   </div>
                 ))}
               </div>

@@ -13,6 +13,8 @@ import FinanceSpreadsheetTab from '@/components/finance/FinanceSpreadsheetTab';
 import MonthlyCashFlowBreakdown from '@/components/finance/MonthlyCashFlowBreakdown';
 import { calcTakeHome } from '@/lib/ukTakeHome';
 import { computePolicySnapshot, computeRequiredGoalSavingsMonthly } from '@/lib/policyEngine';
+import { useFinanceAssumptions } from '@/hooks/useFinanceAssumptions';
+import { useFinanceTrips } from '@/hooks/useFinanceTrips';
 
 // Candy-jar palette (matches Accounts & Settings)
 const PINK = '#FF2EB8';
@@ -51,6 +53,8 @@ export default function FinanceBalanceSheet() {
   const finance = useFinanceData();
   const { transactions, categories, settings } = finance;
   const { expenses: fixedExpenses } = useFixedExpenses();
+  const { assumptions } = useFinanceAssumptions();
+  const { trips } = useFinanceTrips();
   const baseCurrency = settings?.base_currency || 'GBP';
   const fxRates = (settings as any)?.fx_rates || { AUD_GBP: 0.52, GBP_AUD: 1.92 };
 
@@ -231,9 +235,9 @@ export default function FinanceBalanceSheet() {
   }, [fixedExpenses, finance.convertToBase]);
 
   const snapshot = useMemo(() => {
-    if (!finance.assumptions) return null;
+    if (!assumptions) return null;
     return computePolicySnapshot(
-      finance.assumptions,
+      assumptions,
       finance.accounts,
       finance.transactions,
       finance.categories,
@@ -242,14 +246,14 @@ export default function FinanceBalanceSheet() {
       fixedExpensesMonthlyInternal,
       undefined,
       undefined,
-      finance.trips,
+      trips,
       fixedExpensesMonthlyAll,
     );
-  }, [finance.assumptions, finance.accounts, finance.transactions, finance.categories, finance.goals, finance.convertToBase, fixedExpensesMonthlyInternal, finance.trips, fixedExpensesMonthlyAll]);
+  }, [assumptions, finance.accounts, finance.transactions, finance.categories, finance.goals, finance.convertToBase, fixedExpensesMonthlyInternal, trips, fixedExpensesMonthlyAll]);
 
   const expectedIncomeValue = snapshot?.split.monthlyIncome && snapshot.split.monthlyIncome > 0
     ? snapshot.split.monthlyIncome
-    : (finance.assumptions?.expected_monthly_income || stats.income || 0);
+    : (assumptions?.expected_monthly_income || stats.income || 0);
 
   const directGoalSavings = useMemo(() => {
     return computeRequiredGoalSavingsMonthly(
@@ -265,7 +269,7 @@ export default function FinanceBalanceSheet() {
     : directGoalSavings;
   const essentialBudgetMonthly = snapshot 
     ? snapshot.weeklyEssentialBudget * 4.33 
-    : (finance.assumptions?.estimated_essential_variable || 400);
+    : (assumptions?.estimated_essential_variable || 400);
 
   return (
     <div className="w-full font-body">

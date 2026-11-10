@@ -4,7 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import { computeTxFingerprint } from '@/lib/txFingerprint';
 import { FinanceContext } from '@/contexts/FinanceContext';
-import { recalibrateBankTimestamp } from '@/lib/timezoneEngine';
+import { recalibrateBankTimestamp, formatInTimezone } from '@/lib/timezoneEngine';
 import { formatUkDate } from '@/lib/financeUtils';
 import { deduplicateTransactions } from '@/lib/deduplication';
 import { subDays } from 'date-fns';
@@ -207,7 +207,10 @@ export function useFinanceDataState() {
 
   const hasLoadedOnce = useRef(false);
   const cleaningDuplicatesRef = useRef(false);
-  const visaMigrationRef = useRef(false);
+  const categoriesHealedRef = useRef(false);
+  const visaMigrationRef = useRef(
+    typeof window !== 'undefined' && localStorage.getItem('gvb_visa_migrated_v1') === 'true'
+  );
 
   const cleanDuplicateCategories = useCallback(async (catData: any[]) => {
     if (catData.length === 0 || cleaningDuplicatesRef.current) return;
@@ -261,11 +264,11 @@ export function useFinanceDataState() {
         if (acc.provider === 'monzo') {
           const rawName = (acc.account_name || '').trim();
           if (rawName.startsWith('user_0000')) {
-            supabase.from('finance_accounts').update({ account_name: 'Monzo Personal' }).eq('id', acc.id).then(() => {}).catch(console.error);
+            supabase.from('finance_accounts').update({ account_name: 'Monzo Personal' }).eq('id', acc.id).then(() => {}, console.error);
             return { ...acc, account_name: 'Monzo Personal' };
           }
           if (rawName.toLowerCase().startsWith('joint account between user_')) {
-            supabase.from('finance_accounts').update({ account_name: 'Monzo Joint Account' }).eq('id', acc.id).then(() => {}).catch(console.error);
+            supabase.from('finance_accounts').update({ account_name: 'Monzo Joint Account' }).eq('id', acc.id).then(() => {}, console.error);
             return { ...acc, account_name: 'Monzo Joint Account' };
           }
         }
@@ -280,55 +283,58 @@ export function useFinanceDataState() {
         }));
         setCategories(enriched);
 
-        // Self-healing: if no category is marked as essential, automatically make Groceries and Transport essential
-        const hasEssential = catRes.data.some((c: any) => c.is_essential);
-        if (catRes.data.length > 0 && !hasEssential) {
-          const toUpdate = catRes.data.filter((c: any) =>
-            c.name.trim().toLowerCase() === 'groceries' || c.name.trim().toLowerCase() === 'transport'
-          );
-          if (toUpdate.length > 0) {
-            Promise.all(toUpdate.map((c: any) =>
-              supabase.from('finance_categories').update({ is_essential: true }).eq('id', c.id)
-            )).then(() => {
-              fetchAll();
-            }).catch(err => {
-              console.error('[self-healing] Failed to set default essential categories', err);
+        if (!categoriesHealedRef.current && catRes.data.length > 0) {
+          const healOps: PromiseLike<any>[] = [];
+
+          // Self-healing: if no category is marked as essential, automatically make Groceries and Transport essential
+          const hasEssential = catRes.data.some((c: any) => c.is_essential);
+          if (!hasEssential) {
+            const toUpdate = catRes.data.filter((c: any) =>
+              c.name.trim().toLowerCase() === 'groceries' || c.name.trim().toLowerCase() === 'transport'
+            );
+            toUpdate.forEach((c: any) => {
+              healOps.push(supabase.from('finance_categories').update({ is_essential: true }).eq('id', c.id));
             });
           }
-        }
 
-        // Self-healing: Ensure Gamma Salary income category exists
-        const hasGammaCat = catRes.data.some((c: any) => c.type === 'income' && c.name.toLowerCase().includes('gamma'));
-        if (!hasGammaCat && catRes.data.length > 0) {
-          supabase.from('finance_categories').insert({
-            user_id: user.id,
-            name: 'Gamma Salary',
-            type: 'income',
-            is_cuttable: false,
-            is_essential: false,
-            color: '#db2777'
-          }).then(() => {
-            fetchAll();
-          }).catch(err => {
-            console.error('[self-healing] Failed to create Gamma Salary category', err);
-          });
-        }
+          // Self-healing: Ensure Gamma Salary income category exists
+          const hasGammaCat = catRes.data.some((c: any) => c.type === 'income' && c.name.toLowerCase().includes('gamma'));
+          if (!hasGammaCat) {
+            healOps.push(
+              supabase.from('finance_categories').insert({
+                user_id: user.id,
+                name: 'Gamma Salary',
+                type: 'income',
+                is_cuttable: false,
+                is_essential: false,
+                color: '#db2777'
+              })
+            );
+          }
 
-        // Self-healing: Ensure Venture Advisory income category exists
-        const hasVentureCat = catRes.data.some((c: any) => c.type === 'income' && (c.name.toLowerCase().includes('venture') || c.name.toLowerCase().includes('batchbase')));
-        if (!hasVentureCat && catRes.data.length > 0) {
-          supabase.from('finance_categories').insert({
-            user_id: user.id,
-            name: 'Venture Advisory',
-            type: 'income',
-            is_cuttable: false,
-            is_essential: false,
-            color: '#2563eb'
-          }).then(() => {
-            fetchAll();
-          }).catch(err => {
-            console.error('[self-healing] Failed to create Venture Advisory category', err);
-          });
+          // Self-healing: Ensure Venture Advisory income category exists
+          const hasVentureCat = catRes.data.some((c: any) => c.type === 'income' && (c.name.toLowerCase().includes('venture') || c.name.toLowerCase().includes('batchbase')));
+          if (!hasVentureCat) {
+            healOps.push(
+              supabase.from('finance_categories').insert({
+                user_id: user.id,
+                name: 'Venture Advisory',
+                type: 'income',
+                is_cuttable: false,
+                is_essential: false,
+                color: '#2563eb'
+              })
+            );
+          }
+
+          if (healOps.length > 0) {
+            categoriesHealedRef.current = true;
+            Promise.all(healOps.map(p => Promise.resolve(p))).then(() => {
+              fetchAll();
+            }).catch(err => {
+              console.error('[self-healing] Failed to heal default categories', err);
+            });
+          }
         }
 
         // Detect and merge duplicate categories (case-insensitive name match)
@@ -437,7 +443,7 @@ export function useFinanceDataState() {
                   transfer_side: null,
                   transfer_status: null,
                   category_id: targetCatId,
-                }).eq('id', t.id).then(() => {}).catch(console.error);
+                }).eq('id', t.id).then(() => {}, console.error);
               }
               return {
                 ...t,
@@ -509,22 +515,22 @@ export function useFinanceDataState() {
           const deleteChunks: Promise<any>[] = [];
           for (let i = 0; i < duplicatesToDelete.length; i += CHUNK_SIZE) {
             const chunk = duplicatesToDelete.slice(i, i + CHUNK_SIZE);
-            deleteChunks.push(supabase.from('finance_transactions').delete().in('id', chunk));
+            deleteChunks.push(Promise.resolve(supabase.from('finance_transactions').delete().in('id', chunk)));
           }
           Promise.all(deleteChunks).then(() => {
             console.log(`[self-healing] Purged ${duplicatesToDelete.length} duplicate transactions`);
           }).catch(console.error);
         }
         for (const [id, catId] of Object.entries(categoryTransfers)) {
-          supabase.from('finance_transactions').update({ category_id: catId }).eq('id', id).catch(console.error);
+          supabase.from('finance_transactions').update({ category_id: catId }).eq('id', id).then(() => {}, console.error);
         }
         for (const [id, extId] of Object.entries(externalIdTransfers)) {
-          supabase.from('finance_transactions').update({ external_transaction_id: extId }).eq('id', id).catch(console.error);
+          supabase.from('finance_transactions').update({ external_transaction_id: extId }).eq('id', id).then(() => {}, console.error);
         }
         if (mirrorDeleteIds.length > 0) {
           supabase.from('finance_transactions').delete().in('id', mirrorDeleteIds).then(() => {
             console.log(`[self-healing] Purged ${mirrorDeleteIds.length} fake Travel Savings mirror transactions for Gabriella/batchbase`);
-          }).catch(console.error);
+          }, console.error);
         }
         for (const [catId, ids] of Object.entries(healingByCat)) {
           supabase.from('finance_transactions').update({
@@ -534,20 +540,20 @@ export function useFinanceDataState() {
             category_id: catId,
           }).in('id', ids).then(() => {
             console.log(`[self-healing] Auto-categorised ${ids.length} incoming payments`);
-          }).catch(console.error);
+          }, console.error);
         }
         if (transferFlagFixIds.length > 0) {
           supabase.from('finance_transactions').update({
             is_transfer: false,
             transfer_side: null,
             transfer_status: null,
-          }).in('id', transferFlagFixIds).then(() => {}).catch(console.error);
+          }).in('id', transferFlagFixIds).then(() => {}, console.error);
         }
       }
       if (goalRes.data) {
         setGoals(goalRes.data as any);
 
-        // Self-healing: Transfer Visa pool funds to Emergency Reserve and set Visa start_date to Jan 1st 2027
+        // Self-healing: Transfer Visa pool funds to Emergency Reserve and set Visa start_date to Jan 1st 2027 (once)
         if (goalRes.data.length > 0 && !visaMigrationRef.current) {
           const visaGoal = goalRes.data.find((g: any) => g.name.toLowerCase().includes('visa'));
           const emergencyGoal = goalRes.data.find((g: any) => (g as any).is_emergency === true || g.name.toLowerCase().includes('emergency'));
@@ -559,19 +565,20 @@ export function useFinanceDataState() {
 
             if (visaAssigned > 0 || needsStartDateUpdate) {
               visaMigrationRef.current = true;
+              localStorage.setItem('gvb_visa_migrated_v1', 'true');
               const updates: Promise<any>[] = [];
               if (visaAssigned > 0 && emergencyGoal) {
                 updates.push(
-                  supabase.from('finance_goals').update({
+                  Promise.resolve(supabase.from('finance_goals').update({
                     assigned_amount: (emergencyGoal.assigned_amount || 0) + visaAssigned
-                  }).eq('id', emergencyGoal.id)
+                  }).eq('id', emergencyGoal.id))
                 );
               }
               updates.push(
-                supabase.from('finance_goals').update({
+                Promise.resolve(supabase.from('finance_goals').update({
                   assigned_amount: 0,
                   start_date: '2027-01-01'
-                }).eq('id', visaGoal.id)
+                }).eq('id', visaGoal.id))
               );
               Promise.all(updates).then(() => {
                 toast.success(`Transferred ${visaAssigned > 0 ? `Visa funds into Emergency Reserve & set ` : ''}Visa start date to 1 Jan 2027`);
@@ -579,6 +586,9 @@ export function useFinanceDataState() {
               }).catch(err => {
                 console.error('[self-healing] Failed to update Visa pool', err);
               });
+            } else {
+              visaMigrationRef.current = true;
+              localStorage.setItem('gvb_visa_migrated_v1', 'true');
             }
           }
         }
@@ -621,8 +631,8 @@ export function useFinanceDataState() {
     } catch (err) {
       console.error('Finance fetch error', err);
     } finally {
-      setLoading(false);
       hasLoadedOnce.current = true;
+      setLoading(false);
     }
   }, [user, authLoading]);
 
@@ -844,10 +854,15 @@ export function useFinanceDataState() {
 
     if (!isFixed && !fixedExpenseId && tx.description) {
       const descLower = tx.description.toLowerCase();
-      const matched = fixedExpenses.find(fe => {
-        const nameLower = fe.name.toLowerCase();
-        return descLower.includes(nameLower) || nameLower.includes(descLower);
-      }) || (descLower.includes('rent') ? fixedExpenses.find(fe => fe.name.toLowerCase().includes('rent')) : undefined);
+      const { data: feRows } = await supabase
+        .from('finance_fixed_expenses' as any)
+        .select('id, name')
+        .eq('user_id', user.id);
+      const feList = ((feRows as any[]) || []);
+      const matched = feList.find(fe => {
+        const nameLower = String(fe.name || '').toLowerCase();
+        return nameLower && (descLower.includes(nameLower) || nameLower.includes(descLower));
+      }) || (descLower.includes('rent') ? feList.find(fe => String(fe.name || '').toLowerCase().includes('rent')) : undefined);
 
       if (matched) {
         isFixed = true;
@@ -1958,7 +1973,7 @@ export function useFinanceDataState() {
     });
     // Auto-prune logs older than 90 days to keep database lean without losing history
     const ninetyDaysAgo = subDays(new Date(), 90).toISOString();
-    supabase.from('finance_import_logs').delete().lt('created_at', ninetyDaysAgo).then(() => {}).catch(() => {});
+    supabase.from('finance_import_logs').delete().lt('created_at', ninetyDaysAgo).then(() => {}, () => {});
     fetchAll();
   };
 

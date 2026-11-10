@@ -700,10 +700,14 @@ export function computePolicySnapshot(
   }
 
   const rawCarryDebt = debtAppliesThisWeek ? storedDebt : preSettleDebt;
-  // If the user has funds in their Savings Stash, the stash absorbs last week's overspend first
-  // so this week's weekly fun budget is NOT docked if the stash can cover it!
+  // When !debtAppliesThisWeek, preSettleDebt (from planOverspendCover or last_cover) already has Stash subtracted.
+  // When debtAppliesThisWeek, storedDebt already had Stash subtracted if last_settled_week === lastWeekKey.
+  // Only subtract currentStashAvailable if storedDebt was recorded before Stash was settled for lastWeekKey.
   const currentStashAvailable = Math.max(0, (stashGoal as any)?.assigned_amount || 0);
-  const unabsorbedDebt = Math.max(0, rawCarryDebt - currentStashAvailable);
+  const stashAlreadyApplied = !debtAppliesThisWeek || stashMeta.last_settled_week === lastWeekKey;
+  const unabsorbedDebt = stashAlreadyApplied
+    ? Math.max(0, rawCarryDebt)
+    : Math.max(0, rawCarryDebt - currentStashAvailable);
   const carryForwardDebt = unabsorbedDebt;
   const effectiveDebt = !isTravelWeek ? carryForwardDebt : 0;
 

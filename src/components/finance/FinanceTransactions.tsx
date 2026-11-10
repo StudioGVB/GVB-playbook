@@ -353,27 +353,6 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
     setMatching(false);
   };
 
-  const handleCategoryChange = useCallback((txId: string, oldCategoryId: string | null, newCategoryId: string | null) => {
-    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
-
-    updateTransaction(txId, { category_id: newCategoryId } as any);
-    setLastChange({ txId, oldCategoryId });
-
-    const catName = newCategoryId ? categories.find(c => c.id === newCategoryId)?.name : 'None';
-    toast(`Category → ${catName || 'Cleared'}`, {
-      action: {
-        label: 'Undo',
-        onClick: () => {
-          updateTransaction(txId, { category_id: oldCategoryId } as any);
-          setLastChange(null);
-        },
-      },
-      duration: 5000,
-    });
-
-    undoTimerRef.current = setTimeout(() => setLastChange(null), 5000);
-  }, [updateTransaction, categories]);
-
   const [openPoolPopoverTxId, setOpenPoolPopoverTxId] = useState<string | null>(null);
   const assigningTxRef = useRef<Set<string>>(new Set());
 
@@ -467,6 +446,48 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
       assigningTxRef.current.delete(txId);
     }
   }, [updateTransaction, goals, finance, categories, addCategory, baseCurrency]);
+
+  const handleCategoryChange = useCallback(async (txId: string, oldCategoryId: string | null, newCategoryId: string | null) => {
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+
+    const tx = finance.transactions.find(t => t.id === txId);
+    const newCat = newCategoryId ? categories.find(c => c.id === newCategoryId) : null;
+    const matchedGoal = newCat && tx && tx.amount < 0
+      ? goals.find(
+          g =>
+            !(g as any).is_stash &&
+            !(g as any).is_emergency &&
+            !/stash|emergency/i.test(g.name || '') &&
+            g.name.trim().toLowerCase() === newCat.name.trim().toLowerCase()
+        )
+      : null;
+
+    if (matchedGoal) {
+      await handlePoolAssign(txId, matchedGoal.id);
+      return;
+    }
+
+    if (tx && (tx as any).goal_id && (!matchedGoal || !newCategoryId)) {
+      await handlePoolAssign(txId, null);
+    }
+
+    updateTransaction(txId, { category_id: newCategoryId } as any);
+    setLastChange({ txId, oldCategoryId });
+
+    const catName = newCat ? newCat.name : 'None';
+    toast(`Category → ${catName || 'Cleared'}`, {
+      action: {
+        label: 'Undo',
+        onClick: () => {
+          updateTransaction(txId, { category_id: oldCategoryId } as any);
+          setLastChange(null);
+        },
+      },
+      duration: 5000,
+    });
+
+    undoTimerRef.current = setTimeout(() => setLastChange(null), 5000);
+  }, [updateTransaction, categories, finance.transactions, goals, handlePoolAssign]);
 
   const handleFixedExpenseAssign = useCallback((txId: string, expenseId: string | null) => {
     if (expenseId) {

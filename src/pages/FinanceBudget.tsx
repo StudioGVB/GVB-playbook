@@ -456,6 +456,11 @@ export default function FinanceBudget() {
       }
 
       let recordedStashDelta = 0;
+      const prevStashTaken = (meta.last_settled_week === prevWeekKey && meta.last_cover?.week === prevWeekKey)
+        ? (meta.last_cover.steps?.find(s => s.source === 'stash')?.amount || 0)
+        : 0;
+      const currentStashBal = Math.max(0, (stashGoal?.assigned_amount || 0) + prevStashTaken);
+
       if (netDifference > 0) {
         // UNDERSPENT: 100% of weekly underspend sweeps straight into Savings Stash
         stashDelta += netDifference;
@@ -463,10 +468,6 @@ export default function FinanceBudget() {
       } else if (netDifference < 0) {
         // Ensure stash funds actually present are available to cover the overspend
         // If a previous settle run already took from stash for this week, restore it to find pre-settle balance
-        const prevStashTaken = (meta.last_settled_week === prevWeekKey && meta.last_cover?.week === prevWeekKey)
-          ? (meta.last_cover.steps?.find(s => s.source === 'stash')?.amount || 0)
-          : 0;
-        const currentStashBal = Math.max(0, (stashGoal?.assigned_amount || 0) + prevStashTaken);
         const restoredStash = stashGoal
           ? { ...stashGoal, assigned_amount: currentStashBal }
           : null;

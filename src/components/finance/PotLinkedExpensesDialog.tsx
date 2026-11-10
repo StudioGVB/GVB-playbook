@@ -166,7 +166,7 @@ export default function PotLinkedExpensesDialog({
       isBoost?: boolean;
     }[] = [];
 
-    const accMap = new Map(accounts.map(a => [a.id, a.name]));
+    const accMap = new Map(accounts.map(a => [a.id, a.account_name || (a as any).name]));
     const catMap = new Map(categories.map(c => [c.id, c.name]));
 
     matchedTxs.forEach(t => {
