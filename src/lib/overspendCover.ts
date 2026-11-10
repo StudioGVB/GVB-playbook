@@ -114,8 +114,7 @@ export function coverOrder(goals: GoalLike[]): GoalLike[] {
  * Overspend waterfall:
  *  1. Savings Stash
  *  2. Next week's fun money, capped at NEXT_WEEK_CAP
- *  3. Pots, lowest priority first (skipping protected / trip-soon / deadline-soon / emergency)
- *  4. Remainder stays as carry-forward debt
+ *  3. Remainder stays as carry-forward debt (dedicated savings pots are never raided automatically)
  */
 export function planOverspendCover(params: {
   overspend: number;
@@ -126,7 +125,7 @@ export function planOverspendCover(params: {
   meta: CoverMeta;
   now: Date;
 }): { steps: CoverStep[]; nextWeekDeduction: number; leftoverDebt: number } {
-  const { stash, nextWeekFun, goals, trips, meta, now } = params;
+  const { stash, nextWeekFun } = params;
   let left = round2(params.overspend);
   const steps: CoverStep[] = [];
 
@@ -148,20 +147,7 @@ export function planOverspendCover(params: {
     }
   }
 
-  // 3. Pots
-  if (left > 0) {
-    for (const g of coverOrder(goals)) {
-      if (left <= 0) break;
-      if (protectionReason(g, meta, trips, now)) continue;
-      const bal = Math.max(0, g.assigned_amount || 0);
-      if (bal <= 0) continue;
-      const take = round2(Math.min(left, bal));
-      steps.push({ source: 'pot', goalId: g.id, name: g.name, amount: take });
-      left = round2(left - take);
-    }
-  }
-
-  // 4. Leftover stays as debt (on top of the capped next-week deduction)
+  // 3. Leftover stays as debt (dedicated savings pots are never drained automatically)
   return { steps, nextWeekDeduction, leftoverDebt: Math.max(0, left) };
 }
 

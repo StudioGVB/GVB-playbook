@@ -374,59 +374,99 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
     undoTimerRef.current = setTimeout(() => setLastChange(null), 5000);
   }, [updateTransaction, categories]);
 
+  const [openPoolPopoverTxId, setOpenPoolPopoverTxId] = useState<string | null>(null);
+  const assigningTxRef = useRef<Set<string>>(new Set());
+
   const handlePoolAssign = useCallback(async (txId: string, goalId: string | null) => {
+    if (assigningTxRef.current.has(txId)) return;
     const tx = finance.transactions.find(t => t.id === txId);
     if (!tx) return;
-    const txAmount = Math.abs(tx.amount);
 
-    const prevGoalId = (tx as any).goal_id as string | null;
-    if (prevGoalId) {
-      const prevGoal = goals.find(g => g.id === prevGoalId);
-      if (prevGoal) {
-        await finance.updateGoal(prevGoalId, {
-          assigned_amount: (prevGoal.assigned_amount || 0) + txAmount,
-        } as any);
-      }
+    const prevGoalId = ((tx as any).goal_id as string | null) || null;
+    if (prevGoalId === goalId) {
+      setOpenPoolPopoverTxId(null);
+      return;
     }
 
-    let targetCategoryId: string | null = null;
+    assigningTxRef.current.add(txId);
+    setOpenPoolPopoverTxId(null);
 
-    if (goalId) {
-      const newGoal = goals.find(g => g.id === goalId);
-      if (newGoal) {
-        await finance.updateGoal(goalId, {
-          assigned_amount: Math.max(0, (newGoal.assigned_amount || 0) - txAmount),
-        } as any);
+    try {
+      const txAmountBase = Math.abs(baseAmt(tx));
+      const toGoalNative = (amtBase: number, currency?: string | null) => {
+        const oneInBase = finance.convertToBase(1, currency || baseCurrency) || 1;
+        return Math.round((amtBase / oneInBase) * 100) / 100;
+      };
 
-        const goalName = newGoal.name;
-        const existingCat = categories.find(
-          c => c.name.trim().toLowerCase() === goalName.trim().toLowerCase()
-        );
+      if (prevGoalId) {
+        const prevGoal = goals.find(g => g.id === prevGoalId);
+        if (prevGoal) {
+          const refundNative = toGoalNative(txAmountBase, prevGoal.currency);
+          await finance.updateGoal(prevGoalId, {
+            assigned_amount: Math.round(((prevGoal.assigned_amount || 0) + refundNative) * 100) / 100,
+          } as any);
+        }
+      }
 
-        if (existingCat) {
-          targetCategoryId = existingCat.id;
-        } else {
-          const newCat = await addCategory({
-            name: goalName,
-            type: 'variable',
-            color: newGoal.color || undefined,
-          });
-          if (newCat) {
-            targetCategoryId = newCat.id;
+      let targetCategoryId: string | null = null;
+
+      if (goalId) {
+        const newGoal = goals.find(g => g.id === goalId);
+        if (newGoal) {
+          const deductNative = toGoalNative(txAmountBase, newGoal.currency);
+          const priorGoalTxs = finance.transactions.filter(
+            t => t.id !== txId && (t as any).goal_id === goalId && t.amount < 0
+          );
+          const priorSpentBase = priorGoalTxs.reduce((s, t) => s + Math.abs(baseAmt(t)), 0);
+          const priorSpentNative = toGoalNative(priorSpentBase, newGoal.currency);
+          const currentAssigned = newGoal.assigned_amount || 0;
+          const targetNative = newGoal.target_amount || 0;
+
+          // If the pool has a target (e.g. £150) but assigned_amount was left at 0 when spending from it,
+          // deduct from (target_amount - priorSpent) so the remaining balance is (150 - spent) instead of 0.
+          const effectiveBeforeThisTx =
+            currentAssigned <= 0 && targetNative > priorSpentNative
+              ? Math.max(0, targetNative - priorSpentNative)
+              : currentAssigned;
+
+          const nextAssigned = Math.max(0, Math.round((effectiveBeforeThisTx - deductNative) * 100) / 100);
+
+          await finance.updateGoal(goalId, {
+            assigned_amount: nextAssigned,
+          } as any);
+
+          const goalName = newGoal.name;
+          const existingCat = categories.find(
+            c => c.name.trim().toLowerCase() === goalName.trim().toLowerCase()
+          );
+
+          if (existingCat) {
+            targetCategoryId = existingCat.id;
+          } else {
+            const newCat = await addCategory({
+              name: goalName,
+              type: 'variable',
+              color: newGoal.color || undefined,
+            });
+            if (newCat) {
+              targetCategoryId = newCat.id;
+            }
           }
         }
       }
-    }
 
-    const updates: any = { goal_id: goalId };
-    if (targetCategoryId) {
-      updates.category_id = targetCategoryId;
-    }
+      const updates: any = { goal_id: goalId };
+      if (targetCategoryId) {
+        updates.category_id = targetCategoryId;
+      }
 
-    updateTransaction(txId, updates);
-    const goalName = goalId ? goals.find(g => g.id === goalId)?.name : null;
-    toast(goalName ? `Assigned to pool: ${goalName}` : 'Removed from pool');
-  }, [updateTransaction, goals, finance, categories, addCategory]);
+      await updateTransaction(txId, updates);
+      const goalName = goalId ? goals.find(g => g.id === goalId)?.name : null;
+      toast(goalName ? `Assigned to pool: ${goalName}` : 'Removed from pool');
+    } finally {
+      assigningTxRef.current.delete(txId);
+    }
+  }, [updateTransaction, goals, finance, categories, addCategory, baseCurrency]);
 
   const handleFixedExpenseAssign = useCallback((txId: string, expenseId: string | null) => {
     if (expenseId) {
@@ -956,7 +996,7 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                         <div className="w-32 sm:w-36 flex items-center justify-end gap-1.5 shrink-0">
                           {/* Pool assignment / refund flag */}
                           {tx.amount < 0 && goals.length > 0 ? (
-                            <Popover>
+                            <Popover open={openPoolPopoverTxId === tx.id} onOpenChange={open => setOpenPoolPopoverTxId(open ? tx.id : null)}>
                               <PopoverTrigger asChild>
                                 <button
                                   className={`p-1 rounded shrink-0 transition-colors ${assignedGoal ? 'text-primary' : 'text-slate-300 hover:text-slate-600'}`}

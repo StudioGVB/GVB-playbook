@@ -18,12 +18,13 @@ import {
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Plus, ShoppingCart, Target, Wallet, Lock, ArrowRightLeft, Trash2, Palette, Plane, Car, Home, GraduationCap, Heart, Gift, Laptop, Baby, PiggyBank, Briefcase, UtensilsCrossed, Dumbbell, Music, Gamepad2, BookOpen, Sparkles, Pencil, AlertCircle, RotateCcw, AlertTriangle, ChevronRight, HelpCircle, CheckCircle2, Milestone, ArrowUpRight, Check, Shield, type LucideIcon } from 'lucide-react';
+import { Plus, ShoppingCart, Target, Wallet, Lock, ArrowRightLeft, Trash2, Palette, Plane, Car, Home, GraduationCap, Heart, Gift, Laptop, Baby, PiggyBank, Briefcase, UtensilsCrossed, Dumbbell, Music, Gamepad2, BookOpen, Sparkles, Pencil, AlertCircle, RotateCcw, AlertTriangle, ChevronRight, HelpCircle, CheckCircle2, Milestone, ArrowUpRight, Check, Shield, Receipt, type LucideIcon } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import MonthlyPotPlanner from '@/components/finance/MonthlyPotPlanner';
 import FinanceBalanceSheet from '@/pages/FinanceBalanceSheet';
 import WeeklyPoolSavingsCard from '@/components/finance/WeeklyPoolSavingsCard';
+import PotLinkedExpensesDialog from '@/components/finance/PotLinkedExpensesDialog';
 import { format, startOfMonth, endOfMonth, parseISO, isSameMonth, startOfWeek, addWeeks } from 'date-fns';
 import { detectPaycheck, calculatePaycheckWaterfall, isPaycheckProcessed, markPaycheckProcessed, unmarkPaycheckProcessed, savePaycheckAllocationMeta, getPaycheckAllocationMeta } from '@/lib/paycheckEngine';
 import { baseAmt, parseUkDate } from '@/lib/financeUtils';
@@ -138,6 +139,7 @@ export default function FinancePoolsPage() {
   }, [trips, finance.transactions]);
 
   // Create pool dialog
+  const [selectedGoalForExpenses, setSelectedGoalForExpenses] = useState<FinanceGoal | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState('');
   const [newDescription, setNewDescription] = useState('');
@@ -647,9 +649,12 @@ export default function FinancePoolsPage() {
 
     finance.goals.forEach(g => {
       if ((g as any).is_emergency || g.name.toLowerCase().includes('emergency')) return;
+      const isStash = isSystemStashGoal(g);
+      const isSavings = isSystemSavingsGoal(g);
+      const extraLabel = isStash ? ' (Fixed Stash)' : isSavings ? ' (Fixed Savings)' : '';
       opts.push({
         id: g.id,
-        label: g.name,
+        label: `${g.name}${extraLabel}`,
         available: finance.convertToBase(g.assigned_amount || 0, g.currency),
         cap: finance.convertToBase(g.target_amount, g.currency),
       });
@@ -1687,6 +1692,13 @@ export default function FinancePoolsPage() {
                   </div>
                   <div className="flex items-center gap-0.5 flex-shrink-0">
                     <Button
+                      variant="ghost" size="icon" className="h-8 w-8 rounded-lg text-slate-400 hover:text-[#FF2EB8] hover:bg-pink-50 transition-colors"
+                      onClick={() => setSelectedGoalForExpenses(goal)}
+                      title="View logged expenses & activity for this pot"
+                    >
+                      <Receipt className="w-3.5 h-3.5" />
+                    </Button>
+                    <Button
                       variant="ghost" size="icon" className="h-8 w-8 rounded-lg text-slate-400 hover:text-slate-950 hover:bg-slate-50 transition-colors"
                       onClick={() => openEditDialog(goal)}
                       title="Edit pool"
@@ -2367,8 +2379,27 @@ export default function FinancePoolsPage() {
           <DialogHeader><DialogTitle>Edit Pool</DialogTitle></DialogHeader>
           <div className="space-y-4 pt-2">
             <div className="space-y-2">
-              <Label>Pool Name</Label>
-              <Input value={editName} onChange={e => setEditName(e.target.value)} />
+              <div className="flex items-center justify-between">
+                <Label>Pool Name</Label>
+                {isEditingProtected && (
+                  <span className="text-[11px] font-semibold text-slate-500 flex items-center gap-1 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
+                    <Lock className="w-3 h-3 text-slate-500" /> Fixed System Pot
+                  </span>
+                )}
+              </div>
+              <Input
+                value={editName}
+                onChange={e => setEditName(e.target.value)}
+                disabled={isEditingProtected}
+                className={isEditingProtected ? 'bg-slate-100 text-slate-600 font-semibold cursor-not-allowed select-none' : ''}
+              />
+              {isEditingProtected && (
+                <p className="text-[11px] text-muted-foreground">
+                  {isSystemStashGoal(editingGoal)
+                    ? 'Savings Stash is your permanent fixed pot for weekly budget surpluses and overspend coverage.'
+                    : 'Savings is your permanent fixed pot for 10% income savings.'}
+                </p>
+              )}
             </div>
             <div className="space-y-2">
               <Label>Description / Purpose (Optional)</Label>
@@ -2424,13 +2455,6 @@ export default function FinancePoolsPage() {
                   />
                 ))}
               </div>
-            </div>
-            <div className="flex items-center justify-between">
-              <div>
-                <Label>Savings Stash</Label>
-                <p className="text-xs text-muted-foreground">Leftover budget accumulates here</p>
-              </div>
-              <Switch checked={editIsStash} onCheckedChange={setEditIsStash} />
             </div>
             {editDeadline && parseFloat(editTarget) > 0 && (
               <FeasibilityAlert
@@ -2654,6 +2678,20 @@ export default function FinancePoolsPage() {
           }
           toast.success(`Target goal updated to ${months} months!`);
         }}
+      />
+
+      {/* Linked Expenses Dialog */}
+      <PotLinkedExpensesDialog
+        open={!!selectedGoalForExpenses}
+        onOpenChange={(open) => !open && setSelectedGoalForExpenses(null)}
+        goal={selectedGoalForExpenses}
+        transactions={finance.transactions}
+        trips={trips}
+        categories={finance.categories}
+        accounts={finance.accounts}
+        boosts={boosts}
+        baseCurrency={baseCurrency}
+        initialTimeRange="all"
       />
       </div>
     </ErrorBoundary>

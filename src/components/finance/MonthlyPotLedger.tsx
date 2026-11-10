@@ -13,9 +13,10 @@ import {
 import {
   Lock, CheckCircle2, ShoppingCart, PartyPopper,
   PiggyBank, ArrowDownRight, ArrowUpRight, ChevronDown,
-  ChevronUp, Calendar, Info, Layers, Sparkles
+  ChevronUp, Calendar, Info, Layers, Sparkles, Receipt
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import PotLinkedExpensesDialog from './PotLinkedExpensesDialog';
 
 export interface MonthlyPotLedgerProps {
   selectedMonth: Date;
@@ -118,6 +119,7 @@ export default function MonthlyPotLedger({
   const isPastMonth = isBefore(startOfMonth(selectedMonth), startOfMonth(now));
 
   const [expandedPotId, setExpandedPotId] = useState<string | null>(null);
+  const [selectedPotForExpenses, setSelectedPotForExpenses] = useState<PotRowData | null>(null);
   const [showFixedDetails, setShowFixedDetails] = useState(false);
   const [showVariableDetails, setShowVariableDetails] = useState(false);
 
@@ -676,11 +678,28 @@ export default function MonthlyPotLedger({
                               <div className="flex items-center gap-2.5">
                                 <span className="text-base shrink-0">{pot.emoji}</span>
                                 <div>
-                                  <div className="flex items-center gap-1.5">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
                                     <span className="font-bold text-slate-900">{pot.name}</span>
                                     {pot.isCompleted && (
                                       <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0 inline" />
                                     )}
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setSelectedPotForExpenses(pot);
+                                      }}
+                                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 hover:bg-pink-100 text-slate-600 hover:text-[#FF2EB8] transition-colors border border-slate-200/70"
+                                      title={`View logged expenses & activity for ${pot.name}`}
+                                    >
+                                      <Receipt className="w-3 h-3 text-slate-500" />
+                                      <span>Expenses</span>
+                                      {pot.activityTransactions.length > 0 && (
+                                        <span className="bg-white px-1 py-0 rounded text-[9px] text-[#FF2EB8] font-black border border-pink-200">
+                                          {pot.activityTransactions.length}
+                                        </span>
+                                      )}
+                                    </button>
                                   </div>
                                   <div className="flex items-center gap-1.5 text-[10px] text-slate-500 mt-0.5">
                                     <span>{pot.badge}</span>
@@ -813,6 +832,26 @@ export default function MonthlyPotLedger({
           </div>
         </CardContent>
       </Card>
+
+      {/* Linked Expenses Dialog */}
+      <PotLinkedExpensesDialog
+        open={!!selectedPotForExpenses}
+        onOpenChange={(open) => !open && setSelectedPotForExpenses(null)}
+        goal={selectedPotForExpenses ? {
+          id: selectedPotForExpenses.id,
+          name: selectedPotForExpenses.name,
+          color: selectedPotForExpenses.accentColor,
+          target_amount: selectedPotForExpenses.targetBase,
+          assigned_amount: selectedPotForExpenses.endBalance,
+        } : null}
+        transactions={transactions}
+        trips={trips}
+        accounts={accounts}
+        boosts={boosts}
+        baseCurrency={baseCurrency}
+        selectedMonth={selectedMonth}
+        initialTimeRange="month"
+      />
     </div>
   );
 }

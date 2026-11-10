@@ -889,6 +889,12 @@ export function useFinanceDataState() {
   };
 
   const deleteGoal = async (id: string) => {
+    const existing = goals.find(g => g.id === id);
+    if (existing && ((existing as any).is_stash || /stash/i.test(existing.name) || /^(savings|core savings)$/i.test(existing.name.trim()))) {
+      console.warn('[deleteGoal] Blocked deletion of permanent system goal:', existing.name);
+      toast.error('Savings and Savings Stash are permanent core pots and cannot be deleted');
+      return;
+    }
     const { error } = await supabase.from('finance_goals').delete().eq('id', id);
     if (error) { toast.error('Delete failed'); return; }
     fetchAll();

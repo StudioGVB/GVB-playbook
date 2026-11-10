@@ -214,7 +214,7 @@ export function calculatePaycheckWaterfall(
       const weeksLeft = Math.max(1, daysLeft / 7);
       monthlyTarget = Math.min(remainingNeeded, (remainingNeeded / weeksLeft) * 4.33);
     } else if (g.percent_allocation && g.percent_allocation > 0) {
-      monthlyTarget = Math.min(remainingNeeded, (g.percent_allocation / 100) * 500); // default baseline target
+      monthlyTarget = Math.min(remainingNeeded, (g.percent_allocation / 100) * paycheckAmount);
     } else {
       monthlyTarget = Math.min(remainingNeeded, 100);
     }
