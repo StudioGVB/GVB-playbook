@@ -72,7 +72,7 @@ const POOL_COLORS = [
   '#ffaded', '#6b7280',
 ];
 import { formatCurrency } from '@/lib/financeUtils';
-import { useFinanceData } from '@/hooks/useFinanceData';
+import { useFinanceData, type FinanceGoal } from '@/hooks/useFinanceData';
 import { useFinanceAssumptions } from '@/hooks/useFinanceAssumptions';
 import { useFixedExpenses } from '@/hooks/useFixedExpenses';
 import { useWeekTypes } from '@/hooks/useWeekTypes';
@@ -121,7 +121,7 @@ export default function FinancePoolsPage() {
   const finance = useFinanceData();
   const { assumptions, loading: assumptionsLoading, update: updateAssumptions } = useFinanceAssumptions();
   const { expenses: fixedExpenses, loading: fixedExpensesLoading, monthlyTotalInternal: fixedMonthlyTotal, monthlyTotal: fixedMonthlyTotalAll } = useFixedExpenses();
-  const { totalBoostThisWeek, addBoostBatch, loading: boostsLoading } = useWeeklyBoosts();
+  const { boosts, totalBoostThisWeek, addBoostBatch, loading: boostsLoading } = useWeeklyBoosts();
   const { weekTypeMap, loading: weekTypesLoading } = useWeekTypes();
   const { trips, loading: tripsLoading } = useFinanceTrips();
   const allDataReady = !finance.loading && !assumptionsLoading && !fixedExpensesLoading && !boostsLoading && !weekTypesLoading && !tripsLoading;
@@ -382,7 +382,7 @@ export default function FinancePoolsPage() {
       }
 
       if (hasChanges) {
-        await finance.fetchAll();
+        await finance.refetch();
       }
     };
 
@@ -429,7 +429,6 @@ export default function FinancePoolsPage() {
       wtMap,
       trips,
       new Date(),
-      4,
     ) || (essentialVariable / 4.33 + weeklyFromRemainder * 0.65);
     const thisWeekSpent = computeWeekVariableSpend(
       finance.transactions,
@@ -647,7 +646,7 @@ export default function FinancePoolsPage() {
 
   const baseOtherGoalTotal = useMemo(() => {
     return finance.goals
-      .filter(g => !(g as any).is_emergency && !g.name.toLowerCase().includes('emergency'))
+      .filter(g => !(g as any).is_emergency && !g.name.toLowerCase().includes('emergency') && !isSystemSavingsGoal(g))
       .reduce((s, g) => s + finance.convertToBase(g.assigned_amount || 0, g.currency), 0);
   }, [finance.goals, finance.convertToBase]);
 
@@ -664,9 +663,8 @@ export default function FinancePoolsPage() {
   const emergencyShortfallAmt = Math.max(0, emergencyFloor - currentEmergencyFunded);
   const isEmergencyFull = emergencyShortfallAmt <= 0.01;
 
-  // Any remaining cash in bank accounts above [Specific Goal Pots + Living Reserve + Emergency Floor]
-  // automatically sits inside the core Savings pot so there is no unallocated surplus bucket
-  // and Living & Monthly Budget is never artificially inflated.
+  // Core Savings pot is 100% dynamic: all real cash in your bank accounts after reserving
+  // Specific Goal Pots, this month's Living Budget, and your Emergency Floor.
   const extraSavingsCash = Math.max(0, unassignedCash - livingPoolReserved - currentEmergencyFunded);
   const livingPoolCash = livingPoolReserved;
   const unallocatedSurplusCash = 0;
@@ -676,7 +674,7 @@ export default function FinancePoolsPage() {
       .filter(g => !(g as any).is_emergency && !g.name.toLowerCase().includes('emergency'))
       .map(g => {
         const baseAmtVal = finance.convertToBase(g.assigned_amount || 0, g.currency);
-        const totalAmtVal = isSystemSavingsGoal(g) ? baseAmtVal + extraSavingsCash : baseAmtVal;
+        const totalAmtVal = isSystemSavingsGoal(g) ? extraSavingsCash : baseAmtVal;
         return {
           label: g.name,
           amount: totalAmtVal,
@@ -767,12 +765,12 @@ export default function FinancePoolsPage() {
       if ((g as any).is_emergency || g.name.toLowerCase().includes('emergency')) return;
       const isStash = isSystemStashGoal(g);
       const isSavings = isSystemSavingsGoal(g);
-      const extraLabel = isStash ? ' (Fixed Stash)' : isSavings ? ' (Fixed Savings)' : '';
+      const extraLabel = isStash ? ' (Fixed Stash)' : isSavings ? ' (Dynamic Savings)' : '';
       const baseAvailable = finance.convertToBase(g.assigned_amount || 0, g.currency);
       opts.push({
         id: g.id,
         label: `${g.name}${extraLabel}`,
-        available: isSavings ? baseAvailable + extraSavingsCash : baseAvailable,
+        available: isSavings ? extraSavingsCash : baseAvailable,
         cap: finance.convertToBase(g.target_amount, g.currency),
       });
     });
@@ -1718,7 +1716,7 @@ export default function FinancePoolsPage() {
           const isCoreSavings = isSystemSavingsGoal(goal);
           const oneInBase = finance.convertToBase(1, goal.currency) || 1;
           const extraSavingsNative = isCoreSavings ? (extraSavingsCash / oneInBase) : 0;
-          const rawAssigned = (goal.assigned_amount || 0) + extraSavingsNative;
+          const rawAssigned = isCoreSavings ? extraSavingsNative : (goal.assigned_amount || 0);
           const tripInfo = goalTripSpent.get(goal.id);
           const tripSpent = tripInfo?.spent || 0;
           const directSpentInfo = goalDirectSpent.get(goal.id);
@@ -1810,7 +1808,7 @@ export default function FinancePoolsPage() {
                         {tripInfo && <Badge variant="outline" className="text-[9px] px-1.5 py-0 border-sky-200 text-sky-600 bg-sky-50">Trip</Badge>}
                         {isHit && <Badge variant="outline" className="text-[9px] px-1.5 py-0 border-emerald-300 text-emerald-800 bg-emerald-100 font-bold">✓ {directSpentNative > 0 ? 'Funded' : 'Goal Hit!'}</Badge>}
                         {isSystemStashGoal(goal) && <Badge variant="secondary" className="text-[9px] px-1.5 py-0 bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold">Fixed Stash</Badge>}
-                        {isSystemSavingsGoal(goal) && <Badge variant="secondary" className="text-[9px] px-1.5 py-0 bg-indigo-50 text-indigo-700 border border-indigo-200 font-semibold">Fixed Savings</Badge>}
+                        {isSystemSavingsGoal(goal) && <Badge variant="secondary" className="text-[9px] px-1.5 py-0 bg-indigo-50 text-indigo-700 border border-indigo-200 font-semibold">Dynamic (Live Bank Cash)</Badge>}
                         {cardFeasibility && cardFeasibility.isFeasible && cardFeasibility.requiredMonthlyPace > 0 && !isHit && (
                           <Badge
                             variant="outline"
@@ -1842,16 +1840,18 @@ export default function FinancePoolsPage() {
                         const isStashGoal = isSystemStashGoal(goal);
                         const isSavingsGoal = isSystemSavingsGoal(goal);
                         const rawDesc = (goal.description || '').trim();
-                        const visibleDescription = rawDesc.startsWith('{')
+                        const visibleDescription = isSavingsGoal
+                          ? 'Live bank cash after Living Budget, Emergency Fund & Goal Pots'
+                          : rawDesc.startsWith('{')
                           ? (() => {
                               try {
                                 const parsed = JSON.parse(rawDesc);
-                                return parsed?.user_description || (isStashGoal ? 'Surplus buffer & overspend absorber' : isSavingsGoal ? '10% income core savings' : '');
+                                return parsed?.user_description || (isStashGoal ? 'Surplus buffer & overspend absorber' : '');
                               } catch {
-                                return isStashGoal ? 'Surplus buffer & overspend absorber' : isSavingsGoal ? '10% income core savings' : '';
+                                return isStashGoal ? 'Surplus buffer & overspend absorber' : '';
                               }
                             })()
-                          : (rawDesc || (isStashGoal ? 'Surplus buffer & overspend absorber' : isSavingsGoal ? '10% income core savings' : ''));
+                          : (rawDesc || (isStashGoal ? 'Surplus buffer & overspend absorber' : ''));
                         return visibleDescription ? (
                           <p className="text-[11px] text-slate-500 font-normal mt-0.5 line-clamp-2 leading-tight">
                             {visibleDescription}
