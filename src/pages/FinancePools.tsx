@@ -79,6 +79,7 @@ import { useWeekTypes } from '@/hooks/useWeekTypes';
 import { useFinanceTrips } from '@/hooks/useFinanceTrips';
 import { computePolicySnapshot, computeTripSpent, computeTypicalWeeklyVariableSpend, computeWeekVariableSpend, evaluateMidMonthPotFeasibility } from '@/lib/policyEngine';
 import ErrorBoundary from '@/components/ErrorBoundary';
+import { supabase } from '@/integrations/supabase/client';
 
 type PoolId = string; // goal id or virtual id
 const UNALLOCATED = '__unallocated__';
@@ -126,6 +127,16 @@ export default function FinancePoolsPage() {
   const allDataReady = !finance.loading && !assumptionsLoading && !fixedExpensesLoading && !boostsLoading && !weekTypesLoading && !tripsLoading;
   const [searchParams] = useSearchParams();
   const initialTab = searchParams.get('tab') || 'pools';
+
+  const [loadingTimedOut, setLoadingTimedOut] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setLoadingTimedOut(true);
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const isPageLoading = !allDataReady && finance.goals.length === 0 && !loadingTimedOut;
 
   // Map goal_id → trip spent (for goals linked to a trip)
   const goalTripSpent = useMemo(() => {
@@ -234,7 +245,7 @@ export default function FinancePoolsPage() {
   // Auto-consolidate and guarantee fixed permanent system pots (Savings Stash & Savings)
   const systemPotsInitializedRef = useRef(false);
   useEffect(() => {
-    if (finance.loading || systemPotsInitializedRef.current) return;
+    if (finance.loading || !finance.hasLoadedOnce || systemPotsInitializedRef.current) return;
 
     const runInitSystemPots = async () => {
       systemPotsInitializedRef.current = true;
@@ -315,15 +326,20 @@ export default function FinancePoolsPage() {
     };
 
     runInitSystemPots();
-  }, [finance.goals, finance.loading, baseCurrency]);
+  }, [finance.goals, finance.loading, finance.hasLoadedOnce, baseCurrency]);
 
   // Auto-reconcile spending pools (e.g. Office Set Up) where expenses were assigned (e.g. £28 + £90 = £118)
   // against a funded target (e.g. £150), but assigned_amount was wiped to 0
   const reconciledPoolsRef = useRef<Set<string>>(new Set());
+  const reconcileRanRef = useRef(false);
+
   useEffect(() => {
-    if (!allDataReady) return;
+    if (!allDataReady || reconcileRanRef.current || finance.loading || !finance.hasLoadedOnce) return;
 
     const runReconcile = async () => {
+      reconcileRanRef.current = true;
+      let hasChanges = false;
+
       for (const g of finance.goals) {
         if (isProtectedSystemGoal(g) || goalTripSpent.has(g.id)) continue;
         const spentInfo = goalDirectSpent.get(g.id);
@@ -335,28 +351,46 @@ export default function FinancePoolsPage() {
         const reconcileKey = `${g.id}_${spentInfo.spentNative}_${targetNative}`;
 
         if (reconciledPoolsRef.current.has(reconcileKey)) continue;
+        reconciledPoolsRef.current.add(reconcileKey);
 
         // Link any category-matched transactions that were missing goal_id
-        for (const txId of spentInfo.unlinkedTxIds) {
-          await finance.updateTransaction(txId, { goal_id: g.id } as any);
+        if (spentInfo.unlinkedTxIds.length > 0) {
+          try {
+            await supabase
+              .from('finance_transactions')
+              .update({ goal_id: g.id })
+              .in('id', spentInfo.unlinkedTxIds);
+            hasChanges = true;
+          } catch (err) {
+            console.error('Failed to link transactions to goal', err);
+          }
         }
 
         // If the pool has expenses < target (e.g. £118 spent out of £150 = £32 left) but assigned_amount is 0, restore it
         const manualZero = localStorage.getItem(`gvb_pool_manual_zero_${g.id}`) === 'true';
         if (assignedNative <= 0 && expectedRemaining > 0 && !manualZero) {
-          reconciledPoolsRef.current.add(reconcileKey);
-          await finance.updateGoal(g.id, { assigned_amount: expectedRemaining } as any);
-        } else if (spentInfo.unlinkedTxIds.length > 0) {
-          reconciledPoolsRef.current.add(reconcileKey);
+          try {
+            await supabase
+              .from('finance_goals')
+              .update({ assigned_amount: expectedRemaining })
+              .eq('id', g.id);
+            hasChanges = true;
+          } catch (err) {
+            console.error('Failed to restore goal assigned amount', err);
+          }
         }
+      }
+
+      if (hasChanges) {
+        await finance.fetchAll();
       }
     };
 
     runReconcile();
-  }, [allDataReady, finance.goals, goalDirectSpent, goalTripSpent]);
+  }, [allDataReady, finance.loading, finance.hasLoadedOnce, finance.goals, goalDirectSpent, goalTripSpent]);
 
   const snapshot = useMemo(() => {
-    if (!assumptions || !allDataReady) return null;
+    if (!assumptions) return null;
     const now = new Date();
     const poolRefDate = now.getDate() >= 24
       ? new Date(now.getFullYear(), now.getMonth() + 1, 15)
@@ -366,7 +400,7 @@ export default function FinancePoolsPage() {
       finance.goals, finance.convertToBase, fixedMonthlyTotal, undefined, wtMap, trips, fixedMonthlyTotalAll,
       poolRefDate,
     );
-  }, [assumptions, allDataReady, finance.accounts, finance.transactions, finance.categories, finance.goals, finance.convertToBase, fixedMonthlyTotal, fixedMonthlyTotalAll, wtMap, trips]);
+  }, [assumptions, finance.accounts, finance.transactions, finance.categories, finance.goals, finance.convertToBase, fixedMonthlyTotal, fixedMonthlyTotalAll, wtMap, trips]);
 
   const totalCash = snapshot?.totalLiquidCash ?? 0;
   const weeksUntilIncome = snapshot?.weeksUntilIncome ?? 0;
@@ -1244,7 +1278,7 @@ export default function FinancePoolsPage() {
     }
   };
 
-  if (!allDataReady) {
+  if (isPageLoading) {
     return (
       <div className="space-y-6 w-full font-body">
         <h1 className="text-2xl sm:text-4xl font-display font-bold text-slate-900 tracking-tight">Money Pools</h1>

@@ -48,7 +48,10 @@ export function useWeekTypesState() {
   const [loading, setLoading] = useState(true);
 
   const fetchAll = useCallback(async () => {
-    if (!user) return;
+    if (!user) {
+      setLoading(false);
+      return;
+    }
     const [wtRes, tripRes] = await Promise.all([
       supabase.from('finance_week_types' as any).select('*').eq('user_id', user.id).order('week_start', { ascending: false }),
       supabase.from('finance_trips' as any).select('id, name, start_date, end_date').eq('user_id', user.id),
