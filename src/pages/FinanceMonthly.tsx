@@ -22,7 +22,7 @@ import { useFixedExpenses, FREQ_TO_MONTHLY } from '@/hooks/useFixedExpenses';
 import { useWeeklyBoosts } from '@/hooks/useWeeklyBoosts';
 import { useFinanceTrips } from '@/hooks/useFinanceTrips';
 import { useWeekTypes } from '@/hooks/useWeekTypes';
-import { computePolicySnapshot, computeRequiredGoalSavingsMonthly } from '@/lib/policyEngine';
+import { computePolicySnapshot, computeRequiredGoalSavingsMonthly, isInternalTransferTx } from '@/lib/policyEngine';
 import { formatCurrency, baseAmt, parseUkDate, getEffectiveTxMonthDate } from '@/lib/financeUtils';
 import { deduplicateTransactions } from '@/lib/deduplication';
 import MonthlyCashFlowBreakdown from '@/components/finance/MonthlyCashFlowBreakdown';
@@ -242,6 +242,7 @@ export default function FinanceMonthly() {
       }
       if (tx.amount >= 0 || tx.is_transfer) continue;
       if (tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') continue;
+      if (isInternalTransferTx(tx)) continue;
       if ((tx as any).goal_id || (tx as any).is_travel_spend || (tx as any).trip_id) continue;
       if (cat?.exclude_from_reports) continue;
 
@@ -287,7 +288,9 @@ export default function FinanceMonthly() {
 
     for (const tx of monthTxns) {
       if (tx.amount >= 0 || tx.is_transfer) continue;
-      if ((tx as any).goal_id) continue;
+      if (tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') continue;
+      if (isInternalTransferTx(tx)) continue;
+      if ((tx as any).goal_id || (tx as any).is_travel_spend || (tx as any).trip_id) continue;
       if (isFixedTx(tx)) continue;
       const cat = catMap.get(tx.category_id || '');
       if (cat?.exclude_from_reports || cat?.type === 'income' || cat?.type === 'transfer') continue;

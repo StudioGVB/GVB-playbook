@@ -133,20 +133,29 @@ export interface ActualSpendingIncome {
   streams: IncomeStreamBreakdownItem[];
 }
 
-function isInternalTransferTx(tx: FinanceTransaction): boolean {
-  const text = `${tx.merchant || ''} ${tx.description || ''} ${(tx as any).raw?.message || ''}`.toLowerCase();
+export function isInternalTransferTx(tx: FinanceTransaction): boolean {
+  const text = `${tx.merchant || ''} ${tx.description || ''} ${(tx as any).raw?.message || ''}`.toLowerCase().trim();
+  const detailsType = String((tx as any).raw?.detailsType || '').toUpperCase();
   if (text.includes('batchbase') || text.includes('batch base')) return false;
   if (text.includes('venture') || text.includes('advisory')) return false;
   if (text.includes('gabriella') && tx.amount > 0 && !(tx as any).transfer_group_id) return false;
 
   if (tx.is_transfer) return true;
   if (tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') return true;
+  if (detailsType === 'INTERBALANCE' || detailsType === 'CONVERSION' || detailsType === 'BALANCE_DEPOSIT') return true;
 
   return (
     text.includes('transfer from savings') ||
     text.includes('transfer to savings') ||
     text.includes('savings transfer') ||
-    text.includes('internal transfer')
+    text.includes('internal transfer') ||
+    (text.includes('gabriella') && tx.amount < 0) ||
+    /^pot_[0-9a-z]+/i.test((tx.description || '').trim()) ||
+    /^(to|from) (gbp|aud|eur|usd|nzd|cad)\b/i.test((tx.description || '').trim()) ||
+    text.startsWith('round up') ||
+    text.startsWith('cover from ') ||
+    text.startsWith('cover to ') ||
+    text.startsWith('forward to ')
   );
 }
 
@@ -1207,6 +1216,7 @@ function computeRollingWeeklySpend(
   trips: FinanceTrip[] = [],
 ): number {
   const weeklyTotals: number[] = [];
+  const { cleaned: dedupedTxs } = deduplicateTransactions(txs);
 
   for (let w = 1; w <= weeksBack; w++) {
     const ws = startOfWeek(subWeeks(currentWeekStart, w), { weekStartsOn: 1 });
@@ -1223,14 +1233,15 @@ function computeRollingWeeklySpend(
     if (overlapsTrip) continue;
 
     let weekTotal = 0;
-    for (const tx of txs) {
+    for (const tx of dedupedTxs) {
       if (tx.amount >= 0) continue;
       if (tx.is_transfer || tx.is_reimbursable || tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') continue;
+      if (isInternalTransferTx(tx)) continue;
       if ((tx as any).goal_id) continue;
       if ((tx as any).is_travel_spend || (tx as any).trip_id) continue;
       const cat = categories.find(c => c.id === tx.category_id);
       if (cat?.exclude_from_reports) continue;
-      if (cat?.type === 'transfer') continue;
+      if (cat?.type === 'transfer' || cat?.type === 'income') continue;
       const d = parseUkDate(tx.posted_at);
       if (isExcludedSpendDate(d)) continue;
       if (isInAnyTrip(d, trips)) continue;

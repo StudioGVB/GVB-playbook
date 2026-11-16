@@ -12,7 +12,7 @@ import { Table, LayoutGrid } from 'lucide-react';
 import FinanceSpreadsheetTab from '@/components/finance/FinanceSpreadsheetTab';
 import MonthlyCashFlowBreakdown from '@/components/finance/MonthlyCashFlowBreakdown';
 import { calcTakeHome } from '@/lib/ukTakeHome';
-import { computePolicySnapshot, computeRequiredGoalSavingsMonthly } from '@/lib/policyEngine';
+import { computePolicySnapshot, computeRequiredGoalSavingsMonthly, isInternalTransferTx } from '@/lib/policyEngine';
 import { useFinanceAssumptions } from '@/hooks/useFinanceAssumptions';
 import { useFinanceTrips } from '@/hooks/useFinanceTrips';
 
@@ -93,7 +93,8 @@ export default function FinanceBalanceSheet() {
 
       if (tx.is_transfer && !isIncomeCategory && !isIncomeKeyword) continue;
       if ((tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') && !isIncomeCategory && !isIncomeKeyword) continue;
-      if ((tx as any).goal_id) continue;
+      if (isInternalTransferTx(tx) && !isIncomeCategory && !isIncomeKeyword) continue;
+      if ((tx as any).goal_id || (tx as any).is_travel_spend || (tx as any).trip_id) continue;
       if (cat?.exclude_from_reports) continue;
 
       const amt = baseAmt(tx);
@@ -109,6 +110,7 @@ export default function FinanceBalanceSheet() {
           income += amt;
         }
       } else {
+        if (tx.is_reimbursable || cat?.type === 'transfer' || cat?.type === 'income') continue;
         const abs = Math.abs(amt);
         const isFixed = Boolean((tx as any).fixed_expense_id || tx.is_fixed || cat?.type === 'fixed');
         if (isFixed) {

@@ -492,10 +492,40 @@ export function useFinanceDataState() {
 
             const rawDetailsType = String(t.raw?.detailsType || '').toUpperCase();
             const isWiseAccount = acc?.provider === 'wise' || (acc?.account_name || '').toLowerCase().includes('wise');
+            const txCat = t.category_id ? (catRes.data || []).find((c: any) => c.id === t.category_id) : undefined;
+            const isIncomeCat = txCat?.type === 'income';
             const isKiriIncoming = fullDesc.includes('kiri') && !desc.startsWith('to kiri') && !desc.startsWith('sent to kiri');
+
+            // Auto-flag Wise internal currency conversions / balance moves as transfers so they never deduct from weekly budget
+            const isWiseInternalConversion =
+              isWiseAccount &&
+              !t.is_transfer &&
+              (rawDetailsType === 'INTERBALANCE' ||
+                rawDetailsType === 'CONVERSION' ||
+                rawDetailsType === 'BALANCE_DEPOSIT' ||
+                /^(to|from) (gbp|aud|eur|usd|nzd|cad)\b/i.test(desc.trim()) ||
+                desc.startsWith('converted ') ||
+                desc.startsWith('moved to ') ||
+                desc.startsWith('moved from '));
+
+            if (isWiseInternalConversion) {
+              supabase.from('finance_transactions').update({
+                is_transfer: true,
+                transfer_status: 'auto_confirmed',
+              }).eq('id', t.id).then(() => {}, console.error);
+              return {
+                ...t,
+                is_transfer: true,
+                transfer_status: 'auto_confirmed',
+                currency: txCurrency,
+                base_amount: toBase(numAmt, txCurrency),
+              };
+            }
+
             const isWiseCreditMisflaggedAsDebit =
               numAmt < 0 &&
-              (isKiriIncoming ||
+              (isIncomeCat ||
+                isKiriIncoming ||
                 (isWiseAccount && (
                   desc.startsWith('from ') ||
                   desc.startsWith('received ') ||
@@ -510,14 +540,18 @@ export function useFinanceDataState() {
 
             if (isWiseCreditMisflaggedAsDebit) {
               const correctedAmt = Math.abs(numAmt);
+              const genericIncome = (catRes.data || []).find((c: any) => c.type === 'income' && c.name.trim().toLowerCase() === 'income');
+              const nextCatId = t.category_id || (genericIncome ? genericIncome.id : null);
               supabase.from('finance_transactions').update({
                 amount: correctedAmt,
+                ...(nextCatId && !t.category_id ? { category_id: nextCatId } : {}),
               }).eq('id', t.id).then(() => {
-                console.log(`[self-healing] Flipped Wise incoming payment "${t.description || t.merchant}" from ${numAmt} to +${correctedAmt}`);
+                console.log(`[self-healing] Flipped incoming payment "${t.description || t.merchant}" from ${numAmt} to +${correctedAmt}`);
               }, console.error);
               return {
                 ...t,
                 amount: correctedAmt,
+                category_id: nextCatId,
                 currency: txCurrency,
                 base_amount: toBase(correctedAmt, txCurrency),
               };

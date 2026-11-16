@@ -77,7 +77,7 @@ import { useFinanceAssumptions } from '@/hooks/useFinanceAssumptions';
 import { useFixedExpenses } from '@/hooks/useFixedExpenses';
 import { useWeekTypes } from '@/hooks/useWeekTypes';
 import { useFinanceTrips } from '@/hooks/useFinanceTrips';
-import { computePolicySnapshot, computeTripSpent, computeTypicalWeeklyVariableSpend, computeWeekVariableSpend, evaluateMidMonthPotFeasibility } from '@/lib/policyEngine';
+import { computePolicySnapshot, computeTripSpent, computeTypicalWeeklyVariableSpend, computeWeekVariableSpend, evaluateMidMonthPotFeasibility, isInternalTransferTx } from '@/lib/policyEngine';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -480,15 +480,16 @@ export default function FinancePoolsPage() {
     let variableSpent = 0;
 
     for (const tx of finance.transactions) {
-      if (tx.amount >= 0 || tx.is_transfer) continue;
+      if (tx.amount >= 0 || tx.is_transfer || tx.is_reimbursable) continue;
       if (tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') continue;
+      if (isInternalTransferTx(tx)) continue;
       if ((tx as any).goal_id || (tx as any).is_travel_spend || (tx as any).trip_id) continue;
 
       const d = parseUkDate(tx.posted_at);
       if (d < curStart || d > curEnd) continue;
 
       const cat = finance.categories.find(c => c.id === tx.category_id);
-      if (cat?.exclude_from_reports) continue;
+      if (cat?.exclude_from_reports || cat?.type === 'income' || cat?.type === 'transfer') continue;
 
       const amt = Math.abs(baseAmt(tx));
       const rawText = `${tx.merchant || ''} ${tx.description || ''} ${cat?.name || ''}`.toLowerCase();
@@ -501,8 +502,11 @@ export default function FinancePoolsPage() {
         rawText.includes('landlord') ||
         rawText.includes('tenancy') ||
         fixedExpenses.some(e => {
-          const eName = (e.name || '').toLowerCase();
-          return eName && (rawText.includes(eName) || eName.includes(rawText));
+          const eName = (e.name || '').toLowerCase().trim();
+          if (!eName || eName.length < 3) return false;
+          const feAmt = finance.convertToBase(e.amount, e.currency);
+          const amountClose = Math.abs(amt - feAmt) <= Math.max(2, feAmt * 0.1);
+          return amountClose && rawText.includes(eName);
         })
       );
 
@@ -514,7 +518,7 @@ export default function FinancePoolsPage() {
     }
 
     return { fixedPaidSoFar: fixedPaid, variableSpentSoFar: variableSpent };
-  }, [finance.transactions, finance.categories, fixedExpenses]);
+  }, [finance.transactions, finance.categories, fixedExpenses, finance.convertToBase]);
 
   const remainingFixedBills = Math.max(0, effectiveFixedMonthly - fixedPaidSoFar);
   const remainingVariableLiving = Math.max(0, (essentialVariable + monthlyFunAllowance) - variableSpentSoFar);
