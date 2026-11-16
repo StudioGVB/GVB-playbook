@@ -538,6 +538,26 @@ export function useFinanceDataState() {
                   rawDetailsType.includes('PAYIN')
                 )));
 
+            if (isKiriIncoming && (numAmt < 0 || !t.is_refund || txCat?.type === 'income')) {
+              const correctedAmt = Math.abs(numAmt);
+              const clearIncomeCat = txCat?.type === 'income' ? null : t.category_id;
+              supabase.from('finance_transactions').update({
+                amount: correctedAmt,
+                is_refund: true,
+                category_id: clearIncomeCat,
+              } as any).eq('id', t.id).then(() => {
+                console.log(`[self-healing] Marked Kiri payment "${t.description || t.merchant}" as +${correctedAmt} refund/payback`);
+              }, console.error);
+              return {
+                ...t,
+                amount: correctedAmt,
+                is_refund: true,
+                category_id: clearIncomeCat,
+                currency: txCurrency,
+                base_amount: toBase(correctedAmt, txCurrency),
+              };
+            }
+
             if (isWiseCreditMisflaggedAsDebit) {
               const correctedAmt = Math.abs(numAmt);
               const genericIncome = (catRes.data || []).find((c: any) => c.type === 'income' && c.name.trim().toLowerCase() === 'income');

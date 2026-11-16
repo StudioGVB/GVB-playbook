@@ -254,7 +254,7 @@ export function FinanceDashboard() {
     const { cleaned: dedupedTxs } = deduplicateTransactions(finance.transactions);
 
     for (const tx of dedupedTxs) {
-      if (tx.is_reimbursable || tx.amount >= 0 || tx.is_transfer) continue;
+      if (tx.is_reimbursable || tx.is_transfer) continue;
       if (tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') continue;
       if (isInternalTransferTx(tx)) continue;
       if ((tx as any).goal_id || (tx as any).is_travel_spend || (tx as any).trip_id) continue;
@@ -265,6 +265,16 @@ export function FinanceDashboard() {
       if (cat?.exclude_from_reports || cat?.type === 'income' || cat?.type === 'transfer') continue;
 
       const amt = Math.abs(baseAmt(tx));
+      if ((tx as any).is_refund && tx.amount > 0) {
+        if (essentialCatIds.has(tx.category_id || '')) {
+          essential = Math.max(0, essential - amt);
+        } else {
+          fun = Math.max(0, fun - amt);
+        }
+        continue;
+      }
+      if (tx.amount >= 0) continue;
+
       if (isFixedTx(tx)) {
         fixed += amt;
       } else if (essentialCatIds.has(tx.category_id || '')) {

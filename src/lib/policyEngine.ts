@@ -1119,7 +1119,22 @@ export function computeWeekVariableSpend(
     const catId = tx.category_id || '__uncategorised';
     const cat = catMap.get(catId);
     if (cat?.exclude_from_reports) continue;
-    if (cat?.type === 'transfer' || cat?.type === 'fixed' || cat?.type === 'income') continue;
+
+    const rawTxText = `${tx.description || ''} ${tx.merchant || ''}`.toLowerCase().trim();
+    const isKiriOrPeerPayback =
+      !isInternalTransferTx(tx) &&
+      !rawTxText.includes('gamma') &&
+      !rawTxText.includes('batchbase') &&
+      !rawTxText.includes('batch base') &&
+      !rawTxText.includes('venture') &&
+      !rawTxText.includes('advisory') &&
+      !rawTxText.includes('salary') &&
+      !rawTxText.includes('payroll') &&
+      ((rawTxText.includes('kiri') && !rawTxText.startsWith('to kiri') && !rawTxText.startsWith('sent to kiri')) ||
+        rawTxText.startsWith('from kiri') ||
+        rawTxText.includes('received money from kiri'));
+
+    if (!isKiriOrPeerPayback && (cat?.type === 'transfer' || cat?.type === 'fixed' || cat?.type === 'income')) continue;
 
     const d = parseUkDate(tx.posted_at);
     if (d < ws || d > we) continue;
@@ -1129,7 +1144,7 @@ export function computeWeekVariableSpend(
     const dayIdx = Math.min(6, Math.max(0, differenceInCalendarDays(d, ws)));
     const amt = Math.abs(baseAmt(tx));
 
-    if ((tx as any).is_refund && tx.amount > 0) {
+    if (((tx as any).is_refund && tx.amount > 0) || isKiriOrPeerPayback) {
       if (isEssential) {
         essentialSpent -= amt;
         daily[dayIdx].essential = Math.max(0, daily[dayIdx].essential - amt);
@@ -1143,12 +1158,7 @@ export function computeWeekVariableSpend(
     }
 
     if (tx.amount >= 0) continue;
-    const rawTxText = `${tx.description || ''} ${tx.merchant || ''}`.toLowerCase().trim();
-    if (
-      (rawTxText.includes('kiri') && !rawTxText.startsWith('to kiri') && !rawTxText.startsWith('sent to kiri')) ||
-      rawTxText.startsWith('from ') ||
-      rawTxText.startsWith('received ')
-    ) {
+    if (rawTxText.startsWith('from ') || rawTxText.startsWith('received ')) {
       continue;
     }
 
