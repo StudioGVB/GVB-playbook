@@ -498,9 +498,7 @@ export default function FinancePoolsPage() {
         (tx as any).fixed_expense_id ||
         tx.is_fixed ||
         cat?.type === 'fixed' ||
-        rawText.includes('rent') ||
-        rawText.includes('landlord') ||
-        rawText.includes('tenancy') ||
+        (amt >= 100 && /\b(rent|landlord|tenancy|accommodation)\b/i.test(rawText)) ||
         fixedExpenses.some(e => {
           const eName = (e.name || '').toLowerCase().trim();
           if (!eName || eName.length < 3) return false;

@@ -9,7 +9,7 @@ import { useFixedExpensePayments } from '@/hooks/useFixedExpensePayments';
 import { useWeeklyBoosts } from '@/hooks/useWeeklyBoosts';
 import { useWeekTypes } from '@/hooks/useWeekTypes';
 import { useFinanceTrips } from '@/hooks/useFinanceTrips';
-import { computePolicySnapshot, computeActualSpendingIncome, computeWeekVariableSpend, computeTypicalWeeklyVariableSpend, evaluateMidMonthPotFeasibility } from '@/lib/policyEngine';
+import { computePolicySnapshot, computeActualSpendingIncome, computeWeekVariableSpend, computeTypicalWeeklyVariableSpend, evaluateMidMonthPotFeasibility, isInternalTransferTx } from '@/lib/policyEngine';
 import { deduplicateTransactions } from '@/lib/deduplication';
 import { parseCoverMeta, planOverspendCover, planUnderspendRepay, type CoverMeta, type CoverStep } from '@/lib/overspendCover';
 import { formatCurrency, baseAmt, parseUkDate } from '@/lib/financeUtils';
@@ -354,7 +354,7 @@ export default function FinanceBudget() {
     const thisWeekKey = format(todayWeekStart, 'yyyy-MM-dd');
     const prevWeekStart = startOfWeek(subDays(todayWeekStart, 1), { weekStartsOn: 1 });
     const prevWeekKey = format(prevWeekStart, 'yyyy-MM-dd');
-    const SETTLE_VERSION = 14;
+    const SETTLE_VERSION = 15;
 
     const prevWeekSpend = computeWeekVariableSpend(dedupedTransactions, finance.categories, prevWeekStart, trips);
     const prevEssentialSpent = prevWeekSpend.essentialSpent;
@@ -636,6 +636,7 @@ export default function FinanceBudget() {
     const spendTxns = transactions.filter(tx => {
       if (tx.amount >= 0 || tx.is_transfer || tx.is_reimbursable) return false;
       if (tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') return false;
+      if (isInternalTransferTx(tx)) return false;
       if ((tx as any).goal_id || (tx as any).is_travel_spend || (tx as any).trip_id) return false;
       const d = parseUkDate(tx.posted_at);
       if (d < cutoff || d > weekEnd) return false;

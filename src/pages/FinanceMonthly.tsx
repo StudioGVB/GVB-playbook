@@ -175,8 +175,8 @@ export default function FinanceMonthly() {
     const amt = Math.abs(baseAmt(tx));
     const desc = `${tx.merchant || ''} ${tx.description || ''} ${cat?.name || ''}`.toLowerCase();
 
-    // Explicit rent check (e.g. rent, flat, landlord, accommodation, tenancy)
-    if (desc.includes('rent') || desc.includes('flat') || desc.includes('landlord') || desc.includes('accommodation') || desc.includes('tenancy')) {
+    // Explicit rent check (require word boundary and amt >= 100 so "flat white", "parent", "sorrento" etc. are never misclassified)
+    if (amt >= 100 && /\b(rent|landlord|accommodation|tenancy)\b/i.test(desc)) {
       return true;
     }
 
@@ -360,22 +360,34 @@ export default function FinanceMonthly() {
   // Previous month totals for comparison
   const prevTotals = useMemo(() => {
     let essential = 0, fun = 0, fixed = 0, income = 0;
+    let gammaSalaryCounted = false;
     const catTotals = new Map<string, number>();
     for (const tx of prevMonthTxns) {
       const cat = catMap.get(tx.category_id || '');
       const rawText = `${tx.merchant || ''} ${tx.description || ''}`.toLowerCase();
+      const catNameLower = (cat?.name || '').toLowerCase();
       const isIncomeCategory = cat?.type === 'income';
-      const isGabriellaIncome = rawText.includes('gabriella') && tx.amount > 0 && !tx.transfer_group_id;
+      const isGabriellaIncome = rawText.includes('gabriella') && tx.amount > 0 && !tx.transfer_group_id && !tx.is_transfer;
       const isIncomeKeyword = rawText.includes('batchbase') || rawText.includes('batch base') || rawText.includes('payroll') || rawText.includes('salary') || rawText.includes('venture') || rawText.includes('etsy') || isGabriellaIncome;
       if (tx.amount > 0 && (!tx.is_transfer || isIncomeCategory || isIncomeKeyword)) {
         if (!tx.is_reimbursable && (cat?.type !== 'transfer' || isIncomeKeyword)) {
-          income += baseAmt(tx);
+          const txAmt = baseAmt(tx);
+          const isMonthlyGammaSalary =
+            txAmt >= 1000 &&
+            (rawText.includes('gamma') || rawText.includes('salary') || catNameLower.includes('gamma') || catNameLower.includes('salary'));
+          if (isMonthlyGammaSalary) {
+            if (gammaSalaryCounted) continue;
+            gammaSalaryCounted = true;
+          }
+          income += txAmt;
           continue;
         }
       }
 
       if (tx.amount >= 0 || tx.is_transfer) continue;
-      if ((tx as any).goal_id) continue;
+      if (tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') continue;
+      if (isInternalTransferTx(tx)) continue;
+      if ((tx as any).goal_id || (tx as any).is_travel_spend || (tx as any).trip_id) continue;
       if (cat?.exclude_from_reports) continue;
       const amt = Math.abs(baseAmt(tx));
       if (isFixedTx(tx)) {
@@ -440,14 +452,16 @@ export default function FinanceMonthly() {
       let fun = 0;
       let fixed = 0;
       let income = 0;
+      let gammaSalaryCounted = false;
 
-      for (const tx of finance.transactions) {
+      for (const tx of dedupedAllTxns) {
         if (tx.is_reimbursable) continue;
-        const d = parseUkDate(tx.posted_at);
+        const d = getEffectiveTxMonthDateLocal(tx);
         if (d < mStart || d > mEnd) continue;
 
         const cat = catMap.get(tx.category_id || '');
         const rawText = `${tx.merchant || ''} ${tx.description || ''}`.toLowerCase();
+        const catNameLower = (cat?.name || '').toLowerCase();
         const isIncomeCategory = cat?.type === 'income';
         const isGabriellaIncome = rawText.includes('gabriella') && tx.amount > 0 && !tx.transfer_group_id && !tx.is_transfer;
         const isIncomeKeyword =
@@ -461,13 +475,23 @@ export default function FinanceMonthly() {
 
         if (tx.amount > 0 && (!tx.is_transfer || isIncomeCategory || isIncomeKeyword)) {
           if (cat?.type !== 'transfer' || isIncomeKeyword) {
-            income += baseAmt(tx);
+            const txAmt = baseAmt(tx);
+            const isMonthlyGammaSalary =
+              txAmt >= 1000 &&
+              (rawText.includes('gamma') || rawText.includes('salary') || catNameLower.includes('gamma') || catNameLower.includes('salary'));
+            if (isMonthlyGammaSalary) {
+              if (gammaSalaryCounted) continue;
+              gammaSalaryCounted = true;
+            }
+            income += txAmt;
             continue;
           }
         }
 
         if (tx.amount >= 0 || tx.is_transfer) continue;
-        if ((tx as any).goal_id) continue;
+        if (tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') continue;
+        if (isInternalTransferTx(tx)) continue;
+        if ((tx as any).goal_id || (tx as any).is_travel_spend || (tx as any).trip_id) continue;
         if (cat?.exclude_from_reports) continue;
 
         const amt = Math.abs(baseAmt(tx));
@@ -726,7 +750,9 @@ export default function FinanceMonthly() {
 
       const dayTxns = monthTxns.filter(tx => {
         if (tx.amount >= 0 || tx.is_transfer || tx.is_reimbursable) return false;
-        if ((tx as any).goal_id || isFixedTx(tx)) return false;
+        if (tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') return false;
+        if (isInternalTransferTx(tx)) return false;
+        if ((tx as any).goal_id || (tx as any).is_travel_spend || (tx as any).trip_id || isFixedTx(tx)) return false;
         const cat = catMap.get(tx.category_id || '');
         if (cat?.exclude_from_reports || cat?.type === 'income' || cat?.type === 'transfer') return false;
         const txDate = parseUkDate(tx.posted_at);
@@ -853,7 +879,9 @@ export default function FinanceMonthly() {
     const targetStr = format(selectedMonthlyDayDate, 'yyyy-MM-dd');
     return monthTxns.filter(tx => {
       if (tx.amount >= 0 || tx.is_transfer || tx.is_reimbursable) return false;
-      if ((tx as any).goal_id || isFixedTx(tx)) return false;
+      if (tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') return false;
+      if (isInternalTransferTx(tx)) return false;
+      if ((tx as any).goal_id || (tx as any).is_travel_spend || (tx as any).trip_id || isFixedTx(tx)) return false;
       const cat = catMap.get(tx.category_id || '');
       if (cat?.exclude_from_reports || cat?.type === 'income' || cat?.type === 'transfer') return false;
       const txUkDateStr = format(parseUkDate(tx.posted_at), 'yyyy-MM-dd');
@@ -928,8 +956,10 @@ export default function FinanceMonthly() {
     if (!selectedCategory) return [] as { name: string; total: number; count: number }[];
     const map = new Map<string, { total: number; count: number }>();
     for (const tx of monthTxns) {
-      if (tx.amount >= 0 || tx.is_transfer) continue;
-      if ((tx as any).goal_id || isFixedTx(tx)) continue;
+      if (tx.amount >= 0 || tx.is_transfer || tx.is_reimbursable) continue;
+      if (tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') continue;
+      if (isInternalTransferTx(tx)) continue;
+      if ((tx as any).goal_id || (tx as any).is_travel_spend || (tx as any).trip_id || isFixedTx(tx)) continue;
       const catId = tx.category_id || '__uncategorised';
       if (catId !== selectedCategory.catId) continue;
       const key = canonicaliseMerchant(tx.merchant || tx.description || '');

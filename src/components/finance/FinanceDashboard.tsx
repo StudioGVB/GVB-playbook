@@ -14,7 +14,7 @@ import { useFixedExpenses } from '@/hooks/useFixedExpenses';
 import { useWeeklyBoosts } from '@/hooks/useWeeklyBoosts';
 import { useWeekTypes } from '@/hooks/useWeekTypes';
 import { useFinanceTrips } from '@/hooks/useFinanceTrips';
-import { computePolicySnapshot, computeWeekVariableSpend } from '@/lib/policyEngine';
+import { computePolicySnapshot, computeWeekVariableSpend, isInternalTransferTx } from '@/lib/policyEngine';
 import { parseCoverMeta } from '@/lib/overspendCover';
 import { deduplicateTransactions } from '@/lib/deduplication';
 import { formatCurrency, baseAmt, parseUkDate } from '@/lib/financeUtils';
@@ -179,8 +179,8 @@ export function FinanceDashboard() {
       const amt = Math.abs(baseAmt(tx));
       const desc = `${tx.merchant || ''} ${tx.description || ''} ${cat?.name || ''}`.toLowerCase();
 
-      // Explicit rent check (e.g. rent, flat, landlord, accommodation, tenancy)
-      if (desc.includes('rent') || desc.includes('flat') || desc.includes('landlord') || desc.includes('accommodation') || desc.includes('tenancy')) {
+      // Explicit rent check (require word boundary and amt >= 100 so "flat white", "parent", "sorrento" etc. are never misclassified)
+      if (amt >= 100 && /\b(rent|landlord|accommodation|tenancy)\b/i.test(desc)) {
         return true;
       }
 
@@ -256,6 +256,7 @@ export function FinanceDashboard() {
     for (const tx of dedupedTxs) {
       if (tx.is_reimbursable || tx.amount >= 0 || tx.is_transfer) continue;
       if (tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') continue;
+      if (isInternalTransferTx(tx)) continue;
       if ((tx as any).goal_id || (tx as any).is_travel_spend || (tx as any).trip_id) continue;
       const d = parseUkDate(tx.posted_at);
       if (d < monthStart || d > monthEnd) continue;
