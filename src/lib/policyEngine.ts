@@ -1114,7 +1114,7 @@ export function computeWeekVariableSpend(
     const d = parseUkDate(tx.posted_at);
     if (d < ws || d > we) return false;
     const raw = `${tx.description || ''} ${tx.merchant || ''} ${JSON.stringify((tx as any).raw || '')}`.toLowerCase();
-    return raw.includes('kiri');
+    return raw.includes('kiri') || raw.includes('smyth');
   });
   let fallback21PaybackApplied = false;
 
@@ -1132,6 +1132,7 @@ export function computeWeekVariableSpend(
 
     const isExplicitKiri =
       rawTxText.includes('kiri') ||
+      rawTxText.includes('smyth') ||
       (tx as any).is_kiri_payback === true;
 
     const isFallback21WisePayback =

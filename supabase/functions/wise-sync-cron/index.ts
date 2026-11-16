@@ -290,7 +290,8 @@ serve(async (req) => {
             titleUpper.includes('CREDIT') ||
             titleUpper.includes('SENT YOU') ||
             titleUpper.includes('PAID YOU') ||
-            (titleUpper.includes('KIRI') && !titleUpper.startsWith('TO ') && !titleUpper.startsWith('SENT ')) ||
+            titleUpper.includes('KIRI') ||
+            titleUpper.includes('SMYTH') ||
             typeStr.includes('MONEY_IN') ||
             typeStr.includes('DEPOSIT') ||
             typeStr.includes('INCOMING') ||

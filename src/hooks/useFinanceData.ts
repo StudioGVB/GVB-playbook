@@ -497,7 +497,9 @@ export function useFinanceDataState() {
             const rawJsonStr = JSON.stringify(t.raw || '').toLowerCase();
             const isKiriIncoming =
               fullDesc.includes('kiri') ||
+              fullDesc.includes('smyth') ||
               rawJsonStr.includes('kiri') ||
+              rawJsonStr.includes('smyth') ||
               (isWiseAccount && Math.abs(Math.abs(toBase(numAmt, txCurrency)) - 21) <= 1.25 && String(t.posted_at || '').startsWith('2026-11'));
 
             // Auto-flag Wise internal currency conversions / balance moves as transfers so they never deduct from weekly budget
@@ -638,7 +640,7 @@ export function useFinanceDataState() {
             if (Math.abs(Math.abs(Number(c.amount)) - Math.abs(numAmt)) > 0.01) return false;
             const creditTime = new Date(c.posted_at).getTime();
             const cText = `${c.description || ''} ${c.merchant || ''}`.toLowerCase();
-            const isNamedIncoming = cText.includes('kiri') || cText.startsWith('from ') || cText.startsWith('received ');
+            const isNamedIncoming = cText.includes('kiri') || cText.includes('smyth') || cText.startsWith('from ') || cText.startsWith('received ');
             return isNamedIncoming && Math.abs(txTime - creditTime) <= 2 * 86400000;
           });
 
