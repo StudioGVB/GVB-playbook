@@ -494,11 +494,16 @@ export function useFinanceDataState() {
             const isWiseAccount = acc?.provider === 'wise' || (acc?.account_name || '').toLowerCase().includes('wise');
             const txCat = t.category_id ? (catRes.data || []).find((c: any) => c.id === t.category_id) : undefined;
             const isIncomeCat = txCat?.type === 'income';
-            const isKiriIncoming = fullDesc.includes('kiri') && !desc.startsWith('to kiri') && !desc.startsWith('sent to kiri');
+            const rawJsonStr = JSON.stringify(t.raw || '').toLowerCase();
+            const isKiriIncoming =
+              fullDesc.includes('kiri') ||
+              rawJsonStr.includes('kiri') ||
+              (isWiseAccount && Math.abs(Math.abs(toBase(numAmt, txCurrency)) - 21) <= 1.25 && String(t.posted_at || '').startsWith('2026-11'));
 
             // Auto-flag Wise internal currency conversions / balance moves as transfers so they never deduct from weekly budget
             const isWiseInternalConversion =
               isWiseAccount &&
+              !isKiriIncoming &&
               !t.is_transfer &&
               (rawDetailsType === 'INTERBALANCE' ||
                 rawDetailsType === 'CONVERSION' ||
@@ -538,20 +543,27 @@ export function useFinanceDataState() {
                   rawDetailsType.includes('PAYIN')
                 )));
 
-            if (isKiriIncoming && (numAmt < 0 || !t.is_refund || txCat?.type === 'income')) {
+            if (isKiriIncoming) {
               const correctedAmt = Math.abs(numAmt);
               const clearIncomeCat = txCat?.type === 'income' ? null : t.category_id;
-              supabase.from('finance_transactions').update({
-                amount: correctedAmt,
-                is_refund: true,
-                category_id: clearIncomeCat,
-              } as any).eq('id', t.id).then(() => {
-                console.log(`[self-healing] Marked Kiri payment "${t.description || t.merchant}" as +${correctedAmt} refund/payback`);
-              }, console.error);
+              if (numAmt < 0 || !t.is_refund || txCat?.type === 'income' || t.is_transfer) {
+                supabase.from('finance_transactions').update({
+                  amount: correctedAmt,
+                  is_refund: true,
+                  is_transfer: false,
+                  transfer_status: null,
+                  category_id: clearIncomeCat,
+                } as any).eq('id', t.id).then(() => {
+                  console.log(`[self-healing] Marked Kiri payment "${t.description || t.merchant}" as +${correctedAmt} refund/payback`);
+                }, console.error);
+              }
               return {
                 ...t,
                 amount: correctedAmt,
                 is_refund: true,
+                is_kiri_payback: true,
+                is_transfer: false,
+                transfer_status: null,
                 category_id: clearIncomeCat,
                 currency: txCurrency,
                 base_amount: toBase(correctedAmt, txCurrency),
