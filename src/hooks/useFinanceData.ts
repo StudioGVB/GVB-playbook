@@ -490,6 +490,39 @@ export function useFinanceDataState() {
               };
             }
 
+            const rawDetailsType = String(t.raw?.detailsType || '').toUpperCase();
+            const isWiseAccount = acc?.provider === 'wise' || (acc?.account_name || '').toLowerCase().includes('wise');
+            const isKiriIncoming = fullDesc.includes('kiri') && !desc.startsWith('to kiri') && !desc.startsWith('sent to kiri');
+            const isWiseCreditMisflaggedAsDebit =
+              numAmt < 0 &&
+              (isKiriIncoming ||
+                (isWiseAccount && (
+                  desc.startsWith('from ') ||
+                  desc.startsWith('received ') ||
+                  desc.includes('money added') ||
+                  desc.includes('sent you') ||
+                  desc.includes('paid you') ||
+                  rawDetailsType.includes('CREDIT') ||
+                  rawDetailsType.includes('DEPOSIT') ||
+                  rawDetailsType.includes('MONEY_IN') ||
+                  rawDetailsType.includes('PAYIN')
+                )));
+
+            if (isWiseCreditMisflaggedAsDebit) {
+              const correctedAmt = Math.abs(numAmt);
+              supabase.from('finance_transactions').update({
+                amount: correctedAmt,
+              }).eq('id', t.id).then(() => {
+                console.log(`[self-healing] Flipped Wise incoming payment "${t.description || t.merchant}" from ${numAmt} to +${correctedAmt}`);
+              }, console.error);
+              return {
+                ...t,
+                amount: correctedAmt,
+                currency: txCurrency,
+                base_amount: toBase(correctedAmt, txCurrency),
+              };
+            }
+
             return {
               ...t,
               currency: txCurrency,

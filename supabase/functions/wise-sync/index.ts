@@ -340,26 +340,35 @@ serve(async (req) => {
 
       const titleRaw = cleanText(item.title || item.description || '')
       const titleUpper = titleRaw.toUpperCase()
-      const rawPrimary = (item.primaryAmount || '').trim()
-      const rawSecondary = (item.secondaryAmount || '').trim()
+      const rawPrimaryHtml = String(item.primaryAmount || '')
+      const rawSecondaryHtml = String(item.secondaryAmount || '')
+      const rawPrimary = cleanText(rawPrimaryHtml)
+      const rawSecondary = cleanText(rawSecondaryHtml)
 
       let isCredit = false
       let isDebit = false
 
       if (
+        rawPrimaryHtml.toLowerCase().includes('<positive>') ||
+        rawSecondaryHtml.toLowerCase().includes('<positive>') ||
         rawPrimary.startsWith('+') ||
         rawSecondary.startsWith('+') ||
+        titleUpper.startsWith('FROM ') ||
         titleUpper.includes('RECEIVED') ||
         titleUpper.includes('ADDED') ||
         titleUpper.includes('DEPOSIT') ||
         titleUpper.includes('INCOMING') ||
         titleUpper.includes('CREDIT') ||
+        titleUpper.includes('SENT YOU') ||
+        titleUpper.includes('PAID YOU') ||
+        (titleUpper.includes('KIRI') && !titleUpper.startsWith('TO ') && !titleUpper.startsWith('SENT ')) ||
         typeStr.includes('MONEY_IN') ||
         typeStr.includes('DEPOSIT') ||
         typeStr.includes('INCOMING') ||
         typeStr.includes('CREDIT') ||
         typeStr.includes('PAYIN') ||
-        (typeof item.amount === 'number' && item.amount > 0)
+        (typeof item.amount === 'number' && item.amount > 0) ||
+        (item.amount?.value !== undefined && parseFloat(item.amount.value) > 0)
       ) {
         isCredit = true
       } else if (
@@ -372,7 +381,8 @@ serve(async (req) => {
         typeStr.includes('MONEY_OUT') ||
         typeStr.includes('CARD_PAYMENT') ||
         typeStr.includes('OUTGOING') ||
-        (typeof item.amount === 'number' && item.amount < 0)
+        (typeof item.amount === 'number' && item.amount < 0) ||
+        (item.amount?.value !== undefined && parseFloat(item.amount.value) < 0)
       ) {
         isDebit = true
       } else {

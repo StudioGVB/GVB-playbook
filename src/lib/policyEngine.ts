@@ -1144,6 +1144,14 @@ export function computeWeekVariableSpend(
     }
 
     if (tx.amount >= 0) continue;
+    const rawTxText = `${tx.description || ''} ${tx.merchant || ''}`.toLowerCase().trim();
+    if (
+      (rawTxText.includes('kiri') && !rawTxText.startsWith('to kiri') && !rawTxText.startsWith('sent to kiri')) ||
+      rawTxText.startsWith('from ') ||
+      rawTxText.startsWith('received ')
+    ) {
+      continue;
+    }
 
     if (isEssential) {
       essentialSpent += amt;
