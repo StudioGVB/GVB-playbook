@@ -316,30 +316,13 @@ export default function FinanceBudget() {
 
   const snapshot = useMemo(() => {
     if (!assumptions || !allDataReady) return null;
-    const computed = computePolicySnapshot(
+    return computePolicySnapshot(
       assumptions, finance.accounts, dedupedTransactions,
       finance.categories, finance.goals, finance.convertToBase,
       fixedExpensesMonthly, boostAmount, typeof wtMap === 'function' ? wtMap() : wtMap, trips, fixedExpensesMonthlyAll,
       referenceDateForEngine
     );
-    if (!isCurrentWeek && selectedDate < today) {
-      const meta = parseCoverMeta(stashGoal?.description);
-      const locked = meta.closed_weeks?.[weekStartKey];
-      if (locked && locked.totalBudget > 0) {
-        const weeklyEssentialBudget = locked.essentialBudget;
-        const baseWeeklyFun = locked.baseFunBudget;
-        const weeklyFunBudget = baseWeeklyFun + boostAmount;
-        return {
-          ...computed,
-          weeklyEssentialBudget,
-          baseWeeklyFun,
-          weeklyFunBudget,
-          baseBudgetBeforeRollover: baseWeeklyFun + boostAmount,
-        };
-      }
-    }
-    return computed;
-  }, [assumptions, allDataReady, finance.accounts, dedupedTransactions, finance.categories, finance.goals, finance.convertToBase, fixedExpensesMonthly, fixedExpensesMonthlyAll, boostAmount, wtMap, trips, referenceDateForEngine, isCurrentWeek, selectedDate, today, stashGoal?.description, weekStartKey]);
+  }, [assumptions, allDataReady, finance.accounts, dedupedTransactions, finance.categories, finance.goals, finance.convertToBase, fixedExpensesMonthly, fixedExpensesMonthlyAll, boostAmount, wtMap, trips, referenceDateForEngine]);
 
   // Emergency Fund Goal: find existing goal marked with is_emergency or named "Emergency"
   const emergencyGoal = useMemo(() => finance.goals.find(g => (g as any).is_emergency === true || g.name.toLowerCase().includes('emergency')), [finance.goals]);
@@ -371,7 +354,7 @@ export default function FinanceBudget() {
     const thisWeekKey = format(todayWeekStart, 'yyyy-MM-dd');
     const prevWeekStart = startOfWeek(subDays(todayWeekStart, 1), { weekStartsOn: 1 });
     const prevWeekKey = format(prevWeekStart, 'yyyy-MM-dd');
-    const SETTLE_VERSION = 13;
+    const SETTLE_VERSION = 14;
 
     const prevWeekSpend = computeWeekVariableSpend(dedupedTransactions, finance.categories, prevWeekStart, trips);
     const prevEssentialSpent = prevWeekSpend.essentialSpent;
@@ -395,7 +378,7 @@ export default function FinanceBudget() {
     );
 
     // Strictly match last week's displayed budget: last week's Essentials + last week's Weekly Fun Budget
-    const totalBudget = prevWeekSnapshot.weeklyEssentialBudget + prevWeekSnapshot.weeklyFunBudget;
+    const totalBudget = prevWeekSnapshot.weeklyEssentialBudget + prevWeekSnapshot.baseWeeklyFun + prevWeekBoost;
     const totalSpent = prevEssentialSpent + prevFunSpent;
     const netDifference = Math.round((totalBudget - totalSpent) * 100) / 100;
 
@@ -577,7 +560,7 @@ export default function FinanceBudget() {
           ...(meta.closed_weeks || {}),
           [prevWeekKey]: {
             essentialBudget: Math.round(prevWeekSnapshot.weeklyEssentialBudget * 100) / 100,
-            baseFunBudget: Math.round((prevWeekSnapshot.weeklyFunBudget - prevWeekBoost) * 100) / 100,
+            baseFunBudget: Math.round(prevWeekSnapshot.baseWeeklyFun * 100) / 100,
             boost: Math.round(prevWeekBoost * 100) / 100,
             totalBudget: Math.round(totalBudget * 100) / 100,
             essentialSpent: Math.round(prevEssentialSpent * 100) / 100,

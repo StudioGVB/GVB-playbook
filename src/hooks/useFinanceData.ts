@@ -541,10 +541,10 @@ export function useFinanceDataState() {
             if (isWiseCreditMisflaggedAsDebit) {
               const correctedAmt = Math.abs(numAmt);
               const genericIncome = (catRes.data || []).find((c: any) => c.type === 'income' && c.name.trim().toLowerCase() === 'income');
-              const nextCatId = t.category_id || (genericIncome ? genericIncome.id : null);
+              const nextCatId = (!t.category_id || txCat?.type !== 'income') && genericIncome ? genericIncome.id : t.category_id;
               supabase.from('finance_transactions').update({
                 amount: correctedAmt,
-                ...(nextCatId && !t.category_id ? { category_id: nextCatId } : {}),
+                ...(nextCatId ? { category_id: nextCatId } : {}),
               }).eq('id', t.id).then(() => {
                 console.log(`[self-healing] Flipped incoming payment "${t.description || t.merchant}" from ${numAmt} to +${correctedAmt}`);
               }, console.error);
@@ -557,12 +557,65 @@ export function useFinanceDataState() {
               };
             }
 
+            // If an expense transaction is categorized under a category whose name matches a Savings Pool (e.g. "Office set up"),
+            // ensure goal_id is populated so it is never counted against the weekly variable budget.
+            let autoGoalId = t.goal_id;
+            if (numAmt < 0 && !autoGoalId && txCat?.name && goalRes.data) {
+              const catNameLower = txCat.name.trim().toLowerCase();
+              const matchedPool = (goalRes.data as any[]).find(
+                g =>
+                  !g.is_stash &&
+                  !g.is_emergency &&
+                  !/stash|emergency/i.test(g.name || '') &&
+                  (g.name || '').trim().toLowerCase() === catNameLower
+              );
+              if (matchedPool) {
+                autoGoalId = matchedPool.id;
+                supabase.from('finance_transactions').update({ goal_id: matchedPool.id }).eq('id', t.id).then(() => {}, console.error);
+              }
+            }
+
             return {
               ...t,
+              goal_id: autoGoalId,
               currency: txCurrency,
               base_amount: toBase(Number(t.amount) || 0, txCurrency),
             };
           });
+
+        // Remove any Wise shadow debit row (from /v1/transfers where sender name is omitted) that matches
+        // the exact same account, date (within 1 day), and absolute amount of a positive incoming Wise credit (e.g. Kiri).
+        const wisePositiveCredits = enriched.filter(t => {
+          const acc = t.account_id ? accountById.get(t.account_id) : undefined;
+          const isWise = acc?.provider === 'wise' || (acc?.account_name || '').toLowerCase().includes('wise');
+          return isWise && Number(t.amount) > 0 && !t.is_transfer;
+        });
+
+        const enrichedWithoutWiseShadowDebits = enriched.filter(t => {
+          const numAmt = Number(t.amount) || 0;
+          if (numAmt >= 0 || t.is_transfer) return true;
+          const acc = t.account_id ? accountById.get(t.account_id) : undefined;
+          const isWise = acc?.provider === 'wise' || (acc?.account_name || '').toLowerCase().includes('wise');
+          if (!isWise) return true;
+          const rawDetailsType = String(t.raw?.detailsType || '').toUpperCase();
+          if (rawDetailsType === 'CARD' || rawDetailsType === 'CARD_PAYMENT') return true;
+
+          const txTime = new Date(t.posted_at).getTime();
+          const hasMatchingCredit = wisePositiveCredits.some(c => {
+            if (c.id === t.id || c.account_id !== t.account_id) return false;
+            if (Math.abs(Math.abs(Number(c.amount)) - Math.abs(numAmt)) > 0.01) return false;
+            const creditTime = new Date(c.posted_at).getTime();
+            const cText = `${c.description || ''} ${c.merchant || ''}`.toLowerCase();
+            const isNamedIncoming = cText.includes('kiri') || cText.startsWith('from ') || cText.startsWith('received ');
+            return isNamedIncoming && Math.abs(txTime - creditTime) <= 2 * 86400000;
+          });
+
+          if (hasMatchingCredit) {
+            mirrorDeleteIds.push(t.id);
+            return false;
+          }
+          return true;
+        });
 
         // Clean up duplicates using canonical deduplication engine:
         // Handles Amazon orders, weekend-to-Monday settlements (Habibi, Tesco, TfGM, Lidl, Greggs, Primark, etc.),
@@ -572,7 +625,7 @@ export function useFinanceDataState() {
           duplicatesToDelete,
           categoryTransfers,
           externalIdTransfers,
-        } = deduplicateTransactions(enriched);
+        } = deduplicateTransactions(enrichedWithoutWiseShadowDebits);
 
         setTransactions(cleanedEnriched as any);
 

@@ -117,14 +117,7 @@ export default function FinanceHistory() {
 
       // Compute budget snapshot as of this specific week (matches Weekly Budget `<` navigation & Home Monday review)
       let effectiveBudget = 0;
-      const stashes = finance.goals.filter(g => (g as any).is_stash === true || g.name.toLowerCase().includes('stash'));
-      const stashGoal = stashes.find(g => g.currency === baseCurrency) || stashes[0];
-      const stashMeta = parseCoverMeta(stashGoal?.description);
-      const lockedWeek = !isCurrentWeek ? stashMeta.closed_weeks?.[key] : undefined;
-
-      if (lockedWeek && lockedWeek.totalBudget > 0) {
-        effectiveBudget = lockedWeek.essentialBudget + lockedWeek.baseFunBudget + weekBoost;
-      } else if (assumptions) {
+      if (assumptions) {
         const weekSnapshot = computePolicySnapshot(
           assumptions,
           finance.accounts,

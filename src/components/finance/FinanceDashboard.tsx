@@ -132,7 +132,7 @@ export function FinanceDashboard() {
     const prevWeekBoost = boosts
       .filter(b => b.week_start === prevWeekKey)
       .reduce((sum, b) => sum + b.amount, 0);
-    const computed = computePolicySnapshot(
+    return computePolicySnapshot(
       assumptions,
       finance.accounts,
       finance.transactions,
@@ -146,23 +146,6 @@ export function FinanceDashboard() {
       fixedExpensesMonthlyAll,
       prevWeekStart
     );
-    const stashes = finance.goals.filter(g => (g as any).is_stash === true || g.name.toLowerCase().includes('stash'));
-    const stashGoal = stashes.find(g => g.currency === baseCurrency) || stashes[0];
-    const stashMeta = parseCoverMeta(stashGoal?.description);
-    const locked = stashMeta.closed_weeks?.[prevWeekKey];
-    if (locked && locked.totalBudget > 0) {
-      const weeklyEssentialBudget = locked.essentialBudget;
-      const baseWeeklyFun = locked.baseFunBudget;
-      const weeklyFunBudget = baseWeeklyFun + prevWeekBoost;
-      return {
-        ...computed,
-        weeklyEssentialBudget,
-        baseWeeklyFun,
-        weeklyFunBudget,
-        baseBudgetBeforeRollover: baseWeeklyFun + prevWeekBoost,
-      };
-    }
-    return computed;
   }, [
     assumptions,
     finance.loading,
@@ -176,7 +159,6 @@ export function FinanceDashboard() {
     boosts,
     wtMap,
     trips,
-    baseCurrency,
   ]);
 
   const catMap = useMemo(
