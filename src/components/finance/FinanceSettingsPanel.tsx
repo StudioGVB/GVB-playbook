@@ -164,14 +164,26 @@ export default function FinanceSettingsPanel({ finance }: Props) {
   const [monzoSyncing, setMonzoSyncing] = useState(false);
   const [monzoStatus, setMonzoStatus] = useState<{ connected: boolean; error?: string } | null>(null);
   const [monzoToken, setMonzoToken] = useState('');
-  const [monzoClientId, setMonzoClientId] = useState(
-    () => safeGetStorage('gvb_monzo_client_id') || atob('b2F1dGgyY2xpZW50XzAwMDBCQUlVTWhyQThqRGdVNllkbXI=')
-  );
-  const [monzoClientSecret, setMonzoClientSecret] = useState(
-    () =>
-      safeGetStorage('gvb_monzo_client_secret') ||
-      atob('bW56Y29uZi5KQTlhdHFqd1VEQ2dPYm5TUzJnVlJIVUZyUFNOUms2Q2RGQXliTTAxZE9mbnhsZXJ1S1hMUXNPN2pwTWIyMkN6YnJmWUJwVCs1dEQrN0NqV0pxdWdNQT09')
-  );
+  const [monzoClientId, setMonzoClientId] = useState(() => {
+    const defaultCid = atob('b2F1dGgyY2xpZW50XzAwMDBCQUlVTWhyQThqRGdVNllkbXI=');
+    const saved = (safeGetStorage('gvb_monzo_client_id') || '').trim();
+    if (!saved || saved === 'oauth2client_0000BAg6n5qTpwiJJM1EbT') {
+      safeSetStorage('gvb_monzo_client_id', defaultCid);
+      return defaultCid;
+    }
+    return saved;
+  });
+  const [monzoClientSecret, setMonzoClientSecret] = useState(() => {
+    const defaultCsec = atob(
+      'bW56Y29uZi5KQTlhdHFqd1VEQ2dPYm5TUzJnVlJIVUZyUFNOUms2Q2RGQXliTTAxZE9mbnhsZXJ1S1hMUXNPN2pwTWIyMkN6YnJmWUJwVCs1dEQrN0NqV0pxdWdNQT09'
+    );
+    const saved = (safeGetStorage('gvb_monzo_client_secret') || '').trim();
+    if (!saved || !saved.startsWith('mnzconf.') || saved.endsWith('WJpugMA==')) {
+      safeSetStorage('gvb_monzo_client_secret', defaultCsec);
+      return defaultCsec;
+    }
+    return saved;
+  });
   const [monzoEmail, setMonzoEmail] = useState(() => safeGetStorage('gvb_monzo_email') || '');
   const [monzoSendingLink, setMonzoSendingLink] = useState(false);
 
@@ -480,101 +492,21 @@ export default function FinanceSettingsPanel({ finance }: Props) {
     }
   };
 
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const code = params.get('code');
-    if (!code || !user) return;
-
-    const cleanUrl = window.location.pathname;
-    window.history.replaceState({}, document.title, cleanUrl);
-
-    (async () => {
-      const toastId = toast.loading('Completing permanent Monzo OAuth connection...');
-      try {
-        const { data: settingsRow } = await supabase
-          .from('finance_settings')
-          .select('bank_tokens')
-          .eq('user_id', user.id)
-          .maybeSingle();
-
-        const storedTokens = (settingsRow as any)?.bank_tokens || (settings as any)?.bank_tokens || {};
-        const defaultCid = atob('b2F1dGgyY2xpZW50XzAwMDBCQUlVTWhyQThqRGdVNllkbXI=');
-        const defaultCsec = atob(
-          'bW56Y29uZi5KQTlhdHFqd1VEQ2dPYm5TUzJnVlJIVUZyUFNOUms2Q2RGQXliTTAxZE9mbnhsZXJ1S1hMUXNPN2pwTWIyMkN6YnJmWUJwVCs1dEQrN0NqV0pxdWdNQT09'
-        );
-        const clientId = (
-          safeGetStorage('gvb_monzo_client_id') ||
-          storedTokens.monzo_client_id ||
-          defaultCid
-        ).trim();
-        const clientSecret = (
-          safeGetStorage('gvb_monzo_client_secret') ||
-          storedTokens.monzo_client_secret ||
-          defaultCsec
-        ).trim();
-        const redirectUri = `${window.location.origin}/finance/settings`;
-
-        const tokenRes = await fetch('https://api.monzo.com/oauth2/token', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: new URLSearchParams({
-            grant_type: 'authorization_code',
-            client_id: clientId,
-            client_secret: clientSecret,
-            redirect_uri: redirectUri,
-            code: code.trim(),
-          }).toString(),
-        });
-
-        if (!tokenRes.ok) {
-          const errText = await tokenRes.text();
-          toast.error(`Monzo OAuth exchange failed: ${errText}`, { id: toastId });
-          return;
-        }
-
-        const tokenData = await tokenRes.json();
-        const accessToken = tokenData.access_token;
-        const refreshToken = tokenData.refresh_token;
-        const expiresIn = tokenData.expires_in || 21600;
-
-        const bankTokens = {
-          ...storedTokens,
-          monzo: accessToken,
-          monzo_refresh: refreshToken,
-          monzo_expires_at: Date.now() + expiresIn * 1000,
-          monzo_client_id: clientId,
-          monzo_client_secret: clientSecret,
-        };
-
-        await supabase
-          .from('finance_settings')
-          .upsert(
-            {
-              user_id: user.id,
-              bank_tokens: bankTokens,
-              updated_at: new Date().toISOString(),
-            } as any,
-            { onConflict: 'user_id' }
-          );
-
-        safeSetStorage('gvb_monzo_access_token', accessToken);
-        await finance.refetch();
-        toast.success(
-          'Permanent Monzo OAuth linked! Open the Monzo app on your phone and tap Approve, then click Verify Connection.',
-          { id: toastId, duration: 12000 }
-        );
-      } catch (err: any) {
-        toast.error(`OAuth callback error: ${err.message}`, { id: toastId });
-      }
-    })();
-  }, [user]);
-
   const handleSendMonzoMagicLink = async () => {
-    const cid = monzoClientId.trim();
-    const csec = monzoClientSecret.trim();
+    const defaultCid = atob('b2F1dGgyY2xpZW50XzAwMDBCQUlVTWhyQThqRGdVNllkbXI=');
+    const defaultCsec = atob(
+      'bW56Y29uZi5KQTlhdHFqd1VEQ2dPYm5TUzJnVlJIVUZyUFNOUms2Q2RGQXliTTAxZE9mbnhsZXJ1S1hMUXNPN2pwTWIyMkN6YnJmWUJwVCs1dEQrN0NqV0pxdWdNQT09'
+    );
+    const rawCid = monzoClientId.trim();
+    const rawCsec = monzoClientSecret.trim();
+    const cid = rawCid && rawCid !== 'oauth2client_0000BAg6n5qTpwiJJM1EbT' ? rawCid : defaultCid;
+    const csec =
+      rawCsec && rawCsec.startsWith('mnzconf.') && !rawCsec.endsWith('WJpugMA==')
+        ? rawCsec
+        : defaultCsec;
     const email = monzoEmail.trim();
     if (!cid || !cid.startsWith('oauth2client_')) {
-      toast.error('Please paste your new Client ID (starts with oauth2client_)');
+      toast.error('Please paste your Client ID (starts with oauth2client_)');
       return;
     }
     if (!csec || !csec.startsWith('mnzconf.')) {
@@ -588,6 +520,8 @@ export default function FinanceSettingsPanel({ finance }: Props) {
 
     setMonzoSendingLink(true);
     try {
+      setMonzoClientId(cid);
+      setMonzoClientSecret(csec);
       safeSetStorage('gvb_monzo_client_id', cid);
       safeSetStorage('gvb_monzo_client_secret', csec);
       safeSetStorage('gvb_monzo_email', email);
@@ -609,7 +543,10 @@ export default function FinanceSettingsPanel({ finance }: Props) {
         );
       }
 
-      const redirectUri = `${window.location.origin}/finance/settings`;
+      const redirectUri =
+        cid === defaultCid
+          ? 'https://gvb-playbook.vercel.app/finance/settings'
+          : `${window.location.origin}/finance/settings`;
       const res = await fetch('https://internal-api.monzo.com/oauth2/authorize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },

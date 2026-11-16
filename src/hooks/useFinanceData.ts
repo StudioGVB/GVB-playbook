@@ -1361,9 +1361,24 @@ export function useFinanceDataState() {
         const defaultCsec = atob(
           'bW56Y29uZi5KQTlhdHFqd1VEQ2dPYm5TUzJnVlJIVUZyUFNOUms2Q2RGQXliTTAxZE9mbnhsZXJ1S1hMUXNPN2pwTWIyMkN6YnJmWUJwVCs1dEQrN0NqV0pxdWdNQT09'
         );
-        const cid = (localStorage.getItem('gvb_monzo_client_id') || defaultCid).trim();
-        const csec = (localStorage.getItem('gvb_monzo_client_secret') || defaultCsec).trim();
-        const redirectUri = `${window.location.origin}${window.location.pathname}`;
+        const rawLocalCid = (localStorage.getItem('gvb_monzo_client_id') || '').trim();
+        const rawLocalCsec = (localStorage.getItem('gvb_monzo_client_secret') || '').trim();
+        const cid =
+          rawLocalCid && rawLocalCid !== 'oauth2client_0000BAg6n5qTpwiJJM1EbT'
+            ? rawLocalCid
+            : defaultCid;
+        const csec =
+          rawLocalCsec &&
+          rawLocalCsec.startsWith('mnzconf.') &&
+          !rawLocalCsec.endsWith('WJpugMA==')
+            ? rawLocalCsec
+            : defaultCsec;
+        localStorage.setItem('gvb_monzo_client_id', cid);
+        localStorage.setItem('gvb_monzo_client_secret', csec);
+        const redirectUri =
+          cid === defaultCid
+            ? 'https://gvb-playbook.vercel.app/finance/settings'
+            : `${window.location.origin}/finance/settings`;
 
         const tokenRes = await fetch('https://api.monzo.com/oauth2/token', {
           method: 'POST',
@@ -1493,8 +1508,16 @@ export function useFinanceDataState() {
         const defaultCsec = atob(
           'bW56Y29uZi5KQTlhdHFqd1VEQ2dPYm5TUzJnVlJIVUZyUFNOUms2Q2RGQXliTTAxZE9mbnhsZXJ1S1hMUXNPN2pwTWIyMkN6YnJmWUJwVCs1dEQrN0NqV0pxdWdNQT09'
         );
-        const clientId = storedBankTokens.monzo_client_id || defaultCid;
-        const clientSecret = storedBankTokens.monzo_client_secret || defaultCsec;
+        const storedCid = (storedBankTokens.monzo_client_id || '').trim();
+        const storedCsec = (storedBankTokens.monzo_client_secret || '').trim();
+        const clientId =
+          storedCid && storedCid !== 'oauth2client_0000BAg6n5qTpwiJJM1EbT'
+            ? storedCid
+            : defaultCid;
+        const clientSecret =
+          storedCsec && storedCsec.startsWith('mnzconf.') && !storedCsec.endsWith('WJpugMA==')
+            ? storedCsec
+            : defaultCsec;
 
         const refreshRes = await fetch('https://api.monzo.com/oauth2/token', {
           method: 'POST',

@@ -533,8 +533,13 @@ export default function FinanceAccounts({ finance }: Props) {
                         onClick={async () => {
                           const { data } = await supabase.auth.getSession();
                           const userId = data.session?.user.id || '';
-                          const clientId = 'oauth2client_0000BAg6n5qTpwiJJM1EbT';
-                          const redirectUri = encodeURIComponent('https://wlaydyjeilhinngtnnbd.supabase.co/functions/v1/monzo-callback');
+                          const clientId = atob('b2F1dGgyY2xpZW50XzAwMDBCQUlVTWhyQThqRGdVNllkbXI=');
+                          const redirectUri = encodeURIComponent('https://gvb-playbook.vercel.app/finance/settings');
+                          localStorage.setItem('gvb_monzo_client_id', clientId);
+                          localStorage.setItem(
+                            'gvb_monzo_client_secret',
+                            atob('bW56Y29uZi5KQTlhdHFqd1VEQ2dPYm5TUzJnVlJIVUZyUFNOUms2Q2RGQXliTTAxZE9mbnhsZXJ1S1hMUXNPN2pwTWIyMkN6YnJmWUJwVCs1dEQrN0NqV0pxdWdNQT09')
+                          );
                           const authUrl = `https://auth.monzo.com/?client_id=${clientId}&redirect_uri=${redirectUri}&response_type=code&state=${userId}`;
                           window.location.href = authUrl;
                         }}
