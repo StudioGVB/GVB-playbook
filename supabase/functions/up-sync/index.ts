@@ -256,7 +256,7 @@ serve(async (req) => {
     const { data: existingTransactions, error: existingTxError } = dbAccountIds.length > 0
       ? await supabase
           .from('finance_transactions')
-          .select('id, account_id, external_transaction_id, transaction_fingerprint, category_id, is_transfer, goal_id, is_fixed, amount, description, merchant, posted_at')
+          .select('id, account_id, external_transaction_id, transaction_fingerprint, category_id, is_transfer, goal_id, is_fixed, amount, description, merchant, posted_at, raw')
           .eq('user_id', userId)
           .in('account_id', dbAccountIds)
           .order('posted_at', { ascending: false })
@@ -311,10 +311,12 @@ serve(async (req) => {
         continue
       }
 
-      // Check for an existing record whose external_transaction_id was previously nulled out,
-      // matching by exact createdAt or settledAt timestamp (within 5 seconds) + same amount + merchant
+      // Check for an existing record whose external_transaction_id was previously nulled out:
+      // 1) Exact createdAt or settledAt timestamp match (within 5 seconds), OR
+      // 2) Legacy NULL-external_id HELD -> SETTLED clearing transition within 4.5 days
       const rawCreated = (row.raw as any)?.createdAt ? new Date((row.raw as any).createdAt).getTime() : new Date(row.posted_at).getTime()
       const rawSettled = (row.raw as any)?.settledAt ? new Date((row.raw as any).settledAt).getTime() : rawCreated
+      const rowStatus = String((row.raw as any)?.status || '').toUpperCase()
 
       const match = (existingTransactions || []).find((existing: any) => {
         if (matchedExistingIds.has(existing.id)) return false
@@ -328,7 +330,14 @@ serve(async (req) => {
         const dExist = new Date(existing.posted_at).getTime()
         const matchesCreated = Math.abs(dExist - rawCreated) <= 5000
         const matchesSettled = Math.abs(dExist - rawSettled) <= 5000
-        if (!matchesCreated && !matchesSettled) return false
+        const existingStatus = String(existing.raw?.status || '').toUpperCase()
+        const diffDays = Math.abs(dExist - rawCreated) / (1000 * 60 * 60 * 24)
+        const isLegacyHeldToSettled =
+          !existing.external_transaction_id &&
+          diffDays <= 4.5 &&
+          (!existingStatus || (existingStatus !== rowStatus))
+
+        if (!matchesCreated && !matchesSettled && !isLegacyHeldToSettled) return false
 
         return areMerchantsMatchEdge(existing.description, existing.merchant, row.description, row.merchant)
       })
