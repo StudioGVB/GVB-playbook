@@ -328,7 +328,14 @@ serve(async (req) => {
 
       const fullText = `${description} ${merchant || ''} ${tx.counterparty?.name || ''}`.toLowerCase()
       const isGammaSalary = rawAmount >= 500 && fullText.includes('gamma')
-      const isOutgoingTransfer = rawAmount < 0 && (tx.category === 'transfers' || fullText.includes('gabriella'))
+      const isJointOrExternal = fullText.includes('joint') || fullText.includes('kiri') || fullText.includes('smyth')
+      const isOutgoingTransfer = rawAmount < 0 && !isJointOrExternal && (
+        fullText.includes('gabriella') ||
+        fullText.includes('wise') ||
+        fullText.includes('up bank') ||
+        fullText.includes('savings') ||
+        /^pot_[0-9a-z]+/i.test(rawDesc.trim())
+      )
 
       return {
         user_id: userId,

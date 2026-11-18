@@ -533,6 +533,7 @@ export function useFinanceDataState() {
 
             const rawDetailsType = String(t.raw?.detailsType || '').toUpperCase();
             const isWiseAccount = acc?.provider === 'wise' || (acc?.account_name || '').toLowerCase().includes('wise');
+            const isMonzoAccount = acc?.provider === 'monzo' || (acc?.account_name || '').toLowerCase().includes('monzo');
             const txCat = t.category_id ? (catRes.data || []).find((c: any) => c.id === t.category_id) : undefined;
             const isIncomeCat = txCat?.type === 'income';
             const rawJsonStr = JSON.stringify(t.raw || '').toLowerCase();
@@ -541,9 +542,98 @@ export function useFinanceDataState() {
               fullDesc.includes('smyth') ||
               rawJsonStr.includes('kiri') ||
               rawJsonStr.includes('smyth');
+
+            // Outgoing transfer from Monzo Personal to the hidden Monzo Joint Account (or £5 Monzo transfer to Joint/Kiri):
+            // Since the Joint Account is excluded from totals, money sent from Monzo Personal to the Joint Account
+            // must be treated as a real outgoing expense (-amount) and deducted from the weekly budget!
+            const isMonzoToJointTransfer =
+              isMonzoAccount &&
+              (fullDesc.includes('joint') ||
+                rawJsonStr.includes('joint') ||
+                (Math.abs(Math.abs(numAmt) - 5) < 0.01 && (hasKiriName || t.is_refund)));
+
+            if (isMonzoToJointTransfer) {
+              const expenseAmt = -Math.abs(numAmt);
+              const cleanJointDesc = desc.startsWith('joint account between user_')
+                ? 'Transfer to Monzo Joint Account'
+                : t.description;
+              const clearIncomeCat = txCat?.type === 'income' || txCat?.type === 'transfer' ? null : t.category_id;
+              if (
+                numAmt > 0 ||
+                t.is_refund ||
+                t.is_transfer ||
+                t.transfer_status ||
+                t.transfer_side ||
+                t.transfer_group_id ||
+                cleanJointDesc !== t.description ||
+                clearIncomeCat !== t.category_id
+              ) {
+                supabase
+                  .from('finance_transactions')
+                  .update({
+                    description: cleanJointDesc,
+                    amount: expenseAmt,
+                    is_refund: false,
+                    is_transfer: false,
+                    transfer_side: null,
+                    transfer_status: null,
+                    transfer_group_id: null,
+                    category_id: clearIncomeCat,
+                  } as any)
+                  .eq('id', t.id)
+                  .then(() => {
+                    console.log(`[self-healing] Restored Monzo Personal -> Joint transfer "${cleanJointDesc}" to ${expenseAmt} expense`);
+                  }, console.error);
+              }
+              return {
+                ...t,
+                description: cleanJointDesc,
+                amount: expenseAmt,
+                is_refund: false,
+                is_kiri_payback: false,
+                is_transfer: false,
+                transfer_side: null,
+                transfer_status: null,
+                transfer_group_id: null,
+                category_id: clearIncomeCat,
+                currency: txCurrency,
+                base_amount: toBase(expenseAmt, txCurrency),
+              };
+            }
+
+            // Un-flag any outgoing Monzo bank transfer to a friend/external person that was previously auto-flagged
+            // as an internal transfer solely because Monzo sets category='transfers' on all P2P bank transfers.
+            const isOwnInternalMonzoTransfer =
+              (fullDesc.includes('gabriella') && !fullDesc.includes('joint') && !hasKiriName) ||
+              fullDesc.includes('wise') ||
+              fullDesc.includes('up bank') ||
+              fullDesc.includes('savings') ||
+              /^pot_[0-9a-z]+/i.test(desc);
+
+            if (isMonzoAccount && numAmt < 0 && t.is_transfer && t.transfer_status === 'auto_confirmed' && !isOwnInternalMonzoTransfer) {
+              supabase
+                .from('finance_transactions')
+                .update({
+                  is_transfer: false,
+                  transfer_side: null,
+                  transfer_status: null,
+                } as any)
+                .eq('id', t.id)
+                .then(() => {}, console.error);
+              return {
+                ...t,
+                is_transfer: false,
+                transfer_side: null,
+                transfer_status: null,
+                currency: txCurrency,
+                base_amount: toBase(numAmt, txCurrency),
+              };
+            }
+
             const isKiriIncoming =
-              (hasKiriName && (numAmt > 0 || (isWiseAccount && !desc.startsWith('to ') && !desc.startsWith('sent to ')))) ||
-              (isWiseAccount && Math.abs(Math.abs(toBase(numAmt, txCurrency)) - 21) <= 1.25 && String(t.posted_at || '').startsWith('2026-11'));
+              !isMonzoToJointTransfer &&
+              ((hasKiriName && (numAmt > 0 || (isWiseAccount && !desc.startsWith('to ') && !desc.startsWith('sent to ')))) ||
+                (isWiseAccount && Math.abs(Math.abs(toBase(numAmt, txCurrency)) - 21) <= 1.25 && String(t.posted_at || '').startsWith('2026-11')));
 
             // Auto-flag Wise internal currency conversions / balance moves as transfers so they never deduct from weekly budget
             const isWiseInternalConversion =
@@ -1817,9 +1907,15 @@ export function useFinanceDataState() {
             ? tx.merchant.name
             : tx.counterparty?.name || null;
         const rawDesc = (tx.description || 'Monzo transaction').trim();
-        const description =
-          /^\d+$/.test(rawDesc) && merchantName ? `${merchantName} (${rawDesc})` : rawDesc;
-        const merchant = merchantName || rawDesc || null;
+        const isToJoint =
+          rawDesc.toLowerCase().includes('joint') ||
+          (merchantName || '').toLowerCase().includes('joint');
+        const description = rawDesc.toLowerCase().startsWith('joint account between user_')
+          ? 'Transfer to Monzo Joint Account'
+          : /^\d+$/.test(rawDesc) && merchantName
+            ? `${merchantName} (${rawDesc})`
+            : rawDesc;
+        const merchant = isToJoint ? 'Monzo Joint Account' : (merchantName || rawDesc || null);
 
         const fingerprint = await computeTxFingerprint({
           user_id: user.id,
@@ -1835,8 +1931,16 @@ export function useFinanceDataState() {
         const fullText = `${description} ${merchant || ''} ${tx.counterparty?.name || ''}`.toLowerCase();
         const isGammaSalary = rawAmount >= 500 && fullText.includes('gamma');
         const isGammaReimb = rawAmount > 0 && rawAmount < 500 && fullText.includes('gamma network');
+        const isJointOrExternalPerson =
+          isToJoint || fullText.includes('joint') || fullText.includes('kiri') || fullText.includes('smyth');
         const isOutgoingTransfer =
-          rawAmount < 0 && (tx.category === 'transfers' || fullText.includes('gabriella'));
+          rawAmount < 0 &&
+          !isJointOrExternalPerson &&
+          (fullText.includes('gabriella') ||
+            fullText.includes('wise') ||
+            fullText.includes('up bank') ||
+            fullText.includes('savings') ||
+            /^pot_[0-9a-z]+/i.test(rawDesc));
 
         const defaultCatId =
           isGammaSalary && gammaCat
@@ -1853,21 +1957,23 @@ export function useFinanceDataState() {
           amount: rawAmount,
           currency: tx.currency || 'GBP',
           category_id: existing?.category_id ?? defaultCatId ?? null,
-          is_transfer: isGammaSalary
-            ? false
-            : existing?.is_transfer !== undefined && existing?.is_transfer !== null
-              ? existing.is_transfer
+          is_refund: rawAmount < 0 ? false : Boolean((existing as any)?.is_refund),
+          is_transfer:
+            isGammaSalary || isJointOrExternalPerson
+              ? false
               : isOutgoingTransfer,
-          transfer_side: isGammaSalary
-            ? null
-            : isOutgoingTransfer
-              ? 'out'
-              : existing?.transfer_side ?? null,
-          transfer_status: isGammaSalary
-            ? null
-            : isOutgoingTransfer
-              ? 'auto_confirmed'
-              : existing?.transfer_status ?? null,
+          transfer_side:
+            isGammaSalary || isJointOrExternalPerson
+              ? null
+              : isOutgoingTransfer
+                ? 'out'
+                : null,
+          transfer_status:
+            isGammaSalary || isJointOrExternalPerson
+              ? null
+              : isOutgoingTransfer
+                ? 'auto_confirmed'
+                : null,
           goal_id: existing?.goal_id ?? null,
           is_fixed: existing?.is_fixed ?? false,
           is_reimbursable: existing?.is_reimbursable ?? isGammaReimb,

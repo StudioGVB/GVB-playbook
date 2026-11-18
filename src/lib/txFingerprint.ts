@@ -42,13 +42,18 @@ export interface FingerprintInput {
   posted_at: string;
   amount: number;
   description: string;
+  external_transaction_id?: string | null;
 }
 
 export async function computeTxFingerprint(tx: FingerprintInput): Promise<string> {
+  const d = new Date(tx.posted_at);
+  const timeKey = tx.external_transaction_id
+    ? `${dateOnly(d)}|${tx.external_transaction_id}`
+    : (!isNaN(d.getTime()) ? d.toISOString() : String(tx.posted_at));
   const input = [
     tx.user_id,
     tx.account_id,
-    dateOnly(tx.posted_at),
+    timeKey,
     tx.amount.toFixed(2),
     normalizeDescription(tx.description),
   ].join('|');

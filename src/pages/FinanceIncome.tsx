@@ -222,10 +222,7 @@ export default function FinanceIncome() {
     let gammaCounted = false;
     return deduped.filter(tx => {
       if (tx.amount <= 0) return false;
-      if (tx.is_reimbursable || (tx as any).is_refund || (tx as any).is_kiri_payback) return false; // Exclude employer reimbursements, refunds, and friend paybacks from earned personal income
-
-      const rawText = `${tx.merchant || ''} ${tx.description || ''}`.toLowerCase();
-      if (rawText.includes('kiri') || rawText.includes('smyth')) return false;
+      if (tx.is_reimbursable) return false; // Exclude employer work payback deposits from earned personal income
 
       // If explicitly assigned to an income category, bypass transfer filter
       const cat = categories.find(c => c.id === tx.category_id);
@@ -236,8 +233,8 @@ export default function FinanceIncome() {
       if (d < monthStart || d > monthEnd) return false;
 
       const amt = baseAmt(tx);
-      const fullText = `${rawText} ${cat?.name || ''}`.toLowerCase();
-      const isSalary = amt >= 1000 && (fullText.includes('gamma') || fullText.includes('salary') || fullText.includes('payroll'));
+      const rawText = `${tx.merchant || ''} ${tx.description || ''} ${cat?.name || ''}`.toLowerCase();
+      const isSalary = amt >= 1000 && (rawText.includes('gamma') || rawText.includes('salary') || rawText.includes('payroll'));
       if (isSalary) {
         if (gammaCounted) return false;
         gammaCounted = true;

@@ -138,6 +138,7 @@ export function isInternalTransferTx(tx: FinanceTransaction): boolean {
   const detailsType = String((tx as any).raw?.detailsType || '').toUpperCase();
   if (text.includes('batchbase') || text.includes('batch base')) return false;
   if (text.includes('venture') || text.includes('advisory')) return false;
+  if (text.includes('joint')) return false;
   if (text.includes('gabriella') && tx.amount > 0 && !(tx as any).transfer_group_id) return false;
 
   if (tx.is_transfer) return true;
@@ -149,7 +150,7 @@ export function isInternalTransferTx(tx: FinanceTransaction): boolean {
     text.includes('transfer to savings') ||
     text.includes('savings transfer') ||
     text.includes('internal transfer') ||
-    (text.includes('gabriella') && tx.amount < 0) ||
+    (text.includes('gabriella') && !text.includes('kiri') && !text.includes('smyth') && tx.amount < 0) ||
     /^pot_[0-9a-z]+/i.test((tx.description || '').trim()) ||
     /^(to|from) (gbp|aud|eur|usd|nzd|cad)\b/i.test((tx.description || '').trim()) ||
     text.startsWith('round up') ||
@@ -1130,10 +1131,13 @@ export function computeWeekVariableSpend(
     const isEssential = essentialCatIds.has(catId);
     const dayIdx = Math.min(6, Math.max(0, differenceInCalendarDays(d, ws)));
 
+    const isToJointAccount = rawTxText.includes('joint');
     const isExplicitKiri =
-      rawTxText.includes('kiri') ||
-      rawTxText.includes('smyth') ||
-      (tx as any).is_kiri_payback === true;
+      !isToJointAccount &&
+      tx.amount > 0 &&
+      (rawTxText.includes('kiri') ||
+        rawTxText.includes('smyth') ||
+        (tx as any).is_kiri_payback === true);
 
     const isFallback21WisePayback =
       !hasExplicitKiriTxInWeek &&
