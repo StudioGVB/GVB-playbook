@@ -268,12 +268,22 @@ export function useFinanceDataState() {
             (a.external_account_id || '').toLowerCase().includes('joint'))
       );
       const duplicateJointIdsToDelete = new Set<string>();
+      const anyJointExcluded = jointAccounts.some(a => Boolean(a.exclude_from_totals));
       if (jointAccounts.length > 1) {
         const sortedJoint = [...jointAccounts].sort((a, b) => {
           if (a.external_account_id && !b.external_account_id) return -1;
           if (!a.external_account_id && b.external_account_id) return 1;
           return String(b.last_synced_at || '').localeCompare(String(a.last_synced_at || ''));
         });
+        // If any of the duplicate rows had exclude_from_totals set by the user, carry that preference onto the primary row
+        if (anyJointExcluded && !sortedJoint[0].exclude_from_totals) {
+          sortedJoint[0].exclude_from_totals = true;
+          supabase
+            .from('finance_accounts')
+            .update({ exclude_from_totals: true })
+            .eq('id', sortedJoint[0].id)
+            .then(() => {}, console.error);
+        }
         for (let i = 1; i < sortedJoint.length; i++) {
           duplicateJointIdsToDelete.add(sortedJoint[i].id);
           supabase.from('finance_accounts').delete().eq('id', sortedJoint[i].id).then(() => {}, console.error);
@@ -284,37 +294,21 @@ export function useFinanceDataState() {
         .filter(acc => !duplicateJointIdsToDelete.has(acc.id))
         .map(acc => {
           const rawName = (acc.account_name || '').trim();
-          const isJointAcc =
-            rawName.toLowerCase().includes('joint') ||
-            rawName.toLowerCase().startsWith('joint account between user_');
-
           if (acc.provider === 'monzo') {
             if (rawName.startsWith('user_0000')) {
               supabase.from('finance_accounts').update({ account_name: 'Monzo Personal' }).eq('id', acc.id).then(() => {}, console.error);
               return { ...acc, account_name: 'Monzo Personal' };
             }
-            if (isJointAcc) {
-              if (rawName !== 'Monzo Joint Account' || !acc.exclude_from_totals) {
-                supabase
-                  .from('finance_accounts')
-                  .update({ account_name: 'Monzo Joint Account', exclude_from_totals: true })
-                  .eq('id', acc.id)
-                  .then(() => {}, console.error);
-              }
-              return { ...acc, account_name: 'Monzo Joint Account', exclude_from_totals: true };
+            if (rawName.toLowerCase().startsWith('joint account between user_')) {
+              supabase.from('finance_accounts').update({ account_name: 'Monzo Joint Account' }).eq('id', acc.id).then(() => {}, console.error);
+              return { ...acc, account_name: 'Monzo Joint Account' };
             }
-          }
-          if (isJointAcc && !acc.exclude_from_totals) {
-            supabase.from('finance_accounts').update({ exclude_from_totals: true }).eq('id', acc.id).then(() => {}, console.error);
-            return { ...acc, exclude_from_totals: true };
           }
           return acc;
         });
       const excludedAccountIds = new Set<string>([
-        ...accountsData
-          .filter(a => a.exclude_from_totals || (a.account_name || '').toLowerCase().includes('joint'))
-          .map(a => a.id),
-        ...Array.from(duplicateJointIdsToDelete),
+        ...accountsData.filter(a => Boolean(a.exclude_from_totals)).map(a => a.id),
+        ...(anyJointExcluded ? Array.from(duplicateJointIdsToDelete) : []),
       ]);
       if (accRes.data) setAccounts(accountsData);
       if (catRes.data) {
@@ -438,7 +432,16 @@ export function useFinanceDataState() {
         const transferFlagFixIds: string[] = [];
         const mirrorDeleteIds: string[] = [];
 
-        const enriched = (txRes.data as any[])
+        const allRawTxs = (txRes.data || []) as any[];
+        const excludedAccounts = accountsData.filter(a => Boolean(a.exclude_from_totals));
+        const excludedTxs = allRawTxs.filter(t => excludedAccountIds.has(t.account_id));
+        const excludedGroupIds = new Set(excludedTxs.map(t => t.transfer_group_id).filter(Boolean));
+        const isJointAccountExcluded = excludedAccounts.some(a => (a.account_name || '').toLowerCase().includes('joint'));
+        const excludedAccountNames = excludedAccounts
+          .map(a => (a.account_name || '').toLowerCase().trim())
+          .filter(n => n.length >= 4);
+
+        const enriched = allRawTxs
           .filter(t => {
             if (excludedAccountIds.has(t.account_id)) return false;
             // Detect fake mirror deductions created for Gabriella Blyth / Batchbase in Travel Savings
@@ -543,18 +546,30 @@ export function useFinanceDataState() {
               rawJsonStr.includes('kiri') ||
               rawJsonStr.includes('smyth');
 
-            // Outgoing transfer from Monzo Personal to the hidden Monzo Joint Account (or £5 Monzo transfer to Joint/Kiri):
-            // Since the Joint Account is excluded from totals, money sent from Monzo Personal to the Joint Account
-            // must be treated as a real outgoing expense (-amount) and deducted from the weekly budget!
-            const isMonzoToJointTransfer =
-              isMonzoAccount &&
-              (fullDesc.includes('joint') ||
-                rawJsonStr.includes('joint') ||
-                (Math.abs(Math.abs(numAmt) - 5) < 0.01 && (hasKiriName || t.is_refund)));
+            // Dynamic rule for ALL accounts:
+            // If an active account transfers money to/from an account that the user has currently marked Hidden (exclude_from_totals: true),
+            // that transaction is crossing the boundary out of tracked accounts and MUST count as a real expense/deposit (is_transfer: false),
+            // NOT an internal transfer! If the user later unhides that account, it behaves as a normal internal transfer.
+            const matchedExcludedCounterpart = excludedTxs.find(
+              ex =>
+                (t.transfer_group_id && ex.transfer_group_id === t.transfer_group_id) ||
+                (Math.abs(Math.abs(Number(ex.amount) || 0) - Math.abs(numAmt)) < 0.01 &&
+                  Math.abs(new Date(ex.posted_at).getTime() - new Date(t.posted_at).getTime()) <= 2 * 86400000)
+            );
+            const matchesExcludedAccountByName =
+              excludedAccountNames.some(n => fullDesc.includes(n)) ||
+              (isJointAccountExcluded &&
+                (fullDesc.includes('joint') ||
+                  rawJsonStr.includes('joint') ||
+                  (isMonzoAccount && Math.abs(Math.abs(numAmt) - 5) < 0.01 && (hasKiriName || t.is_refund))));
 
-            if (isMonzoToJointTransfer) {
+            const isTransferToHiddenAccount =
+              Boolean(matchedExcludedCounterpart && Number(matchedExcludedCounterpart.amount) > 0) ||
+              (matchesExcludedAccountByName && (numAmt < 0 || t.is_refund || (t.transfer_group_id && excludedGroupIds.has(t.transfer_group_id))));
+
+            if (isTransferToHiddenAccount) {
               const expenseAmt = -Math.abs(numAmt);
-              const cleanJointDesc = desc.startsWith('joint account between user_')
+              const cleanDesc = desc.startsWith('joint account between user_')
                 ? 'Transfer to Monzo Joint Account'
                 : t.description;
               const clearIncomeCat = txCat?.type === 'income' || txCat?.type === 'transfer' ? null : t.category_id;
@@ -564,37 +579,34 @@ export function useFinanceDataState() {
                 t.is_transfer ||
                 t.transfer_status ||
                 t.transfer_side ||
-                t.transfer_group_id ||
-                cleanJointDesc !== t.description ||
+                cleanDesc !== t.description ||
                 clearIncomeCat !== t.category_id
               ) {
                 supabase
                   .from('finance_transactions')
                   .update({
-                    description: cleanJointDesc,
+                    description: cleanDesc,
                     amount: expenseAmt,
                     is_refund: false,
                     is_transfer: false,
                     transfer_side: null,
                     transfer_status: null,
-                    transfer_group_id: null,
                     category_id: clearIncomeCat,
                   } as any)
                   .eq('id', t.id)
                   .then(() => {
-                    console.log(`[self-healing] Restored Monzo Personal -> Joint transfer "${cleanJointDesc}" to ${expenseAmt} expense`);
+                    console.log(`[self-healing] Treated transfer to hidden account "${cleanDesc}" as ${expenseAmt} expense`);
                   }, console.error);
               }
               return {
                 ...t,
-                description: cleanJointDesc,
+                description: cleanDesc,
                 amount: expenseAmt,
                 is_refund: false,
                 is_kiri_payback: false,
                 is_transfer: false,
                 transfer_side: null,
                 transfer_status: null,
-                transfer_group_id: null,
                 category_id: clearIncomeCat,
                 currency: txCurrency,
                 base_amount: toBase(expenseAmt, txCurrency),
@@ -604,7 +616,7 @@ export function useFinanceDataState() {
             // Un-flag any outgoing Monzo bank transfer to a friend/external person that was previously auto-flagged
             // as an internal transfer solely because Monzo sets category='transfers' on all P2P bank transfers.
             const isOwnInternalMonzoTransfer =
-              (fullDesc.includes('gabriella') && !fullDesc.includes('joint') && !hasKiriName) ||
+              (fullDesc.includes('gabriella') && !hasKiriName && (!fullDesc.includes('joint') || !isJointAccountExcluded)) ||
               fullDesc.includes('wise') ||
               fullDesc.includes('up bank') ||
               fullDesc.includes('savings') ||
@@ -631,7 +643,7 @@ export function useFinanceDataState() {
             }
 
             const isKiriIncoming =
-              !isMonzoToJointTransfer &&
+              !isTransferToHiddenAccount &&
               ((hasKiriName && (numAmt > 0 || (isWiseAccount && !desc.startsWith('to ') && !desc.startsWith('sent to ')))) ||
                 (isWiseAccount && Math.abs(Math.abs(toBase(numAmt, txCurrency)) - 21) <= 1.25 && String(t.posted_at || '').startsWith('2026-11')));
 
@@ -1768,7 +1780,6 @@ export function useFinanceDataState() {
           existingName.startsWith('user_0000') ||
           existingName.toLowerCase().startsWith('joint account between user_');
         const finalName = isRawMonzoIdName || !existingName ? defaultCleanName : existingName;
-        const excludeFlag = isJoint ? true : Boolean(existingMatch.exclude_from_totals);
 
         await supabase
           .from('finance_accounts')
@@ -1779,7 +1790,6 @@ export function useFinanceDataState() {
             external_account_id: String(acc.id),
             last_synced_at: nowIso,
             source_type: 'bank',
-            exclude_from_totals: excludeFlag,
           })
           .eq('id', existingMatch.id);
         extToDbId[String(acc.id)] = existingMatch.id;
@@ -1796,7 +1806,6 @@ export function useFinanceDataState() {
               external_account_id: String(acc.id),
               last_synced_at: nowIso,
               source_type: 'bank',
-              exclude_from_totals: isJoint,
             },
             { onConflict: 'user_id,external_account_id' }
           )
@@ -1829,21 +1838,13 @@ export function useFinanceDataState() {
       }
     }
 
+    const isJointHiddenInDb = (existingDbAccounts || []).some(
+      (a: any) => (a.account_name || '').toLowerCase().includes('joint') && Boolean(a.exclude_from_totals)
+    );
+
     for (const acc of monzoAccounts) {
       const dbAccountId = extToDbId[String(acc.id)];
       if (!dbAccountId) continue;
-
-      const isJoint = acc.type === 'uk_retail_joint' || acc.owner_type === 'joint';
-      const matchedDbAcc = (existingDbAccounts || []).find((a: any) => a.id === dbAccountId);
-      if (isJoint || matchedDbAcc?.exclude_from_totals) {
-        // Hidden / Joint account: do not import its transactions into personal ledger and clean up any previously synced ones
-        await supabase
-          .from('finance_transactions')
-          .delete()
-          .eq('user_id', user.id)
-          .eq('account_id', dbAccountId);
-        continue;
-      }
 
       let txs: any[] = [];
       try {
@@ -1918,12 +1919,15 @@ export function useFinanceDataState() {
         const fullText = `${description} ${merchant || ''} ${tx.counterparty?.name || ''}`.toLowerCase();
         const isGammaSalary = rawAmount >= 500 && fullText.includes('gamma');
         const isGammaReimb = rawAmount > 0 && rawAmount < 500 && fullText.includes('gamma network');
-        const isJointOrExternalPerson =
-          isToJoint || fullText.includes('joint') || fullText.includes('kiri') || fullText.includes('smyth');
+        const isToHiddenJointOrExternalPerson =
+          (isToJoint && isJointHiddenInDb) ||
+          fullText.includes('kiri') ||
+          fullText.includes('smyth');
         const isOutgoingTransfer =
           rawAmount < 0 &&
-          !isJointOrExternalPerson &&
+          !isToHiddenJointOrExternalPerson &&
           (fullText.includes('gabriella') ||
+            (isToJoint && !isJointHiddenInDb) ||
             fullText.includes('wise') ||
             fullText.includes('up bank') ||
             fullText.includes('savings') ||
@@ -1946,17 +1950,17 @@ export function useFinanceDataState() {
           category_id: existing?.category_id ?? defaultCatId ?? null,
           is_refund: rawAmount < 0 ? false : Boolean((existing as any)?.is_refund),
           is_transfer:
-            isGammaSalary || isJointOrExternalPerson
+            isGammaSalary || isToHiddenJointOrExternalPerson
               ? false
               : isOutgoingTransfer,
           transfer_side:
-            isGammaSalary || isJointOrExternalPerson
+            isGammaSalary || isToHiddenJointOrExternalPerson
               ? null
               : isOutgoingTransfer
                 ? 'out'
                 : null,
           transfer_status:
-            isGammaSalary || isJointOrExternalPerson
+            isGammaSalary || isToHiddenJointOrExternalPerson
               ? null
               : isOutgoingTransfer
                 ? 'auto_confirmed'
