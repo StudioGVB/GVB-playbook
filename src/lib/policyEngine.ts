@@ -149,7 +149,6 @@ export function isInternalTransferTx(tx: FinanceTransaction): boolean {
     text.includes('transfer to savings') ||
     text.includes('savings transfer') ||
     text.includes('internal transfer') ||
-    (text.includes('gabriella') && !text.includes('kiri') && !text.includes('smyth') && !text.includes('joint') && tx.amount < 0) ||
     /^pot_[0-9a-z]+/i.test((tx.description || '').trim()) ||
     /^(to|from) (gbp|aud|eur|usd|nzd|cad)\b/i.test((tx.description || '').trim()) ||
     text.startsWith('round up') ||

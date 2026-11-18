@@ -268,14 +268,17 @@ export function useFinanceDataState() {
             (a.external_account_id || '').toLowerCase().includes('joint'))
       );
       const duplicateJointIdsToDelete = new Set<string>();
-      const anyJointExcluded = jointAccounts.some(a => Boolean(a.exclude_from_totals));
+      const shouldSeedJointHidden = !localStorage.getItem('gvb_joint_hidden_seeded_v2');
+      const anyJointExcluded = shouldSeedJointHidden || jointAccounts.some(a => Boolean(a.exclude_from_totals));
+      if (shouldSeedJointHidden && jointAccounts.length > 0) {
+        localStorage.setItem('gvb_joint_hidden_seeded_v2', 'true');
+      }
       if (jointAccounts.length > 1) {
         const sortedJoint = [...jointAccounts].sort((a, b) => {
           if (a.external_account_id && !b.external_account_id) return -1;
           if (!a.external_account_id && b.external_account_id) return 1;
           return String(b.last_synced_at || '').localeCompare(String(a.last_synced_at || ''));
         });
-        // If any of the duplicate rows had exclude_from_totals set by the user, carry that preference onto the primary row
         if (anyJointExcluded && !sortedJoint[0].exclude_from_totals) {
           sortedJoint[0].exclude_from_totals = true;
           supabase
@@ -288,6 +291,13 @@ export function useFinanceDataState() {
           duplicateJointIdsToDelete.add(sortedJoint[i].id);
           supabase.from('finance_accounts').delete().eq('id', sortedJoint[i].id).then(() => {}, console.error);
         }
+      } else if (shouldSeedJointHidden && jointAccounts.length === 1 && !jointAccounts[0].exclude_from_totals) {
+        jointAccounts[0].exclude_from_totals = true;
+        supabase
+          .from('finance_accounts')
+          .update({ exclude_from_totals: true })
+          .eq('id', jointAccounts[0].id)
+          .then(() => {}, console.error);
       }
 
       const accountsData = rawAccounts
@@ -434,6 +444,7 @@ export function useFinanceDataState() {
 
         const allRawTxs = (txRes.data || []) as any[];
         const excludedAccounts = accountsData.filter(a => Boolean(a.exclude_from_totals));
+        const activeTxs = allRawTxs.filter(t => !excludedAccountIds.has(t.account_id));
         const excludedTxs = allRawTxs.filter(t => excludedAccountIds.has(t.account_id));
         const excludedGroupIds = new Set(excludedTxs.map(t => t.transfer_group_id).filter(Boolean));
         const isJointAccountExcluded = excludedAccounts.some(a => (a.account_name || '').toLowerCase().includes('joint'));
@@ -441,9 +452,8 @@ export function useFinanceDataState() {
           .map(a => (a.account_name || '').toLowerCase().trim())
           .filter(n => n.length >= 4);
 
-        const enriched = allRawTxs
+        const enriched = activeTxs
           .filter(t => {
-            if (excludedAccountIds.has(t.account_id)) return false;
             // Detect fake mirror deductions created for Gabriella Blyth / Batchbase in Travel Savings
             const desc = (t.description || '').toLowerCase();
             const merch = (t.merchant || '').toLowerCase();
@@ -465,78 +475,8 @@ export function useFinanceDataState() {
             const numAmt = Number(t.amount) || 0;
             const acc = t.account_id ? accountById.get(t.account_id) : undefined;
             const txCurrency = (acc?.provider === 'up' ? 'AUD' : (t.currency || acc?.currency || baseCurrency)).toUpperCase();
-
-            // Self-heal Gamma Salary payments (e.g. Monzo "10012726" with merchant "Gamma", >= £500)
-            const isGammaSalary = numAmt >= 500 && (fullDesc.includes('gamma') || desc === '10012726');
-            if (isGammaSalary) {
-              const cleanGammaDesc = /^\d+$/.test((t.description || '').trim())
-                ? `Gamma (${(t.description || '').trim()})`
-                : t.description;
-              const targetCatId = !t.category_id && gammaCat ? gammaCat.id : t.category_id;
-              const needsDbHeal =
-                t.is_transfer ||
-                t.transfer_status ||
-                t.transfer_side ||
-                (!t.category_id && gammaCat) ||
-                cleanGammaDesc !== t.description;
-              if (needsDbHeal) {
-                supabase.from('finance_transactions').update({
-                  description: cleanGammaDesc,
-                  merchant: t.merchant || 'Gamma',
-                  is_transfer: false,
-                  transfer_side: null,
-                  transfer_status: null,
-                  category_id: targetCatId,
-                }).eq('id', t.id).then(() => {}, console.error);
-              }
-              return {
-                ...t,
-                description: cleanGammaDesc,
-                merchant: t.merchant || 'Gamma',
-                is_transfer: false,
-                transfer_side: null,
-                transfer_status: null,
-                category_id: targetCatId,
-                currency: txCurrency,
-                base_amount: toBase(numAmt, txCurrency),
-              };
-            }
-
-            const isBatchbase = fullDesc.includes('batchbase') || fullDesc.includes('batch base') || tags.includes('batchbase') || tags.includes('batch');
-            const isGabriella = fullDesc.includes('gabriella') || fullDesc.includes('gabriella blyth');
-            const isVentureText = fullDesc.includes('venture') || fullDesc.includes('advisory');
-
-            // Incoming money from Gabriella Blyth without a matched outgoing transfer leg is personal income, never an internal transfer
-            // Only explicit Batchbase/Venture text is VA. Ambiguous "Gabriella" deposits go to the generic Income bucket until sorted.
-            const isVentureIncome = numAmt > 0 && (isBatchbase || isVentureText);
-            const isGabriellaSingleDeposit = isGabriella && numAmt > 0 && !t.transfer_group_id;
-
-            if (isVentureIncome || isGabriellaSingleDeposit) {
-              // Only auto-assign when uncategorised — never override a category you've set
-              const genericIncome = (catRes.data || []).find((c: any) => c.type === 'income' && c.name.trim().toLowerCase() === 'income');
-              const autoCat = isVentureIncome ? ventureCat : genericIncome;
-              const targetCatId = !t.category_id && autoCat ? autoCat.id : t.category_id;
-              const hasTransferFlag = t.is_transfer || t.transfer_status || t.transfer_side;
-
-              if (!t.category_id && autoCat) {
-                (healingByCat[autoCat.id] ||= []).push(t.id);
-              } else if (hasTransferFlag) {
-                transferFlagFixIds.push(t.id);
-              }
-              return {
-                ...t,
-                is_transfer: false,
-                transfer_side: null,
-                transfer_status: null,
-                category_id: targetCatId,
-                currency: txCurrency,
-                base_amount: toBase(numAmt, txCurrency),
-              };
-            }
-
-            const rawDetailsType = String(t.raw?.detailsType || '').toUpperCase();
-            const isWiseAccount = acc?.provider === 'wise' || (acc?.account_name || '').toLowerCase().includes('wise');
             const isMonzoAccount = acc?.provider === 'monzo' || (acc?.account_name || '').toLowerCase().includes('monzo');
+            const isWiseAccount = acc?.provider === 'wise' || (acc?.account_name || '').toLowerCase().includes('wise');
             const txCat = t.category_id ? (catRes.data || []).find((c: any) => c.id === t.category_id) : undefined;
             const isIncomeCat = txCat?.type === 'income';
             const rawJsonStr = JSON.stringify(t.raw || '').toLowerCase();
@@ -547,21 +487,29 @@ export function useFinanceDataState() {
               rawJsonStr.includes('smyth');
 
             // Dynamic rule for ALL accounts:
-            // If an active account transfers money to/from an account that the user has currently marked Hidden (exclude_from_totals: true),
-            // that transaction is crossing the boundary out of tracked accounts and MUST count as a real expense/deposit (is_transfer: false),
-            // NOT an internal transfer! If the user later unhides that account, it behaves as a normal internal transfer.
+            // Check if this transaction on an active account has a counterpart on a currently Hidden (exclude_from_totals: true) account,
+            // or matches a currently Hidden account by name.
             const matchedExcludedCounterpart = excludedTxs.find(
               ex =>
                 (t.transfer_group_id && ex.transfer_group_id === t.transfer_group_id) ||
                 (Math.abs(Math.abs(Number(ex.amount) || 0) - Math.abs(numAmt)) < 0.01 &&
                   Math.abs(new Date(ex.posted_at).getTime() - new Date(t.posted_at).getTime()) <= 2 * 86400000)
             );
+            const hasActiveCounterpart = activeTxs.some(
+              other =>
+                other.id !== t.id &&
+                other.account_id !== t.account_id &&
+                ((t.transfer_group_id && other.transfer_group_id === t.transfer_group_id) ||
+                  ((Number(other.amount) > 0) !== (numAmt > 0) &&
+                    Math.abs(Math.abs(Number(other.amount) || 0) - Math.abs(numAmt)) < 0.01 &&
+                    Math.abs(new Date(other.posted_at).getTime() - new Date(t.posted_at).getTime()) <= 3 * 86400000))
+            );
             const matchesExcludedAccountByName =
               excludedAccountNames.some(n => fullDesc.includes(n)) ||
               (isJointAccountExcluded &&
                 (fullDesc.includes('joint') ||
                   rawJsonStr.includes('joint') ||
-                  (isMonzoAccount && Math.abs(Math.abs(numAmt) - 5) < 0.01 && (hasKiriName || t.is_refund))));
+                  (isMonzoAccount && Math.abs(Math.abs(numAmt) - 5) < 0.01 && (hasKiriName || t.is_refund || fullDesc.includes('gabriella')))));
 
             const isTransferToHiddenAccount =
               Boolean(matchedExcludedCounterpart && Number(matchedExcludedCounterpart.amount) > 0) ||
@@ -613,16 +561,84 @@ export function useFinanceDataState() {
               };
             }
 
-            // Un-flag any outgoing Monzo bank transfer to a friend/external person that was previously auto-flagged
-            // as an internal transfer solely because Monzo sets category='transfers' on all P2P bank transfers.
-            const isOwnInternalMonzoTransfer =
-              (fullDesc.includes('gabriella') && !hasKiriName && (!fullDesc.includes('joint') || !isJointAccountExcluded)) ||
-              fullDesc.includes('wise') ||
-              fullDesc.includes('up bank') ||
+            // Self-heal Gamma Salary payments (e.g. Monzo "10012726" with merchant "Gamma", >= £500)
+            const isGammaSalary = numAmt >= 500 && (fullDesc.includes('gamma') || desc === '10012726');
+            if (isGammaSalary) {
+              const cleanGammaDesc = /^\d+$/.test((t.description || '').trim())
+                ? `Gamma (${(t.description || '').trim()})`
+                : t.description;
+              const targetCatId = !t.category_id && gammaCat ? gammaCat.id : t.category_id;
+              const needsDbHeal =
+                t.is_transfer ||
+                t.transfer_status ||
+                t.transfer_side ||
+                (!t.category_id && gammaCat) ||
+                cleanGammaDesc !== t.description;
+              if (needsDbHeal) {
+                supabase.from('finance_transactions').update({
+                  description: cleanGammaDesc,
+                  merchant: t.merchant || 'Gamma',
+                  is_transfer: false,
+                  transfer_side: null,
+                  transfer_status: null,
+                  category_id: targetCatId,
+                }).eq('id', t.id).then(() => {}, console.error);
+              }
+              return {
+                ...t,
+                description: cleanGammaDesc,
+                merchant: t.merchant || 'Gamma',
+                is_transfer: false,
+                transfer_side: null,
+                transfer_status: null,
+                category_id: targetCatId,
+                currency: txCurrency,
+                base_amount: toBase(numAmt, txCurrency),
+              };
+            }
+
+            const isBatchbase = fullDesc.includes('batchbase') || fullDesc.includes('batch base') || tags.includes('batchbase') || tags.includes('batch');
+            const isGabriella = fullDesc.includes('gabriella') || fullDesc.includes('gabriella blyth');
+            const isVentureText = fullDesc.includes('venture') || fullDesc.includes('advisory');
+
+            // Incoming money from Gabriella Blyth without a matched outgoing transfer leg is personal income, never an internal transfer
+            // Only explicit Batchbase/Venture text is VA. Ambiguous "Gabriella" deposits go to the generic Income bucket until sorted.
+            const isVentureIncome = numAmt > 0 && (isBatchbase || isVentureText);
+            const isGabriellaSingleDeposit = isGabriella && numAmt > 0 && !t.transfer_group_id && !matchedExcludedCounterpart;
+
+            if (isVentureIncome || isGabriellaSingleDeposit) {
+              // Only auto-assign when uncategorised — never override a category you've set
+              const genericIncome = (catRes.data || []).find((c: any) => c.type === 'income' && c.name.trim().toLowerCase() === 'income');
+              const autoCat = isVentureIncome ? ventureCat : genericIncome;
+              const targetCatId = !t.category_id && autoCat ? autoCat.id : t.category_id;
+              const hasTransferFlag = t.is_transfer || t.transfer_status || t.transfer_side;
+
+              if (!t.category_id && autoCat) {
+                (healingByCat[autoCat.id] ||= []).push(t.id);
+              } else if (hasTransferFlag) {
+                transferFlagFixIds.push(t.id);
+              }
+              return {
+                ...t,
+                is_transfer: false,
+                transfer_side: null,
+                transfer_status: null,
+                category_id: targetCatId,
+                currency: txCurrency,
+                base_amount: toBase(numAmt, txCurrency),
+              };
+            }
+
+            const rawDetailsType = String(t.raw?.detailsType || '').toUpperCase();
+
+            // Un-flag any outgoing Monzo bank transfer that was previously auto-flagged as an internal transfer
+            // when it does NOT have a matching deposit on another active account (and is not a Monzo savings pot move).
+            const isMonzoSavingsOrActiveTransfer =
+              hasActiveCounterpart ||
               fullDesc.includes('savings') ||
               /^pot_[0-9a-z]+/i.test(desc);
 
-            if (isMonzoAccount && numAmt < 0 && t.is_transfer && t.transfer_status === 'auto_confirmed' && !isOwnInternalMonzoTransfer) {
+            if (isMonzoAccount && numAmt < 0 && t.is_transfer && t.transfer_status === 'auto_confirmed' && !isMonzoSavingsOrActiveTransfer) {
               supabase
                 .from('finance_transactions')
                 .update({
