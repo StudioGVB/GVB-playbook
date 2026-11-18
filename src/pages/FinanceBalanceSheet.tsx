@@ -98,8 +98,18 @@ export default function FinanceBalanceSheet() {
       if (cat?.exclude_from_reports) continue;
 
       const amt = baseAmt(tx);
+      if ((tx as any).is_refund && amt > 0) {
+        const abs = Math.abs(amt);
+        variable = Math.max(0, variable - abs);
+        if (cat?.is_essential && cat?.type === 'variable') {
+          essentialSpent = Math.max(0, essentialSpent - abs);
+        } else {
+          funSpent = Math.max(0, funSpent - abs);
+        }
+        continue;
+      }
       if (amt > 0) {
-        if (!tx.is_reimbursable && (cat?.type !== 'transfer' || isIncomeKeyword)) {
+        if (!tx.is_reimbursable && !(tx as any).is_refund && !(tx as any).is_kiri_payback && (cat?.type !== 'transfer' || isIncomeKeyword)) {
           const isMonthlyGammaSalary =
             amt >= 1000 &&
             (rawText.includes('gamma') || rawText.includes('salary') || rawText.includes('payroll'));

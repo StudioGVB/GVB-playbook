@@ -160,8 +160,18 @@ export function isDuplicatePair(a: any, b: any): { isDuplicate: boolean; keeper:
     return { isDuplicate: false, keeper: null, duplicate: null };
   }
 
-  // Never deduplicate cross-account transfers
-  if ((a.is_transfer || b.is_transfer) && a.account_id !== b.account_id) {
+  // Never deduplicate transactions across different accounts
+  if (a.account_id && b.account_id && a.account_id !== b.account_id) {
+    return { isDuplicate: false, keeper: null, duplicate: null };
+  }
+
+  // If both rows have real bank API external_transaction_ids and they differ,
+  // they are two distinct real-world purchases (e.g., buying two rounds of drinks at the same bar).
+  const extA = a.external_transaction_id ? String(a.external_transaction_id).trim() : '';
+  const extB = b.external_transaction_id ? String(b.external_transaction_id).trim() : '';
+  const hasRealExtA = Boolean(extA && !extA.includes('|'));
+  const hasRealExtB = Boolean(extB && !extB.includes('|'));
+  if (hasRealExtA && hasRealExtB && extA !== extB) {
     return { isDuplicate: false, keeper: null, duplicate: null };
   }
 
@@ -184,6 +194,30 @@ export function isDuplicatePair(a: any, b: any): { isDuplicate: boolean; keeper:
     return { isDuplicate: false, keeper: null, duplicate: null };
   }
 
+  // Check exact timestamp difference:
+  // Two card taps at different times of day (> 5 seconds apart) are separate purchases
+  // unless one is a date-only CSV import (00:00:00 without API status) or a legacy HELD -> SETTLED pair on different days.
+  const rawTimeA = new Date(a.posted_at).getTime();
+  const rawTimeB = new Date(b.posted_at).getTime();
+  const diffMs = Math.abs(rawTimeA - rawTimeB);
+  const statusA = String(a.raw?.status || '').toUpperCase();
+  const statusB = String(b.raw?.status || '').toUpperCase();
+  const isDateOnlyCsvA = !statusA && (!String(a.posted_at).includes(':') || String(a.posted_at).includes('00:00:00'));
+  const isDateOnlyCsvB = !statusB && (!String(b.posted_at).includes(':') || String(b.posted_at).includes('00:00:00'));
+
+  if (diffMs > 5000 && !(hasRealExtA && hasRealExtB && extA === extB)) {
+    const isOneCsv = isDateOnlyCsvA || isDateOnlyCsvB;
+    const isHeldToSettledCrossDay =
+      diffDays >= 1 &&
+      !hasRealExtA &&
+      !hasRealExtB &&
+      ((statusA === 'HELD' && statusB === 'SETTLED') || (statusA === 'SETTLED' && statusB === 'HELD'));
+
+    if (!isOneCsv && !isHeldToSettledCrossDay) {
+      return { isDuplicate: false, keeper: null, duplicate: null };
+    }
+  }
+
   // Determine earlier (keeper = actual purchase date) vs later (duplicate = settlement / re-sync)
   // If on the same timestamp, prefer the row that already has a category_id or API external_transaction_id
   let earlier = a;
@@ -195,17 +229,14 @@ export function isDuplicatePair(a: any, b: any): { isDuplicate: boolean; keeper:
     earlier = b;
     later = a;
   } else {
-    const scoreA = (a.category_id ? 2 : 0) + (a.external_transaction_id && !String(a.external_transaction_id).includes('|') ? 1 : 0);
-    const scoreB = (b.category_id ? 2 : 0) + (b.external_transaction_id && !String(b.external_transaction_id).includes('|') ? 1 : 0);
+    const scoreA = (a.category_id ? 2 : 0) + (hasRealExtA ? 1 : 0);
+    const scoreB = (b.category_id ? 2 : 0) + (hasRealExtB ? 1 : 0);
     if (scoreB > scoreA) {
       earlier = b;
       later = a;
     }
   }
 
-  // Any two transactions with the exact same amount, same sign, and matching merchant
-  // within 0–4 calendar days (same-day sync duplicates, weekday/weekend card clearing,
-  // CSV vs API duplicates, or pending-to-settled duplicates) are treated as duplicates.
   return { isDuplicate: true, keeper: earlier, duplicate: later };
 }
 

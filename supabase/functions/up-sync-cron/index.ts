@@ -121,11 +121,13 @@ serve(async (req) => {
           if (allTransactions.length >= 2000) break
         }
 
-        // 5. Fingerprint helper
-        async function computeFingerprint(uid: string, accId: string, postedAt: string, amount: number, desc: string): Promise<string> {
+        // 5. Fingerprint helper: includes externalId (tx.id) so multiple purchases of the same amount
+        // at the same merchant on the same day never collide on idx_finance_transactions_fingerprint
+        async function computeFingerprint(uid: string, accId: string, postedAt: string, amount: number, desc: string, externalId?: string): Promise<string> {
           const dateOnly = new Date(postedAt).toISOString().slice(0, 10)
           const normDesc = desc.toUpperCase().trim().replace(/\s+/g, ' ').replace(/[^A-Z0-9 ]/g, '')
-          const input = `${uid}|${accId}|${dateOnly}|${amount.toFixed(2)}|${normDesc}`
+          const uniquePart = externalId ? `${dateOnly}|${externalId}` : new Date(postedAt).toISOString()
+          const input = `${uid}|${accId}|${uniquePart}|${amount.toFixed(2)}|${normDesc}`
           const buf = new TextEncoder().encode(input)
           const hash = await crypto.subtle.digest('SHA-256', buf)
           return [...new Uint8Array(hash)].map(b => b.toString(16).padStart(2, '0')).join('')
@@ -148,7 +150,9 @@ serve(async (req) => {
         const txBatch = await Promise.all(allTransactions.map(async ({ tx, dbAccountId }) => {
           const rawAmount = parseFloat(tx.attributes.amount?.value || '0')
           const hasTransferRelation = !!tx.relationships?.transferAccount?.data
-          const postedAt = tx.attributes.settledAt || tx.attributes.createdAt || new Date().toISOString()
+          const createdAt = tx.attributes.createdAt || null
+          const settledAt = tx.attributes.settledAt || null
+          const postedAt = createdAt || settledAt || new Date().toISOString()
           const description = tx.attributes.description || 'Unknown'
           const rawText = tx.attributes.rawText || ''
           const message = tx.attributes.message || ''
@@ -165,7 +169,7 @@ serve(async (req) => {
           )
           const isVentureIncome = (isBatchbase || (isGabriella && isWeeklyPaycheck)) && rawAmount > 0
 
-          const fingerprint = await computeFingerprint(userId, dbAccountId, postedAt, rawAmount, description)
+          const fingerprint = await computeFingerprint(userId, dbAccountId, postedAt, rawAmount, description, tx.id)
           const status = tx.attributes.status || null
 
           return {
@@ -190,6 +194,8 @@ serve(async (req) => {
               status,
               message: message || null,
               tags: tagIds.length > 0 ? tagIds : null,
+              createdAt,
+              settledAt,
             },
           }
         }))
@@ -282,6 +288,7 @@ serve(async (req) => {
           if (existingExternalIds.has(externalKey)) {
             const existing = existingMap.get(externalKey)
             if (existing) {
+              matchedExistingIds.add(existing.id)
               row.category_id = existing.category_id ?? null
               if (existing.is_transfer !== undefined && existing.is_transfer !== null) {
                 row.is_transfer = existing.is_transfer
@@ -297,19 +304,24 @@ serve(async (req) => {
             continue
           }
 
-          // Check for clearing / CSV duplicate match against existing records
+          // Check for an existing record whose external_transaction_id was previously nulled out,
+          // matching by exact createdAt or settledAt timestamp (within 5 seconds) + same amount + merchant
+          const rawCreated = (row.raw as any)?.createdAt ? new Date((row.raw as any).createdAt).getTime() : new Date(row.posted_at).getTime()
+          const rawSettled = (row.raw as any)?.settledAt ? new Date((row.raw as any).settledAt).getTime() : rawCreated
+
           const match = (existingTransactions || []).find((existing: any) => {
             if (matchedExistingIds.has(existing.id)) return false
             if (existing.account_id !== row.account_id) return false
+            if (existing.external_transaction_id && existing.external_transaction_id !== row.external_transaction_id) return false
             const amtExist = Math.abs(Number(existing.amount) || 0)
             const amtRow = Math.abs(Number(row.amount) || 0)
             if (Math.abs(amtExist - amtRow) > 0.005) return false
             if ((Number(existing.amount) < 0) !== (Number(row.amount) < 0)) return false
 
             const dExist = new Date(existing.posted_at).getTime()
-            const dRow = new Date(row.posted_at).getTime()
-            const diffDays = Math.abs(dExist - dRow) / (1000 * 60 * 60 * 24)
-            if (diffDays > 4.5) return false
+            const matchesCreated = Math.abs(dExist - rawCreated) <= 5000
+            const matchesSettled = Math.abs(dExist - rawSettled) <= 5000
+            if (!matchesCreated && !matchesSettled) return false
 
             return areMerchantsMatchEdge(existing.description, existing.merchant, row.description, row.merchant)
           })
@@ -325,7 +337,7 @@ serve(async (req) => {
             continue
           }
 
-          const dedupeKey = row.transaction_fingerprint || externalKey
+          const dedupeKey = externalKey || row.transaction_fingerprint
           const current = dedupedNewTransactions.get(dedupeKey)
           if (!current) {
             dedupedNewTransactions.set(dedupeKey, row)

@@ -105,6 +105,7 @@ serve(async (req) => {
         external_account_id: String(acc.id),
         last_synced_at: new Date().toISOString(),
         source_type: 'bank',
+        exclude_from_totals: isJoint,
       })
     }
 

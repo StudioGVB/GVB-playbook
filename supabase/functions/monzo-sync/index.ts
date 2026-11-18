@@ -173,6 +173,7 @@ serve(async (req) => {
         external_account_id: String(acc.id),
         last_synced_at: new Date().toISOString(),
         source_type: 'bank',
+        exclude_from_totals: isJoint,
       })
     }
 
@@ -188,13 +189,17 @@ serve(async (req) => {
     // 3. Get DB account IDs mapped to external IDs (scoped to this user)
     const { data: dbAccounts } = await supabase
       .from('finance_accounts')
-      .select('id, external_account_id')
+      .select('id, external_account_id, exclude_from_totals')
       .eq('provider', 'monzo')
       .eq('user_id', userId)
 
     const extToDbId: Record<string, string> = {}
+    const excludedExtIds = new Set<string>()
     for (const a of (dbAccounts || [])) {
-      if (a.external_account_id) extToDbId[a.external_account_id] = a.id
+      if (a.external_account_id) {
+        extToDbId[a.external_account_id] = a.id
+        if ((a as any).exclude_from_totals) excludedExtIds.add(a.external_account_id)
+      }
     }
 
     // 4. Fetch transactions for each account (last 90 days)
@@ -206,8 +211,9 @@ serve(async (req) => {
     let allTransactions: Array<{ tx: any; dbAccountId: string }> = []
 
     for (const acc of accounts) {
+      const isJoint = acc.type === 'uk_retail_joint' || acc.owner_type === 'joint'
       const dbAccountId = extToDbId[String(acc.id)]
-      if (!dbAccountId) continue
+      if (!dbAccountId || isJoint || excludedExtIds.has(String(acc.id))) continue
 
       const txUrl = `https://api.monzo.com/transactions?account_id=${acc.id}&since=${sinceStr}&limit=100&expand[]=merchant`
       

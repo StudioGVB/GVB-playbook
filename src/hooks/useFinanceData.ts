@@ -260,21 +260,62 @@ export function useFinanceDataState() {
         supabase.from('income_source_tags' as any).select('*').order('created_at'),
       ]);
 
-      const accountsData = ((accRes.data || []) as any as FinanceAccount[]).map(acc => {
-        if (acc.provider === 'monzo') {
-          const rawName = (acc.account_name || '').trim();
-          if (rawName.startsWith('user_0000')) {
-            supabase.from('finance_accounts').update({ account_name: 'Monzo Personal' }).eq('id', acc.id).then(() => {}, console.error);
-            return { ...acc, account_name: 'Monzo Personal' };
-          }
-          if (rawName.toLowerCase().startsWith('joint account between user_')) {
-            supabase.from('finance_accounts').update({ account_name: 'Monzo Joint Account' }).eq('id', acc.id).then(() => {}, console.error);
-            return { ...acc, account_name: 'Monzo Joint Account' };
-          }
+      const rawAccounts = (accRes.data || []) as any as FinanceAccount[];
+      const jointAccounts = rawAccounts.filter(
+        a =>
+          a.provider === 'monzo' &&
+          ((a.account_name || '').toLowerCase().includes('joint') ||
+            (a.external_account_id || '').toLowerCase().includes('joint'))
+      );
+      const duplicateJointIdsToDelete = new Set<string>();
+      if (jointAccounts.length > 1) {
+        const sortedJoint = [...jointAccounts].sort((a, b) => {
+          if (a.external_account_id && !b.external_account_id) return -1;
+          if (!a.external_account_id && b.external_account_id) return 1;
+          return String(b.last_synced_at || '').localeCompare(String(a.last_synced_at || ''));
+        });
+        for (let i = 1; i < sortedJoint.length; i++) {
+          duplicateJointIdsToDelete.add(sortedJoint[i].id);
+          supabase.from('finance_accounts').delete().eq('id', sortedJoint[i].id).then(() => {}, console.error);
         }
-        return acc;
-      });
-      const excludedAccountIds = new Set(accountsData.filter(a => a.exclude_from_totals).map(a => a.id));
+      }
+
+      const accountsData = rawAccounts
+        .filter(acc => !duplicateJointIdsToDelete.has(acc.id))
+        .map(acc => {
+          const rawName = (acc.account_name || '').trim();
+          const isJointAcc =
+            rawName.toLowerCase().includes('joint') ||
+            rawName.toLowerCase().startsWith('joint account between user_');
+
+          if (acc.provider === 'monzo') {
+            if (rawName.startsWith('user_0000')) {
+              supabase.from('finance_accounts').update({ account_name: 'Monzo Personal' }).eq('id', acc.id).then(() => {}, console.error);
+              return { ...acc, account_name: 'Monzo Personal' };
+            }
+            if (isJointAcc) {
+              if (rawName !== 'Monzo Joint Account' || !acc.exclude_from_totals) {
+                supabase
+                  .from('finance_accounts')
+                  .update({ account_name: 'Monzo Joint Account', exclude_from_totals: true })
+                  .eq('id', acc.id)
+                  .then(() => {}, console.error);
+              }
+              return { ...acc, account_name: 'Monzo Joint Account', exclude_from_totals: true };
+            }
+          }
+          if (isJointAcc && !acc.exclude_from_totals) {
+            supabase.from('finance_accounts').update({ exclude_from_totals: true }).eq('id', acc.id).then(() => {}, console.error);
+            return { ...acc, exclude_from_totals: true };
+          }
+          return acc;
+        });
+      const excludedAccountIds = new Set<string>([
+        ...accountsData
+          .filter(a => a.exclude_from_totals || (a.account_name || '').toLowerCase().includes('joint'))
+          .map(a => a.id),
+        ...Array.from(duplicateJointIdsToDelete),
+      ]);
       if (accRes.data) setAccounts(accountsData);
       if (catRes.data) {
         const enriched = (catRes.data as any[]).map(c => ({
@@ -495,11 +536,13 @@ export function useFinanceDataState() {
             const txCat = t.category_id ? (catRes.data || []).find((c: any) => c.id === t.category_id) : undefined;
             const isIncomeCat = txCat?.type === 'income';
             const rawJsonStr = JSON.stringify(t.raw || '').toLowerCase();
-            const isKiriIncoming =
+            const hasKiriName =
               fullDesc.includes('kiri') ||
               fullDesc.includes('smyth') ||
               rawJsonStr.includes('kiri') ||
-              rawJsonStr.includes('smyth') ||
+              rawJsonStr.includes('smyth');
+            const isKiriIncoming =
+              (hasKiriName && (numAmt > 0 || (isWiseAccount && !desc.startsWith('to ') && !desc.startsWith('sent to ')))) ||
               (isWiseAccount && Math.abs(Math.abs(toBase(numAmt, txCurrency)) - 21) <= 1.25 && String(t.posted_at || '').startsWith('2026-11'));
 
             // Auto-flag Wise internal currency conversions / balance moves as transfers so they never deduct from weekly budget
@@ -793,27 +836,10 @@ export function useFinanceDataState() {
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
   const prepareUpTransactionsForSync = useCallback(async () => {
-    if (!user) return;
-    try {
-      const { data: upAccs } = await supabase
-        .from('finance_accounts')
-        .select('id')
-        .eq('user_id', user.id)
-        .eq('provider', 'up');
-      const upAccIds = (upAccs || []).map(a => a.id);
-      if (upAccIds.length > 0) {
-        await supabase
-          .from('finance_transactions')
-          .update({ external_transaction_id: null } as any)
-          .eq('user_id', user.id)
-          .in('account_id', upAccIds)
-          .not('transaction_fingerprint', 'is', null)
-          .not('external_transaction_id', 'is', null);
-      }
-    } catch (err) {
-      console.warn('[up-sync-prep] Failed to prepare Up transactions:', err);
-    }
-  }, [user]);
+    // Preserve external_transaction_id on Up Bank rows so distinct same-day purchases
+    // at the same merchant retain their unique Up Bank transaction UUIDs.
+    return;
+  }, []);
 
   const autoSyncRef = useRef(false);
   useEffect(() => {
@@ -1654,7 +1680,11 @@ export function useFinanceDataState() {
 
       const existingMatch =
         (existingDbAccounts || []).find((a: any) => a.external_account_id === String(acc.id)) ||
-        (!isJoint ? (existingDbAccounts || []).find((a: any) => !a.external_account_id) : undefined);
+        (isJoint
+          ? (existingDbAccounts || []).find((a: any) => (a.account_name || '').toLowerCase().includes('joint'))
+          : (existingDbAccounts || []).find(
+              (a: any) => !a.external_account_id && !(a.account_name || '').toLowerCase().includes('joint')
+            ));
 
       if (existingMatch) {
         const existingName = (existingMatch.account_name || '').trim();
@@ -1662,6 +1692,7 @@ export function useFinanceDataState() {
           existingName.startsWith('user_0000') ||
           existingName.toLowerCase().startsWith('joint account between user_');
         const finalName = isRawMonzoIdName || !existingName ? defaultCleanName : existingName;
+        const excludeFlag = isJoint ? true : Boolean(existingMatch.exclude_from_totals);
 
         await supabase
           .from('finance_accounts')
@@ -1672,6 +1703,7 @@ export function useFinanceDataState() {
             external_account_id: String(acc.id),
             last_synced_at: nowIso,
             source_type: 'bank',
+            exclude_from_totals: excludeFlag,
           })
           .eq('id', existingMatch.id);
         extToDbId[String(acc.id)] = existingMatch.id;
@@ -1688,6 +1720,7 @@ export function useFinanceDataState() {
               external_account_id: String(acc.id),
               last_synced_at: nowIso,
               source_type: 'bank',
+              exclude_from_totals: isJoint,
             },
             { onConflict: 'user_id,external_account_id' }
           )
@@ -1723,6 +1756,18 @@ export function useFinanceDataState() {
     for (const acc of monzoAccounts) {
       const dbAccountId = extToDbId[String(acc.id)];
       if (!dbAccountId) continue;
+
+      const isJoint = acc.type === 'uk_retail_joint' || acc.owner_type === 'joint';
+      const matchedDbAcc = (existingDbAccounts || []).find((a: any) => a.id === dbAccountId);
+      if (isJoint || matchedDbAcc?.exclude_from_totals) {
+        // Hidden / Joint account: do not import its transactions into personal ledger and clean up any previously synced ones
+        await supabase
+          .from('finance_transactions')
+          .delete()
+          .eq('user_id', user.id)
+          .eq('account_id', dbAccountId);
+        continue;
+      }
 
       let txs: any[] = [];
       try {

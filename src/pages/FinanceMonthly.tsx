@@ -381,8 +381,17 @@ export default function FinanceMonthly() {
       const isIncomeCategory = cat?.type === 'income';
       const isGabriellaIncome = rawText.includes('gabriella') && tx.amount > 0 && !tx.transfer_group_id && !tx.is_transfer;
       const isIncomeKeyword = rawText.includes('batchbase') || rawText.includes('batch base') || rawText.includes('payroll') || rawText.includes('salary') || rawText.includes('venture') || rawText.includes('etsy') || isGabriellaIncome;
+      if ((tx as any).is_refund && tx.amount > 0) {
+        const amt = Math.abs(baseAmt(tx));
+        if (essentialCatIds.has(tx.category_id || '')) {
+          essential = Math.max(0, essential - amt);
+        } else {
+          fun = Math.max(0, fun - amt);
+        }
+        continue;
+      }
       if (tx.amount > 0 && (!tx.is_transfer || isIncomeCategory || isIncomeKeyword)) {
-        if (!tx.is_reimbursable && (cat?.type !== 'transfer' || isIncomeKeyword)) {
+        if (!tx.is_reimbursable && !(tx as any).is_refund && !(tx as any).is_kiri_payback && (cat?.type !== 'transfer' || isIncomeKeyword)) {
           const txAmt = baseAmt(tx);
           const isMonthlyGammaSalary =
             txAmt >= 1000 &&

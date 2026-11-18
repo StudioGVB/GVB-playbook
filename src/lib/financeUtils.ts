@@ -334,7 +334,7 @@ export function computeIncomeBySource(
   days: number = 90,
 ): { sources: IncomeSource[]; total: number } {
   const filtered = filterTxByDays(txs, days)
-    .filter(tx => tx.amount > 0 && !tx.is_reimbursable && tx.transfer_status !== 'confirmed' && tx.transfer_status !== 'auto_confirmed');
+    .filter(tx => tx.amount > 0 && !tx.is_reimbursable && !(tx as any).is_refund && !(tx as any).is_kiri_payback && tx.transfer_status !== 'confirmed' && tx.transfer_status !== 'auto_confirmed');
 
   const total = filtered.reduce((s, tx) => s + baseAmt(tx), 0);
 
@@ -373,7 +373,7 @@ export function computeIncomeGrowth(txs: FinanceTransaction[], days: number = 90
   const prevEnd = subDays(new Date(), days);
   const prevStart = subDays(prevEnd, days);
   const prevTxs = filterTxByDateRange(txs, prevStart, prevEnd)
-    .filter(tx => tx.amount > 0 && tx.transfer_status !== 'confirmed' && tx.transfer_status !== 'auto_confirmed');
+    .filter(tx => tx.amount > 0 && !tx.is_reimbursable && !(tx as any).is_refund && !(tx as any).is_kiri_payback && tx.transfer_status !== 'confirmed' && tx.transfer_status !== 'auto_confirmed');
   const prevTotal = prevTxs.reduce((s, tx) => s + baseAmt(tx), 0);
   if (prevTotal <= 0) return current.total > 0 ? 100 : 0;
   return ((current.total - prevTotal) / prevTotal) * 100;
@@ -397,7 +397,7 @@ export function computeMonthlyIncomeBySource(
     const { start, end } = getMonthRange(i);
     const monthLabel = format(start, 'MMM');
     const incomeTxs = filterTxByDateRange(txs, start, end)
-      .filter(tx => tx.amount > 0 && !tx.is_reimbursable && tx.transfer_status !== 'confirmed' && tx.transfer_status !== 'auto_confirmed');
+      .filter(tx => tx.amount > 0 && !tx.is_reimbursable && !(tx as any).is_refund && !(tx as any).is_kiri_payback && tx.transfer_status !== 'confirmed' && tx.transfer_status !== 'auto_confirmed');
     const sources: Record<string, number> = {};
     let total = 0;
     for (const tx of incomeTxs) {
