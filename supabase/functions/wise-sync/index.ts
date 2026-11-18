@@ -291,11 +291,12 @@ serve(async (req) => {
       }
     }
 
-    // Fingerprint helper
-    async function computeFingerprint(uid: string, accId: string, postedAt: string, amount: number, desc: string): Promise<string> {
+    // Fingerprint helper: includes externalId or full timestamp so same-day repeat purchases never collide
+    async function computeFingerprint(uid: string, accId: string, postedAt: string, amount: number, desc: string, externalId?: string): Promise<string> {
       const dateOnly = new Date(postedAt).toISOString().slice(0, 10)
       const normDesc = desc.toUpperCase().trim().replace(/\s+/g, ' ').replace(/[^A-Z0-9 ]/g, '')
-      const input = `${uid}|${accId}|${dateOnly}|${amount.toFixed(2)}|${normDesc}`
+      const uniquePart = externalId ? `${dateOnly}|${externalId}` : new Date(postedAt).toISOString()
+      const input = `${uid}|${accId}|${uniquePart}|${amount.toFixed(2)}|${normDesc}`
       const buf = new TextEncoder().encode(input)
       const hash = await crypto.subtle.digest('SHA-256', buf)
       return [...new Uint8Array(hash)].map(b => b.toString(16).padStart(2, '0')).join('')
@@ -437,7 +438,7 @@ serve(async (req) => {
         targetCategoryId = ventureCatId
       }
 
-      const fingerprint = await computeFingerprint(userId, dbAccountId, postedAt, rawAmount, description)
+      const fingerprint = await computeFingerprint(userId, dbAccountId, postedAt, rawAmount, description, item.id ? String(item.id) : undefined)
       const externalTxId = item.id ? String(item.id) : fingerprint
 
       txBatch.push({

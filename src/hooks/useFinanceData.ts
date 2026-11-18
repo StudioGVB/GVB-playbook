@@ -789,25 +789,11 @@ export function useFinanceDataState() {
         // same-day double records, and CSV-to-API sync duplicates, while preserving user categories.
         const {
           cleaned: cleanedEnriched,
-          duplicatesToDelete,
           categoryTransfers,
           externalIdTransfers,
         } = deduplicateTransactions(enrichedWithoutWiseShadowDebits);
 
         setTransactions(cleanedEnriched as any);
-
-        // Run async cleanup in background without blocking render (chunked to avoid URL length limits)
-        if (duplicatesToDelete.length > 0) {
-          const CHUNK_SIZE = 100;
-          const deleteChunks: Promise<any>[] = [];
-          for (let i = 0; i < duplicatesToDelete.length; i += CHUNK_SIZE) {
-            const chunk = duplicatesToDelete.slice(i, i + CHUNK_SIZE);
-            deleteChunks.push(Promise.resolve(supabase.from('finance_transactions').delete().in('id', chunk)));
-          }
-          Promise.all(deleteChunks).then(() => {
-            console.log(`[self-healing] Purged ${duplicatesToDelete.length} duplicate transactions`);
-          }).catch(console.error);
-        }
         for (const [id, catId] of Object.entries(categoryTransfers)) {
           supabase.from('finance_transactions').update({ category_id: catId }).eq('id', id).then(() => {}, console.error);
         }
@@ -1923,6 +1909,7 @@ export function useFinanceDataState() {
           posted_at: postedAt,
           amount: rawAmount,
           description,
+          external_transaction_id: tx.id ? String(tx.id) : null,
         });
         const externalTxId = tx.id ? String(tx.id) : fingerprint;
         const extKey = `${dbAccountId}:${externalTxId}`;
