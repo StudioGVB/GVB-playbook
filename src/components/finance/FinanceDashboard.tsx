@@ -537,6 +537,7 @@ export function FinanceDashboard() {
         trips={trips}
         snapshot={lastWeekSnapshot}
         forceShow={showMondayPreview}
+        syncingBanks={syncingBanks}
       />
 
       {/* ═══ ROW 1: 4 COMPACT SINGLE-NUMBER WIDGETS ═══ */}
