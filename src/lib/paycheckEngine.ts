@@ -180,7 +180,8 @@ export function calculatePaycheckWaterfall(
   goals: FinanceGoal[],
   fixedMonthlyTotal: number,
   essentialVariableMonthly: number,
-  convertToBase: (amt: number, cur: string) => number
+  convertToBase: (amt: number, cur: string) => number,
+  transactions: any[] = []
 ): PaycheckWaterfallBreakdown {
   let remaining = paycheckAmount;
 
@@ -193,6 +194,16 @@ export function calculatePaycheckWaterfall(
   const emergencyTopUp = Math.min(remaining, emergencyShortfall);
   remaining -= emergencyTopUp;
 
+  // Compute linked spend per goal in base currency
+  const spentByGoalBase = new Map<string, number>();
+  for (const tx of transactions || []) {
+    const goalId = (tx as any)?.goal_id;
+    const amt = Number(tx?.amount) || 0;
+    if (!goalId || amt >= 0 || tx?.is_transfer) continue;
+    const baseVal = Math.abs(convertToBase(amt, tx?.currency || 'GBP'));
+    spentByGoalBase.set(goalId, (spentByGoalBase.get(goalId) || 0) + baseVal);
+  }
+
   // Step 3: Goal Pool Monthly Contributions
   const now = new Date();
   const goalAllocations: { goalId: string; goalName: string; monthlyTarget: number; allocatedAmount: number }[] = [];
@@ -203,9 +214,12 @@ export function calculatePaycheckWaterfall(
     if (g.start_date && new Date(g.start_date) > now) continue; // Exclude goals starting in the future
     const targetBase = convertToBase(g.target_amount || 0, g.currency);
     const assignedBase = convertToBase(g.assigned_amount || 0, g.currency);
-    const remainingNeeded = Math.max(0, targetBase - assignedBase);
+    const spentBase = spentByGoalBase.get(g.id) || 0;
+    const refillWhenSpent = Boolean((g as any).refill_when_spent);
+    const effectiveFundedBase = refillWhenSpent ? assignedBase : (assignedBase + spentBase);
+    const remainingNeeded = Math.max(0, targetBase - effectiveFundedBase);
 
-    // Rule: Pot reached target amount -> skip allocation even if deadline is upcoming
+    // Rule: Pot reached target amount -> skip allocation even if deadline is upcoming (unless refill_when_spent is enabled)
     if (remainingNeeded <= 0.01) continue;
 
     let monthlyTarget = 0;

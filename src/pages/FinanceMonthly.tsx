@@ -22,14 +22,14 @@ import { useFixedExpenses, FREQ_TO_MONTHLY } from '@/hooks/useFixedExpenses';
 import { useWeeklyBoosts } from '@/hooks/useWeeklyBoosts';
 import { useFinanceTrips } from '@/hooks/useFinanceTrips';
 import { useWeekTypes } from '@/hooks/useWeekTypes';
-import { computePolicySnapshot, computeRequiredGoalSavingsMonthly, isInternalTransferTx } from '@/lib/policyEngine';
+import { computePolicySnapshot, computeRequiredGoalSavingsMonthly, computeWeekVariableSpend, isInternalTransferTx } from '@/lib/policyEngine';
 import { formatCurrency, baseAmt, parseUkDate, getEffectiveTxMonthDate } from '@/lib/financeUtils';
 import { deduplicateTransactions } from '@/lib/deduplication';
 import MonthlyCashFlowBreakdown from '@/components/finance/MonthlyCashFlowBreakdown';
 import MonthlyPotLedger from '@/components/finance/MonthlyPotLedger';
 import {
   startOfMonth, endOfMonth, subMonths, addMonths, format,
-  getDaysInMonth, getDate, getDay,
+  getDaysInMonth, getDate, getDay, startOfWeek,
 } from 'date-fns';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import {
@@ -121,22 +121,6 @@ export default function FinanceMonthly() {
     finance.categories.filter(c => c.is_essential && c.type === 'variable').map(c => c.id)
   ), [finance.categories]);
 
-  // Monthly overview shows every committed fixed bill, including external bills like rent
-  const fixedMonthly = fixedExpensesMonthlyAll;
-
-  // Monthly budgets
-  const monthlyEssentialBudget = snapshot
-    ? snapshot.weeklyEssentialBudget * 4.33
-    : (assumptions?.estimated_essential_variable || 400);
-  const monthlyFunBudget = snapshot
-    ? snapshot.baseWeeklyFun * 4.33
-    : (assumptions ? (assumptions.weekly_fun_budget || 100) * 4.33 : 0);
-  const monthlyVariableBudget = monthlyEssentialBudget + monthlyFunBudget;
-  const autoTotalBudget = monthlyVariableBudget + fixedMonthly;
-  const budgetOverride = (assumptions as any)?.monthly_budget_override;
-  const monthlyTotalBudget = (budgetOverride != null && budgetOverride !== '') ? Number(budgetOverride) : autoTotalBudget;
-  const expectedIncomeVal = snapshot?.split.monthlyIncome ?? (assumptions?.expected_monthly_income || 0);
-
   const dedupedAllTxns = useMemo(
     () => deduplicateTransactions(finance.transactions).cleaned,
     [finance.transactions]
@@ -154,6 +138,27 @@ export default function FinanceMonthly() {
       return d >= monthStart && d <= monthEnd;
     });
   }, [dedupedAllTxns, monthStart, monthEnd, getEffectiveTxMonthDateLocal]);
+
+  // Extra fixed bills this month (6-week meds difference, extra phone data, higher/extra subscriptions)
+  const extraFixedBillsMonth = useMemo(() => {
+    return monthTxns.reduce((sum, tx) => sum + (Number((tx as any).extra_fixed_bill_amount) || 0), 0);
+  }, [monthTxns]);
+
+  // Monthly overview shows every committed fixed bill plus any extra bills that hit this month
+  const fixedMonthly = fixedExpensesMonthlyAll + extraFixedBillsMonth;
+
+  // Monthly budgets
+  const monthlyEssentialBudget = snapshot
+    ? snapshot.weeklyEssentialBudget * 4.33
+    : (assumptions?.estimated_essential_variable || 400);
+  const monthlyFunBudget = snapshot
+    ? snapshot.baseWeeklyFun * 4.33
+    : (assumptions ? (assumptions.weekly_fun_budget || 100) * 4.33 : 0);
+  const monthlyVariableBudget = monthlyEssentialBudget + monthlyFunBudget;
+  const autoTotalBudget = monthlyVariableBudget + fixedMonthly;
+  const budgetOverride = (assumptions as any)?.monthly_budget_override;
+  const monthlyTotalBudget = (budgetOverride != null && budgetOverride !== '') ? Number(budgetOverride) : autoTotalBudget;
+  const expectedIncomeVal = snapshot?.split.monthlyIncome ?? (assumptions?.expected_monthly_income || 0);
 
   // Previous month transactions for comparison
   const prevMonthStart = startOfMonth(subMonths(selectedMonth, 1));
@@ -371,14 +376,28 @@ export default function FinanceMonthly() {
   const daysElapsed = isCurrentMonth ? getDate(today) : daysInMonth;
   const daysRemaining = Math.max(0, daysInMonth - daysElapsed);
 
+  const currentWeekSummary = useMemo(() => {
+    const ws = startOfWeek(new Date(), { weekStartsOn: 1 });
+    return computeWeekVariableSpend(finance.transactions, finance.categories, ws, trips);
+  }, [finance.transactions, finance.categories, trips]);
+
+  const currentDayOfWeek = Math.max(1, ((today.getDay() + 6) % 7) + 1); // 1=Mon..7=Sun
+  const thisWeekDailyEssPace = currentWeekSummary.essentialSpent / currentDayOfWeek;
+  const thisWeekDailyFunPace = currentWeekSummary.funSpent / currentDayOfWeek;
+  const thisWeekDailyVariablePace = currentWeekSummary.totalSpent / currentDayOfWeek;
+
   const dailyVariablePace = daysElapsed > 0 ? variableSpent / daysElapsed : 0;
   const targetDailyVariable = daysInMonth > 0 ? monthlyVariableBudget / daysInMonth : 0;
   const variableRemaining = Math.max(0, monthlyVariableBudget - variableSpent);
   const safeDailyRemaining = daysRemaining > 0 ? variableRemaining / daysRemaining : 0;
 
-  const projectedVariableSpend = dailyVariablePace * daysInMonth;
-  const projectedSpend = projectedVariableSpend + fixedMonthly;
-  const projectedDiff = projectedSpend - monthlyTotalBudget; // positive => over
+  const futureDailyVariablePace = Math.min(dailyVariablePace, thisWeekDailyVariablePace);
+  const projectedVariableSpend = isCurrentMonth
+    ? variableSpent + futureDailyVariablePace * daysRemaining
+    : variableSpent;
+  const effectiveFixedMonthly = Math.max(fixedMonthly, fixedSpent);
+  const projectedSpend = projectedVariableSpend + effectiveFixedMonthly;
+  const projectedDiff = projectedSpend - (monthlyVariableBudget + effectiveFixedMonthly); // positive => over
 
   const timePct = (daysElapsed / daysInMonth) * 100;
   const variableUsedPct = monthlyVariableBudget > 0 ? (variableSpent / monthlyVariableBudget) * 100 : 0;
@@ -621,11 +640,13 @@ export default function FinanceMonthly() {
     };
   }, [finance.transactions, selectedMonth, catMap, essentialCatIds, isFixedTx, reimbursementsOn]);
 
+  const mtdDailyEssPace = daysElapsed > 0 ? essentialSpent / daysElapsed : 0;
+  const mtdDailyFunPace = daysElapsed > 0 ? funSpent / daysElapsed : 0;
   const projectedEssentialSpend = isCurrentMonth && daysElapsed > 0
-    ? (essentialSpent / daysElapsed) * daysInMonth
+    ? essentialSpent + Math.min(mtdDailyEssPace, thisWeekDailyEssPace) * daysRemaining
     : essentialSpent;
   const projectedFunSpend = isCurrentMonth && daysElapsed > 0
-    ? (funSpent / daysElapsed) * daysInMonth
+    ? funSpent + Math.min(mtdDailyFunPace, thisWeekDailyFunPace) * daysRemaining
     : funSpent;
 
   const thisMonthComparisonTarget = useMemo(() => {

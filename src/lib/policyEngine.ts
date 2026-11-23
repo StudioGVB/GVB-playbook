@@ -534,12 +534,18 @@ export function computePolicySnapshot(
     computedEssentialVariable,
   );
   
-  // Survival cost = actual fixed bills + essential variable (pools use Up-only bills)
-  const fixedMonthly = fixedExpensesMonthly ?? 0;
+  // Survival cost = actual fixed bills + extra bills this month + essential variable
+  const monthPrefix = format(now, 'yyyy-MM');
+  const extraFixedThisMonth = transactions.reduce((sum, tx) => {
+    const extra = Number((tx as any).extra_fixed_bill_amount) || 0;
+    if (extra <= 0) return sum;
+    return String(tx.posted_at || '').startsWith(monthPrefix) ? sum + extra : sum;
+  }, 0);
+  const fixedMonthly = (fixedExpensesMonthly ?? 0) + extraFixedThisMonth;
   const survivalCostMonthly = fixedMonthly + essentialVariable;
   // Emergency floor should cover ALL bills you must pay if income stops —
   // including rent even if it's currently paid from an external account.
-  const emergencySurvivalMonthly = (fixedExpensesMonthlyAll ?? fixedMonthly) + essentialVariable;
+  const emergencySurvivalMonthly = ((fixedExpensesMonthlyAll ?? (fixedExpensesMonthly ?? 0)) + extraFixedThisMonth) + essentialVariable;
   const emergencyFloor = emergencySurvivalMonthly * assumptions.buffer_months * 1.2; // 20% contingency
   
   const totalLiquidCash = accounts
@@ -1007,8 +1013,14 @@ export function computeMoneySplit(
     ? overrideMonthlyIncome
     : computeActualSpendingIncome(transactions, categories, referenceDate).total;
 
-  // 2. Committed fixed bills (use passed fixed expenses if provided, else historic average)
-  let monthlyMandatory = fixedExpensesMonthly ?? 0;
+  // 2. Committed fixed bills + any extra bills/overages (6-week meds, extra phone data, subscriptions) this month
+  const refMonthPrefix = format(referenceDate, 'yyyy-MM');
+  const extraFixedInRefMonth = transactions.reduce((sum, tx) => {
+    const extra = Number((tx as any).extra_fixed_bill_amount) || 0;
+    if (extra <= 0) return sum;
+    return String(tx.posted_at || '').startsWith(refMonthPrefix) ? sum + extra : sum;
+  }, 0);
+  let monthlyMandatory = (fixedExpensesMonthly ?? 0) + extraFixedInRefMonth;
   if (!fixedExpensesMonthly) {
     const threeMonthsAgo = new Date(now);
     threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);

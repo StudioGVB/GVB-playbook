@@ -328,7 +328,19 @@ export function FinanceDashboard() {
   const combinedDailyPace = daysLeftInWeek > 0 ? combinedSafeToSpend / daysLeftInWeek : combinedSafeToSpend;
 
   // 2. Monthly Spend & Projected Under/Over
-  const fixedMonthly = fixedExpensesMonthlyAll;
+  const extraFixedBillsMonth = useMemo(() => {
+    const { cleaned: dedupedTxs } = deduplicateTransactions(finance.transactions);
+    let extra = 0;
+    for (const tx of dedupedTxs) {
+      const d = parseUkDate(tx.posted_at);
+      if (d >= monthStart && d <= monthEnd) {
+        extra += Number((tx as any).extra_fixed_bill_amount) || 0;
+      }
+    }
+    return extra;
+  }, [finance.transactions, monthStart, monthEnd]);
+
+  const fixedMonthly = Math.max(fixedExpensesMonthlyAll + extraFixedBillsMonth, fixedSpentMonth);
   const monthlyVariableBudget = (snapshot.weeklyEssentialBudget + snapshot.baseWeeklyFun) * 4.33;
   const autoTotalBudget = monthlyVariableBudget + fixedMonthly;
   const budgetOverride = (assumptions as any)?.monthly_budget_override;
@@ -338,7 +350,11 @@ export function FinanceDashboard() {
   const variableSpentMonth = essentialSpentMonth + funSpentMonth;
   const totalSpentMonth = variableSpentMonth + fixedSpentMonth;
   const dailyVariablePace = daysElapsed > 0 ? variableSpentMonth / daysElapsed : 0;
-  const projectedSpend = dailyVariablePace * daysInMonth + fixedMonthly;
+  const thisWeekDailyVariablePace = dayOfWeek > 0 ? totalSpentThisWeek / dayOfWeek : dailyVariablePace;
+  const remainingDaysInMonth = Math.max(0, daysInMonth - daysElapsed);
+  const futureDailyVariablePace = Math.min(dailyVariablePace, thisWeekDailyVariablePace);
+  const projectedVariableSpend = variableSpentMonth + futureDailyVariablePace * remainingDaysInMonth;
+  const projectedSpend = projectedVariableSpend + fixedMonthly;
   const projectedDiff = projectedSpend - monthlyTotalBudget; // <= 0 means under budget
 
   // 3. Runway

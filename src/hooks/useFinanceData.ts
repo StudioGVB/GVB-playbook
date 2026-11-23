@@ -79,6 +79,7 @@ export interface FinanceGoal {
   assigned_amount: number;
   percent_allocation: number;
   color: string | null;
+  refill_when_spent?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -822,164 +823,168 @@ export function useFinanceDataState() {
           externalIdTransfers,
         } = deduplicateTransactions(enrichedWithoutWiseShadowDebits);
 
-        // Enrich Fixed Bills:
-        // 1) Multi-week / 6-week bills (e.g. Meds every 6 weeks, quarterly, yearly): full cycle payment is covered by Fixed Bills (0 overage).
-        // 2) Monthly / weekly / fortnightly bills & subscriptions (e.g. Phone Bill + extra data, subscriptions):
-        //    Base budgeted amount is covered by Fixed Bills, and only the extra overage above the budgeted amount
-        //    is deducted from the Weekly Budget / Savings Stash.
+        // Enrich Fixed Bills & Extra Bills:
+        // All fixed bills, 6-week Meds/pharmacy/clinic payments, Phone + extra data top-ups, and Subscriptions
+        // are covered under Fixed Bills (fixed_overage_amount = 0) so they never pollute day-to-day Variable Spending.
+        // Any amount above the 1-month template budget (or any extra un-templated bill/subscription) is tracked in
+        // tx.extra_fixed_bill_amount so the Fixed Bills budget automatically expands to cover it.
         const fixedExpensesList = ((fixedExpRes?.data || []) as any[]);
-        if (fixedExpensesList.length > 0) {
-          const parseFreqWeeks = (freq: string): number | null => {
-            const m = String(freq || '').match(/(?:every[_\s]+)?(\d+)[_\s]*weeks?/i);
-            return m ? (parseInt(m[1], 10) || null) : null;
-          };
-          const getMonthlyMult = (freq: string): number => {
-            if (freq === 'weekly') return 52 / 12;
-            if (freq === 'fortnightly') return 26 / 12;
-            if (freq === 'monthly') return 1;
-            if (freq === 'quarterly') return 1 / 3;
-            if (freq === 'yearly') return 1 / 12;
-            const w = parseFreqWeeks(freq);
-            if (w && w > 0) return 52 / (12 * w);
-            return 1;
-          };
-          const isMultiWeekOrMedsBill = (fe: any): boolean => {
-            const freq = String(fe.frequency || 'monthly').toLowerCase();
-            const w = parseFreqWeeks(freq);
-            if ((w !== null && w >= 3) || freq === 'quarterly' || freq === 'yearly') return true;
-            const nameNotes = `${fe.name || ''} ${fe.notes || ''}`.toLowerCase();
-            return /\b(meds|medication|prescription|pharmacy|chemist|elvanse|amfexa|adhd|titration|clinic)\b/i.test(nameNotes);
-          };
-          const normText = (s: string) =>
-            (s || '').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
-          const stopWords = new Set(['bill', 'bills', 'plan', 'monthly', 'subscription', 'sub', 'the', 'and', 'for', 'fee', 'fees', 'flat', 'uk']);
+        const parseFreqWeeks = (freq: string): number | null => {
+          const m = String(freq || '').match(/(?:every[_\s]+)?(\d+)[_\s]*weeks?/i);
+          return m ? (parseInt(m[1], 10) || null) : null;
+        };
+        const getMonthlyMult = (freq: string): number => {
+          if (freq === 'weekly') return 52 / 12;
+          if (freq === 'fortnightly') return 26 / 12;
+          if (freq === 'monthly') return 1;
+          if (freq === 'quarterly') return 1 / 3;
+          if (freq === 'yearly') return 1 / 12;
+          const w = parseFreqWeeks(freq);
+          if (w && w > 0) return 52 / (12 * w);
+          return 1;
+        };
+        const isMultiWeekOrMedsBill = (fe: any): boolean => {
+          const freq = String(fe.frequency || 'monthly').toLowerCase();
+          const w = parseFreqWeeks(freq);
+          if ((w !== null && w >= 3) || freq === 'quarterly' || freq === 'yearly') return true;
+          const nameNotes = `${fe.name || ''} ${fe.notes || ''}`.toLowerCase();
+          return /\b(meds|medication|prescription|pharmacy|chemist|elvanse|amfexa|adhd|titration|clinic)\b/i.test(nameNotes);
+        };
+        const normText = (s: string) =>
+          (s || '').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
+        const stopWords = new Set(['bill', 'bills', 'plan', 'monthly', 'subscription', 'sub', 'the', 'and', 'for', 'fee', 'fees', 'flat', 'uk']);
 
-          const matchesBillTitle = (fe: any, tx: any): boolean => {
-            const feRaw = `${fe.name || ''} ${fe.notes || ''}`;
-            const txRaw = `${tx.merchant || ''} ${tx.description || ''}`;
-            const nFe = normText(fe.name || '');
-            const nTx = normText(txRaw);
-            if (!nFe || !nTx) return false;
+        const matchesBillTitle = (fe: any, tx: any): boolean => {
+          const feRaw = `${fe.name || ''} ${fe.notes || ''}`;
+          const txRaw = `${tx.merchant || ''} ${tx.description || ''}`;
+          const nFe = normText(fe.name || '');
+          const nTx = normText(txRaw);
+          if (!nFe || !nTx) return false;
 
-            const isRentExp = /\b(rent|flat|housing|accommodation)\b/i.test(feRaw);
-            if (isRentExp) {
-              const absBase = Math.abs(Number(tx.base_amount ?? tx.amount) || 0);
-              return absBase >= 100 && /\b(rent|landlord|accommodation|tenancy|standing order)\b/i.test(txRaw);
-            }
-            if (/\b(phone|mobile|sim|data|lyca|lycamobile|vodafone|o2|ee|three|giffgaff|optus|telstra|lebara|smarty|vox)\b/i.test(feRaw) &&
-                /\b(lyca|lycamobile|vodafone|optus|telstra|ee|o2|giffgaff|three|lebara|smarty|vox|mobile|phone bill)\b/i.test(txRaw)) {
-              return true;
-            }
-            if (/\b(meds|medication|prescription|pharmacy|chemist|elvanse|amfexa|adhd|titration|clinic)\b/i.test(feRaw) &&
-                /\b(meds|medication|prescription|pharmacy|chemist|boots|superdrug|lloyds|well pharmacy|broadway|signature|elvanse|amfexa|adhd|titration|clinic)\b/i.test(txRaw)) {
-              return true;
-            }
-            if (nFe.length >= 4 && nTx.includes(nFe)) return true;
-            const feTokens = nFe.split(' ').filter(w => w.length >= 3 && !stopWords.has(w));
-            if (feTokens.length === 0) return false;
-            const txTokenSet = new Set(nTx.split(' '));
-            return feTokens.every(w => txTokenSet.has(w) || (w.length >= 4 && nTx.includes(w)));
-          };
-
-          const txByFeAndMonth = new Map<string, any[]>();
-          const autoLinkUpdates: Array<{ txId: string; feId: string }> = [];
-
-          for (const tx of cleanedEnriched as any[]) {
-            if (Number(tx.amount) >= 0 || tx.is_transfer || tx.is_reimbursable) continue;
-            if (tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') continue;
-            if (tx.goal_id || tx.trip_id || tx.is_travel_spend) continue;
-
+          const isRentExp = /\b(rent|flat|housing|accommodation)\b/i.test(feRaw);
+          if (isRentExp) {
             const absBase = Math.abs(Number(tx.base_amount ?? tx.amount) || 0);
-            if (absBase <= 0) continue;
+            return absBase >= 100 && /\b(rent|landlord|accommodation|tenancy|standing order)\b/i.test(txRaw);
+          }
+          if (/\b(phone|mobile|sim|data|lyca|lycamobile|vodafone|voxi|o2|ee|three|giffgaff|optus|telstra|lebara|smarty|vox)\b/i.test(feRaw) &&
+              /\b(lyca|lycamobile|vodafone|voxi|optus|telstra|ee|o2|giffgaff|three|lebara|smarty|vox|mobile|phone bill|id mobile|tesco mobile)\b/i.test(txRaw)) {
+            return true;
+          }
+          if (/\b(meds|medication|prescription|pharmacy|chemist|elvanse|amfexa|adhd|titration|clinic)\b/i.test(feRaw) &&
+              /\b(meds|medication|prescription|pharmacy|chemist|boots|superdrug|lloyds|well pharmacy|broadway|signature|elvanse|amfexa|adhd|titration|clinic|psychiatry|mypace|harley)\b/i.test(txRaw)) {
+            return true;
+          }
+          if (nFe.length >= 4 && nTx.includes(nFe)) return true;
+          const feTokens = nFe.split(' ').filter(w => w.length >= 3 && !stopWords.has(w));
+          if (feTokens.length === 0) return false;
+          const txTokenSet = new Set(nTx.split(' '));
+          return feTokens.every(w => txTokenSet.has(w) || (w.length >= 4 && nTx.includes(w)));
+        };
 
-            let matchedFe = tx.fixed_expense_id
-              ? fixedExpensesList.find(f => f.id === tx.fixed_expense_id)
-              : undefined;
+        const txByFeAndMonth = new Map<string, any[]>();
+        const autoLinkUpdates: Array<{ txId: string; feId: string }> = [];
+        const catByIdMap = new Map<string, any>((catRes.data || []).map((c: any) => [c.id, c]));
 
-            if (!matchedFe) {
-              matchedFe = fixedExpensesList.find(fe => {
-                const iso = String(tx.posted_at || '').slice(0, 10);
-                if (fe.effective_from && iso < String(fe.effective_from).slice(0, 10)) return false;
-                if (fe.effective_to && iso > String(fe.effective_to).slice(0, 10)) return false;
-                if (!matchesBillTitle(fe, tx)) return false;
+        for (const tx of cleanedEnriched as any[]) {
+          if (Number(tx.amount) >= 0 || tx.is_transfer || tx.is_reimbursable) continue;
+          if (tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') continue;
+          if (tx.goal_id || tx.trip_id || tx.is_travel_spend) continue;
 
-                const feMonthlyBase = toBase((Number(fe.amount) || 0) * getMonthlyMult(fe.frequency), fe.currency || baseCurrency);
-                const feSingleBase = toBase(Number(fe.amount) || 0, fe.currency || baseCurrency);
-                const expectedBase = Math.max(feMonthlyBase, feSingleBase);
-                if (expectedBase <= 0) return false;
+          const absBase = Math.abs(Number(tx.base_amount ?? tx.amount) || 0);
+          if (absBase <= 0) continue;
 
-                if (isMultiWeekOrMedsBill(fe)) {
-                  return absBase >= expectedBase * 0.25 && absBase <= Math.max(expectedBase * 3.0, expectedBase + 150);
-                }
-                return absBase >= Math.min(2, expectedBase * 0.2) && absBase <= Math.max(expectedBase * 3.0, expectedBase + 60);
-              });
+          let matchedFe = tx.fixed_expense_id
+            ? fixedExpensesList.find(f => f.id === tx.fixed_expense_id)
+            : undefined;
 
-              if (matchedFe) {
-                tx.fixed_expense_id = matchedFe.id;
-                tx.is_fixed = true;
-                autoLinkUpdates.push({ txId: tx.id, feId: matchedFe.id });
+          if (!matchedFe && fixedExpensesList.length > 0) {
+            matchedFe = fixedExpensesList.find(fe => {
+              const iso = String(tx.posted_at || '').slice(0, 10);
+              if (fe.effective_from && iso < String(fe.effective_from).slice(0, 10)) return false;
+              if (fe.effective_to && iso > String(fe.effective_to).slice(0, 10)) return false;
+              if (!matchesBillTitle(fe, tx)) return false;
+
+              const feMonthlyBase = toBase((Number(fe.amount) || 0) * getMonthlyMult(fe.frequency), fe.currency || baseCurrency);
+              const feSingleBase = toBase(Number(fe.amount) || 0, fe.currency || baseCurrency);
+              const expectedBase = Math.max(feMonthlyBase, feSingleBase);
+              if (expectedBase <= 0) return false;
+
+              if (isMultiWeekOrMedsBill(fe)) {
+                return absBase >= expectedBase * 0.2 && absBase <= Math.max(expectedBase * 3.5, expectedBase + 150);
               }
-            }
+              return absBase >= Math.min(2, expectedBase * 0.15) && absBase <= Math.max(expectedBase * 3.5, expectedBase + 80);
+            });
 
             if (matchedFe) {
-              const monthKey = String(tx.posted_at || '').slice(0, 7);
-              const groupKey = `${matchedFe.id}::${monthKey}`;
-              const arr = txByFeAndMonth.get(groupKey) || [];
-              arr.push({ tx, fe: matchedFe });
-              txByFeAndMonth.set(groupKey, arr);
-            } else if (tx.is_fixed) {
+              tx.fixed_expense_id = matchedFe.id;
+              tx.is_fixed = true;
+              autoLinkUpdates.push({ txId: tx.id, feId: matchedFe.id });
+            }
+          }
+
+          if (matchedFe) {
+            const monthKey = String(tx.posted_at || '').slice(0, 7);
+            const groupKey = `${matchedFe.id}::${monthKey}`;
+            const arr = txByFeAndMonth.get(groupKey) || [];
+            arr.push({ tx, fe: matchedFe });
+            txByFeAndMonth.set(groupKey, arr);
+          } else {
+            const txCatObj = tx.category_id ? catByIdMap.get(tx.category_id) : undefined;
+            const catNameLower = String(txCatObj?.name || '').toLowerCase();
+            const txRawText = `${tx.merchant || ''} ${tx.description || ''}`;
+            const isFixedOrBillCat =
+              txCatObj?.type === 'fixed' ||
+              /\b(bills?|fixed|subscriptions?|utilities|rent|housing|phone|mobile|internet|wifi|broadband|meds|medication|medical|pharmacy|healthcare|health|clinic|prescription)\b/i.test(catNameLower);
+            const isKnownBillSubOrMedsMerchant =
+              /\b(apple\.com\/bill|itunes|icloud|spotify|netflix|disney\+|amazon prime|prime video|audible|google one|chatgpt|openai|claude|anthropic|canva|adobe|figma|notion|patreon|substack|whoop|strava|puregym|the gym|jd gyms|vodafone|voxi|giffgaff|lyca|lycamobile|lebara|smarty|id mobile|tesco mobile|virgin media|hyperoptic|octopus|british gas|united utilities|council tax|prescription|pharmacy|chemist|well pharmacy|broadway|signature|elvanse|amfexa|adhd|titration|psychiatry|mypace|harley)\b/i.test(txRawText);
+
+            if (tx.is_fixed || isFixedOrBillCat || isKnownBillSubOrMedsMerchant) {
+              tx.is_fixed = true;
               tx.fixed_covered_amount = absBase;
               tx.fixed_overage_amount = 0;
+              tx.extra_fixed_bill_amount = absBase;
             }
           }
+        }
 
-          for (const [, group] of txByFeAndMonth.entries()) {
-            const fe = group[0].fe;
-            const multiWeek = isMultiWeekOrMedsBill(fe);
-            const feMonthlyBase = toBase((Number(fe.amount) || 0) * getMonthlyMult(fe.frequency), fe.currency || baseCurrency);
-            const feSingleBase = toBase(Number(fe.amount) || 0, fe.currency || baseCurrency);
-            const budgetCap = Math.max(feMonthlyBase, feSingleBase);
-            const tolerance = Math.max(0.5, budgetCap * 0.02);
+        for (const [, group] of txByFeAndMonth.entries()) {
+          const fe = group[0].fe;
+          const multiWeek = isMultiWeekOrMedsBill(fe);
+          const feMonthlyBase = toBase((Number(fe.amount) || 0) * getMonthlyMult(fe.frequency), fe.currency || baseCurrency);
+          const feSingleBase = toBase(Number(fe.amount) || 0, fe.currency || baseCurrency);
+          const budgetCap = Math.max(feMonthlyBase, feSingleBase);
 
-            group.sort((a, b) => new Date(a.tx.posted_at).getTime() - new Date(b.tx.posted_at).getTime());
+          group.sort((a, b) => new Date(a.tx.posted_at).getTime() - new Date(b.tx.posted_at).getTime());
 
-            let cumSpent = 0;
-            for (const { tx } of group) {
-              const amt = Math.abs(Number(tx.base_amount ?? tx.amount) || 0);
-              tx.is_fixed = true;
-              tx.fixed_expense_id = fe.id;
-              tx.fixed_expense_name = fe.name;
-              tx.fixed_bill_budget_amount = budgetCap;
-              tx.is_multi_week_fixed_bill = multiWeek;
+          let cumSpent = 0;
+          for (const { tx } of group) {
+            const amt = Math.abs(Number(tx.base_amount ?? tx.amount) || 0);
+            const prevCum = cumSpent;
+            cumSpent += amt;
 
-              if (multiWeek) {
-                // Full 6-week / multi-week payment is covered by Fixed Bills (averages out over the cycle, 0 overage penalty)
-                tx.fixed_covered_amount = amt;
-                tx.fixed_overage_amount = 0;
-              } else {
-                const prevCum = cumSpent;
-                cumSpent += amt;
-                if (cumSpent <= budgetCap + tolerance) {
-                  tx.fixed_covered_amount = amt;
-                  tx.fixed_overage_amount = 0;
-                } else {
-                  const covered = Math.max(0, Math.min(cumSpent, budgetCap) - prevCum);
-                  const overage = Math.max(0, Math.round((amt - covered) * 100) / 100);
-                  tx.fixed_covered_amount = Math.round(covered * 100) / 100;
-                  tx.fixed_overage_amount = overage;
-                }
-              }
-            }
+            // Every fixed bill & extra bill portion is covered under Fixed Bills so it never inflates variable spend / weekly allowance
+            tx.is_fixed = true;
+            tx.fixed_expense_id = fe.id;
+            tx.fixed_expense_name = fe.name;
+            tx.fixed_bill_budget_amount = budgetCap;
+            tx.is_multi_week_fixed_bill = multiWeek;
+            tx.fixed_covered_amount = amt;
+            tx.fixed_overage_amount = 0;
+
+            // Track how much of this bill exceeds the 1-month prorated template in fixedExpensesMonthly
+            // so the Fixed Bills budget automatically reserves enough to cover extra phone data, higher subscriptions, or 6-week Meds!
+            const coveredByMonthlyTemplate = Math.max(0, Math.min(cumSpent, feMonthlyBase) - prevCum);
+            tx.extra_fixed_bill_amount = Math.max(0, Math.round((amt - coveredByMonthlyTemplate) * 100) / 100);
           }
+        }
 
-          if (autoLinkUpdates.length > 0) {
-            for (const u of autoLinkUpdates) {
-              supabase
-                .from('finance_transactions')
-                .update({ fixed_expense_id: u.feId, is_fixed: true } as any)
-                .eq('id', u.txId)
-                .then(() => {}, console.error);
-            }
+        if (autoLinkUpdates.length > 0) {
+          for (const u of autoLinkUpdates) {
+            supabase
+              .from('finance_transactions')
+              .update({ fixed_expense_id: u.feId, is_fixed: true } as any)
+              .eq('id', u.txId)
+              .then(() => {}, console.error);
           }
         }
 

@@ -103,6 +103,19 @@ export default function MonthlyPotPlanner({
       .sort((a, b) => (a.priority ?? 99) - (b.priority ?? 99) || a.name.localeCompare(b.name));
   }, [goals]);
 
+  // Compute linked spend per goal in base currency
+  const spentByGoalBase = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const tx of transactions || []) {
+      const goalId = (tx as any)?.goal_id;
+      const amt = Number(tx?.amount) || 0;
+      if (!goalId || amt >= 0 || tx?.is_transfer) continue;
+      const baseVal = Math.abs(convertToBase(amt, tx?.currency || 'GBP'));
+      map.set(goalId, (map.get(goalId) || 0) + baseVal);
+    }
+    return map;
+  }, [transactions, convertToBase]);
+
   // Goal-driven recommendations
   const recommendations = useMemo(() => {
     const list: { goal: FinanceGoal; remaining: number; isFull: boolean; monthlyTarget: number; recommendedPct: number }[] = [];
@@ -111,7 +124,10 @@ export default function MonthlyPotPlanner({
     for (const g of allocatablePots) {
       const targetBase = convertToBase(g.target_amount || 0, g.currency);
       const assignedBase = convertToBase(g.assigned_amount || 0, g.currency);
-      const remaining = Math.max(0, targetBase - assignedBase);
+      const spentBase = spentByGoalBase.get(g.id) || 0;
+      const refillWhenSpent = Boolean(g.refill_when_spent);
+      const effectiveFundedBase = refillWhenSpent ? assignedBase : (assignedBase + spentBase);
+      const remaining = Math.max(0, targetBase - effectiveFundedBase);
       const isFull = remaining <= 0.01;
 
       let monthlyTarget = 0;
@@ -136,7 +152,7 @@ export default function MonthlyPotPlanner({
       const pct = sumTargets > 0 ? (item.monthlyTarget / sumTargets) * 100 : (100 / Math.max(1, allocatablePots.length));
       return { ...item, recommendedPct: pct };
     });
-  }, [allocatablePots, convertToBase, targetDate, potPoolTotal]);
+  }, [allocatablePots, convertToBase, targetDate, potPoolTotal, spentByGoalBase]);
 
   // Pct state for the interactive sliders
   const [pcts, setPcts] = useState<Record<string, number>>({});
@@ -202,7 +218,9 @@ export default function MonthlyPotPlanner({
   const handleSetPotAmt = (goal: FinanceGoal, amt: number) => {
     const targetBase = convertToBase(goal.target_amount || 0, goal.currency);
     const assignedBase = convertToBase(goal.assigned_amount || 0, goal.currency);
-    const remaining = Math.max(0, targetBase - assignedBase);
+    const spentBase = spentByGoalBase.get(goal.id) || 0;
+    const effectiveFundedBase = goal.refill_when_spent ? assignedBase : (assignedBase + spentBase);
+    const remaining = Math.max(0, targetBase - effectiveFundedBase);
 
     // If pot is at capacity and user adds > 0, show capacity prompt
     if (remaining <= 0.01 && amt > 0) {
@@ -229,7 +247,9 @@ export default function MonthlyPotPlanner({
     const count = allocatablePots.filter(g => {
       const targetBase = convertToBase(g.target_amount || 0, g.currency);
       const assignedBase = convertToBase(g.assigned_amount || 0, g.currency);
-      return targetBase - assignedBase > 0.01;
+      const spentBase = spentByGoalBase.get(g.id) || 0;
+      const effectiveFundedBase = g.refill_when_spent ? assignedBase : (assignedBase + spentBase);
+      return targetBase - effectiveFundedBase > 0.01;
     }).length;
     if (count === 0) return;
     const per = Math.floor(100 / count);
@@ -237,7 +257,9 @@ export default function MonthlyPotPlanner({
     allocatablePots.forEach(g => {
       const targetBase = convertToBase(g.target_amount || 0, g.currency);
       const assignedBase = convertToBase(g.assigned_amount || 0, g.currency);
-      next[g.id] = targetBase - assignedBase > 0.01 ? per : 0;
+      const spentBase = spentByGoalBase.get(g.id) || 0;
+      const effectiveFundedBase = g.refill_when_spent ? assignedBase : (assignedBase + spentBase);
+      next[g.id] = targetBase - effectiveFundedBase > 0.01 ? per : 0;
     });
     setPcts(next);
   };
@@ -530,7 +552,10 @@ export default function MonthlyPotPlanner({
             const amt = allocatedAmounts[g.id] || 0;
             const targetBase = convertToBase(g.target_amount || 0, g.currency);
             const assignedBase = convertToBase(g.assigned_amount || 0, g.currency);
-            const remaining = Math.max(0, targetBase - assignedBase);
+            const spentBase = spentByGoalBase.get(g.id) || 0;
+            const refillWhenSpent = Boolean(g.refill_when_spent);
+            const effectiveFundedBase = refillWhenSpent ? assignedBase : (assignedBase + spentBase);
+            const remaining = Math.max(0, targetBase - effectiveFundedBase);
             const isFull = remaining <= 0.01;
             const rec = recommendations.find(r => r.goal.id === g.id);
 
@@ -544,7 +569,7 @@ export default function MonthlyPotPlanner({
                         <span className="font-display font-bold text-sm text-slate-900">{g.name}</span>
                         {isFull && (
                           <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200 text-[10px] font-bold">
-                            🎉 Goal Reached (Full)
+                            🎉 {spentBase > 0 && !refillWhenSpent ? 'Goal Hit (Ignored on Payday)' : 'Goal Reached (Full)'}
                           </Badge>
                         )}
                         {g.deadline && !isFull && (
@@ -552,10 +577,32 @@ export default function MonthlyPotPlanner({
                             Due {format(new Date(g.deadline), 'MMM yyyy')} · needs {fmt(rec?.monthlyTarget || 0)}/mo
                           </span>
                         )}
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            const nextVal = !refillWhenSpent;
+                            await updateGoal(g.id, { refill_when_spent: nextVal });
+                            toast.success(
+                              nextVal
+                                ? `${g.name}: set to auto-refill back to target on payday`
+                                : `${g.name}: once hit, won't refill spent funds on payday`
+                            );
+                          }}
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border transition-colors cursor-pointer ${
+                            refillWhenSpent
+                              ? 'bg-sky-50 text-sky-800 border-sky-200 hover:bg-sky-100'
+                              : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'
+                          }`}
+                          title="Toggle whether spending from this pot triggers a payday refill"
+                        >
+                          <RotateCcw className="w-2.5 h-2.5" />
+                          {refillWhenSpent ? 'Auto-refill when spent' : 'Once hit, ignore'}
+                        </button>
                       </div>
                       <p className="text-[11px] text-slate-500 tabular-nums">
-                        Current: {fmt(assignedBase)} / {fmt(targetBase)}
-                        {!isFull && <span className="text-slate-400 ml-1.5">({fmt(remaining)} remaining)</span>}
+                        In pot: {fmt(assignedBase)}
+                        {spentBase > 0 && ` (+${fmt(spentBase)} spent)`} / {fmt(targetBase)}
+                        {!isFull && <span className="text-slate-400 ml-1.5">({fmt(remaining)} remaining to fund)</span>}
                       </p>
                     </div>
                   </div>
