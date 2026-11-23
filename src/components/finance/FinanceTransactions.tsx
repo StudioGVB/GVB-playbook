@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
-import { Search, Check, Sparkles, Loader2, X, ArrowLeftRight, Target, Receipt, Undo2, DollarSign, Briefcase, RefreshCw, Wallet, Plus, Trash2, Scissors, Handshake } from 'lucide-react';
+import { Search, Check, Sparkles, Loader2, X, ArrowLeftRight, Target, Receipt, Undo2, DollarSign, Briefcase, RefreshCw, Wallet, Plus, Trash2, Scissors, Handshake, MoreHorizontal } from 'lucide-react';
 import { formatCurrency, formatUkDate, parseUkDate, baseAmt } from '@/lib/financeUtils';
 import { deduplicateTransactions } from '@/lib/deduplication';
 import { format, isToday, isYesterday, startOfWeek, endOfWeek, subWeeks } from 'date-fns';
@@ -16,6 +16,17 @@ import type { useFinanceData } from '@/hooks/useFinanceData';
 import type { FixedExpense } from '@/hooks/useFixedExpenses';
 import SplitTransactionDialog from './SplitTransactionDialog';
 import PaybackLinkDialog from './PaybackLinkDialog';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
+} from '@/components/ui/dropdown-menu';
 
 type Props = { finance: ReturnType<typeof useFinanceData>; initialAccountFilter?: string; fixedExpenses?: FixedExpense[] };
 
@@ -1274,10 +1285,10 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                         </p>
                       </div>
 
-                      {/* Right: Category, Amount & Actions in clean aligned columns */}
-                      <div className="flex items-center gap-3 sm:gap-6 shrink-0 ml-auto">
+                      {/* Right: Category, Amount & Actions in clean aligned columns (mobile responsive) */}
+                      <div className="flex items-center justify-between sm:justify-end gap-2 sm:gap-6 w-full sm:w-auto shrink-0 mt-1 sm:mt-0 pt-1.5 sm:pt-0 border-t border-slate-100/80 dark:border-slate-800/60 sm:border-0">
                         {/* Category pill */}
-                        <div className="w-24 sm:w-28 flex justify-start shrink-0 min-w-0">
+                        <div className="w-auto sm:w-28 flex justify-start shrink-0 min-w-0">
                           <Popover>
                             <PopoverTrigger asChild>
                               {displayCat ? (
@@ -1329,8 +1340,10 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                           </Popover>
                         </div>
 
-                        {/* Amount (Clean left-aligned column with generous width so amounts never touch the action icons) */}
-                        <div className="w-28 sm:w-36 text-left shrink-0">
+                        {/* Amount & Actions container */}
+                        <div className="flex items-center gap-2.5 sm:gap-6 shrink-0 ml-auto">
+                          {/* Amount */}
+                          <div className="w-auto sm:w-36 text-right sm:text-left shrink-0">
                           <p className={`text-xs sm:text-sm font-display font-bold tabular-nums ${isRealIncome ? 'text-[hsl(var(--success))]' : 'text-slate-900'}`}>
                             {(() => {
                               const rawAmt = tx.base_amount !== undefined && tx.base_amount !== null ? tx.base_amount : tx.amount;
@@ -1353,8 +1366,8 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                           })()}
                         </div>
 
-                        {/* Action Icons Toolbar (Comfortable fixed-width container ensuring all action buttons sit cleanly on the right) */}
-                        <div className="w-40 sm:w-48 flex items-center justify-end gap-1.5 shrink-0">
+                        {/* Desktop Action Icons Toolbar (Comfortable fixed-width container on larger screens) */}
+                        <div className="hidden sm:flex items-center justify-end gap-1.5 shrink-0 w-40 sm:w-48">
                           {/* Pool assignment / refund flag */}
                           {tx.amount < 0 && goals.length > 0 ? (
                             <Popover open={openPoolPopoverTxId === tx.id} onOpenChange={open => setOpenPoolPopoverTxId(open ? tx.id : null)}>
@@ -1625,10 +1638,232 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                             <Trash2 className="w-4 h-4" />
                           </button>
                         </div>
+
+                        {/* Mobile Action Menu (Single 3-dots icon button on phone) */}
+                        <div className="flex sm:hidden items-center shrink-0">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <button
+                                className="w-8 h-8 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 active:bg-slate-200 flex items-center justify-center shrink-0 transition-colors shadow-2xs"
+                                title="Actions"
+                                aria-label="Transaction actions"
+                              >
+                                <MoreHorizontal className="w-4 h-4" />
+                              </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-56 p-1.5 shadow-xl">
+                              <DropdownMenuLabel className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground px-2 py-1">
+                                Actions
+                              </DropdownMenuLabel>
+
+                              {/* Split */}
+                              {tx.amount < 0 && (
+                                <DropdownMenuItem
+                                  onClick={() => {
+                                    setTxToSplit(tx);
+                                    setSplitDialogOpen(true);
+                                  }}
+                                  className="flex items-center gap-2 text-xs py-2 cursor-pointer font-medium"
+                                >
+                                  <Scissors className="w-4 h-4 text-fuchsia-600" />
+                                  <span>
+                                    {(tx.raw as any)?.split_meta?.is_split_parent
+                                      ? 'Manage / Unsplit'
+                                      : 'Split with a Pot / Weekly'}
+                                  </span>
+                                </DropdownMenuItem>
+                              )}
+
+                              {/* Friend Payback */}
+                              {!tx.is_transfer && (
+                                <DropdownMenuItem
+                                  onClick={() => {
+                                    setSourceTxForPayback(tx);
+                                    setPaybackDialogOpen(true);
+                                  }}
+                                  className="flex items-center gap-2 text-xs py-2 cursor-pointer font-medium"
+                                >
+                                  <Handshake className="w-4 h-4 text-emerald-600" />
+                                  <span>
+                                    {(tx.raw as any)?.payback_meta
+                                      ? 'View / Unlink Payback'
+                                      : tx.amount > 0
+                                      ? 'Link Payback to Purchase'
+                                      : 'Link Friend Payback Received'}
+                                  </span>
+                                </DropdownMenuItem>
+                              )}
+
+                              {/* Assign to Pot (Submenu) */}
+                              {tx.amount < 0 && goals.length > 0 && (
+                                <DropdownMenuSub>
+                                  <DropdownMenuSubTrigger className="flex items-center gap-2 text-xs py-2 cursor-pointer font-medium">
+                                    <Target className="w-4 h-4 text-primary" />
+                                    <span className="truncate">
+                                      {assignedGoal ? `Pot: ${assignedGoal.name}` : 'Assign to Pot'}
+                                    </span>
+                                  </DropdownMenuSubTrigger>
+                                  <DropdownMenuSubContent className="w-48 p-1 shadow-lg">
+                                    <DropdownMenuLabel className="text-[10px] uppercase font-bold text-muted-foreground px-2 py-1">
+                                      Select Pot
+                                    </DropdownMenuLabel>
+                                    {goals.map(g => (
+                                      <DropdownMenuItem
+                                        key={g.id}
+                                        onClick={() => handlePoolAssign(tx.id, g.id)}
+                                        className="flex items-center gap-2 text-xs py-1.5 cursor-pointer"
+                                      >
+                                        <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: g.color || '#3b82f6' }} />
+                                        <span className="truncate">{g.name}</span>
+                                        {(tx as any).goal_id === g.id && <Check className="w-3.5 h-3.5 ml-auto text-primary" />}
+                                      </DropdownMenuItem>
+                                    ))}
+                                    {(tx as any).goal_id && (
+                                      <>
+                                        <DropdownMenuSeparator />
+                                        <DropdownMenuItem
+                                          onClick={() => handlePoolAssign(tx.id, null)}
+                                          className="text-xs text-destructive flex items-center gap-2 py-1.5 cursor-pointer"
+                                        >
+                                          <X className="w-3.5 h-3.5" /> Remove from pot
+                                        </DropdownMenuItem>
+                                      </>
+                                    )}
+                                  </DropdownMenuSubContent>
+                                </DropdownMenuSub>
+                              )}
+
+                              {/* Fixed expense / bill assignment (Submenu) */}
+                              {tx.amount < 0 && fixedExpenses.length > 0 && (
+                                <DropdownMenuSub>
+                                  <DropdownMenuSubTrigger className="flex items-center gap-2 text-xs py-2 cursor-pointer font-medium">
+                                    <Receipt className="w-4 h-4 text-amber-600" />
+                                    <span className="truncate">
+                                      {assignedFixedExpense ? `Bill: ${assignedFixedExpense.name}` : 'Mark as Bill'}
+                                    </span>
+                                  </DropdownMenuSubTrigger>
+                                  <DropdownMenuSubContent className="w-52 p-1 shadow-lg">
+                                    <DropdownMenuLabel className="text-[10px] uppercase font-bold text-muted-foreground px-2 py-1">
+                                      Fixed Bills
+                                    </DropdownMenuLabel>
+                                    {fixedExpenses.map(e => (
+                                      <DropdownMenuItem
+                                        key={e.id}
+                                        onClick={() => handleFixedExpenseAssign(tx.id, e.id)}
+                                        className="flex items-center gap-2 text-xs py-1.5 cursor-pointer"
+                                      >
+                                        <span className="truncate">{e.name}</span>
+                                        <span className="ml-auto text-[10px] text-muted-foreground">
+                                          {formatCurrency(e.amount, e.currency)}
+                                        </span>
+                                        {(tx as any).fixed_expense_id === e.id && <Check className="w-3.5 h-3.5 ml-auto text-primary" />}
+                                      </DropdownMenuItem>
+                                    ))}
+                                    {(tx as any).fixed_expense_id && (
+                                      <>
+                                        <DropdownMenuSeparator />
+                                        <DropdownMenuItem
+                                          onClick={() => handleFixedExpenseAssign(tx.id, null)}
+                                          className="text-xs text-destructive flex items-center gap-2 py-1.5 cursor-pointer"
+                                        >
+                                          <X className="w-3.5 h-3.5" /> Remove bill tag
+                                        </DropdownMenuItem>
+                                      </>
+                                    )}
+                                  </DropdownMenuSubContent>
+                                </DropdownMenuSub>
+                              )}
+
+                              {/* Work Travel Claim */}
+                              <DropdownMenuItem
+                                onClick={() => {
+                                  if (!tx.is_reimbursable) {
+                                    updateTransaction(tx.id, { is_reimbursable: true, reimbursement_status: 'pending' } as any);
+                                    toast.success('💼 Marked as Work Travel Claim');
+                                  } else {
+                                    const newStatus = tx.reimbursement_status === 'reimbursed' ? 'pending' : 'reimbursed';
+                                    updateTransaction(tx.id, {
+                                      is_reimbursable: true,
+                                      reimbursement_status: newStatus,
+                                      reimbursed_at: newStatus === 'reimbursed' ? new Date().toISOString() : null,
+                                    } as any);
+                                    toast.success(newStatus === 'reimbursed' ? '✓ Settled & removed from active Work Claims' : 'Reopened as Pending Claim');
+                                  }
+                                }}
+                                className="flex items-center gap-2 text-xs py-2 cursor-pointer font-medium"
+                              >
+                                <Briefcase className={`w-4 h-4 ${tx.is_reimbursable ? 'text-sky-600' : 'text-slate-400'}`} />
+                                <span>
+                                  {!tx.is_reimbursable
+                                    ? 'Mark as Work Claim'
+                                    : tx.reimbursement_status === 'reimbursed'
+                                    ? 'Reopen Work Claim'
+                                    : 'Settle Work Claim'}
+                                </span>
+                              </DropdownMenuItem>
+
+                              {/* Refund toggle (for income) */}
+                              {tx.amount > 0 && !tx.is_transfer && (
+                                <DropdownMenuItem
+                                  onClick={() => {
+                                    const newIsRefund = !(tx as any).is_refund;
+                                    updateTransaction(tx.id, { is_refund: newIsRefund } as any);
+                                    toast(newIsRefund ? 'Marked as refund — added back to this week\'s Fun Money' : 'Refund flag removed');
+                                  }}
+                                  className="flex items-center gap-2 text-xs py-2 cursor-pointer font-medium"
+                                >
+                                  <Undo2 className="w-4 h-4 text-emerald-600" />
+                                  <span>{(tx as any).is_refund ? 'Unmark Refund' : 'Mark as Refund (Adds to Fun Money)'}</span>
+                                </DropdownMenuItem>
+                              )}
+
+                              {/* Transfer toggle */}
+                              <DropdownMenuItem
+                                onClick={() => {
+                                  const isCurrentlyTransfer = tx.is_transfer || isConfirmedTransfer || transferStatus === 'suggested';
+                                  if (isCurrentlyTransfer) {
+                                    updateTransaction(tx.id, {
+                                      is_transfer: false,
+                                      transfer_status: null,
+                                      transfer_side: null,
+                                      matched_transaction_id: null,
+                                      transfer_group_id: null,
+                                    } as any);
+                                    toast('Unmarked as transfer — now counts as income/spending');
+                                  } else {
+                                    updateTransaction(tx.id, { is_transfer: true } as any);
+                                    toast('Marked as transfer — excluded from income/spending');
+                                  }
+                                }}
+                                className="flex items-center gap-2 text-xs py-2 cursor-pointer font-medium"
+                              >
+                                <ArrowLeftRight className={`w-4 h-4 ${(tx.is_transfer || isConfirmedTransfer) ? 'text-purple-600' : 'text-slate-400'}`} />
+                                <span>{(tx.is_transfer || isConfirmedTransfer) ? 'Unmark Transfer' : 'Mark as Transfer'}</span>
+                              </DropdownMenuItem>
+
+                              <DropdownMenuSeparator />
+
+                              {/* Delete */}
+                              <DropdownMenuItem
+                                onClick={async () => {
+                                  if (window.confirm(`Delete transaction "${tx.description}" (${formatCurrency(tx.amount, finance.settings?.base_currency || 'GBP')})?`)) {
+                                    await deleteTransaction(tx.id);
+                                    toast.success('Transaction deleted');
+                                  }
+                                }}
+                                className="flex items-center gap-2 text-xs py-2 cursor-pointer font-medium text-destructive focus:text-destructive focus:bg-destructive/10"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                                <span>Delete Transaction</span>
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
                       </div>
                     </div>
-                  );
-                })}
+                  </div>
+                );
+              })}
               </div>
             </div>
           ))
