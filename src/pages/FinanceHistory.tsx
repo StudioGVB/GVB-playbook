@@ -57,7 +57,7 @@ export default function FinanceHistory() {
   const [savingHoliday, setSavingHoliday] = useState(false);
   const [calendarOpen, setCalendarOpen] = useState(false);
 
-  const baseCurrency = finance.settings?.base_currency || 'AUD';
+  const baseCurrency = finance.settings?.base_currency || 'GBP';
   const fmt = (n: number) => formatCurrency(n, baseCurrency);
 
   const catMap = useMemo(() => new Map(finance.categories.map(c => [c.id, c])), [finance.categories]);

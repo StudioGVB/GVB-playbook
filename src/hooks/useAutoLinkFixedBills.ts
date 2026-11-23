@@ -144,8 +144,8 @@ export function useAutoLinkFixedBills(params: {
 
         const multiWeek = isMultiWeekOrMeds(fe);
         const allowFlexibleAmt = !isRentExp;
-        const expenseCurrency = fe.currency || 'AUD';
-        const nativeMatches = expenseCurrency === (tx.currency || 'AUD') && amountMatches(Number(fe.amount), absAmt, allowFlexibleAmt);
+        const expenseCurrency = fe.currency || baseCurrency || 'GBP';
+        const nativeMatches = expenseCurrency === (tx.currency || baseCurrency || 'GBP') && amountMatches(Number(fe.amount), absAmt, allowFlexibleAmt);
         const baseMatches = !!baseCurrency && expenseCurrency === baseCurrency && baseAbsAmt != null && amountMatches(Number(fe.amount), baseAbsAmt, allowFlexibleAmt);
         if (!nativeMatches && !baseMatches) return false;
         if (!multiWeek && isRentExp && fe.due_day && !dayDiff(fe.due_day, tx.posted_at, 6)) return false;

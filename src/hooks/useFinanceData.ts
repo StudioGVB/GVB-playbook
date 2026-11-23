@@ -1276,7 +1276,7 @@ export function useFinanceDataState() {
     const { data, error } = await supabase.from('finance_accounts').insert({
       user_id: user.id,
       account_name: 'External / Off-book',
-      currency: settings?.base_currency || 'AUD',
+      currency: settings?.base_currency || 'GBP',
       provider: 'external',
       balance: 0,
     }).select().single();
@@ -1328,7 +1328,7 @@ export function useFinanceDataState() {
       description: tx.description,
       merchant: (tx as any).merchant || null,
       posted_at: tx.posted_at,
-      currency: tx.currency || settings?.base_currency || 'AUD',
+      currency: tx.currency || settings?.base_currency || 'GBP',
       trip_id: tx.trip_id || null,
       category_id: tx.category_id || null,
       goal_id: (tx as any).goal_id || null,

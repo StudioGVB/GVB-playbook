@@ -709,7 +709,7 @@ export function generateGoalPlan(
   };
 }
 
-export function formatCurrency(amount: number, currency: string = 'AUD'): string {
+export function formatCurrency(amount: number, currency: string = 'GBP'): string {
   const symbols: Record<string, string> = { GBP: '£', EUR: '€', AUD: 'A$', USD: 'US$', NZD: 'NZ$' };
   const symbol = symbols[currency] || `${currency} `;
   const sign = amount < 0 ? '-' : '';

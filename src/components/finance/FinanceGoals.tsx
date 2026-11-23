@@ -18,7 +18,7 @@ export default function FinanceGoals({ finance }: Props) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [amount, setAmount] = useState('');
-  const [currency, setCurrency] = useState(settings?.base_currency || 'AUD');
+  const [currency, setCurrency] = useState(settings?.base_currency || 'GBP');
   const [startDate, setStartDate] = useState('');
   const [deadline, setDeadline] = useState('');
   const [priority, setPriority] = useState('2');

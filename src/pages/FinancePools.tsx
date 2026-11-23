@@ -240,7 +240,7 @@ export default function FinancePoolsPage() {
     setFeasibilityDialogOpen(true);
   };
 
-  const baseCurrency = finance.settings?.base_currency || 'AUD';
+  const baseCurrency = finance.settings?.base_currency || 'GBP';
   const fmt = (n: number) => formatCurrency(n, baseCurrency);
   const wtMap = useMemo(() => weekTypeMap(), [weekTypeMap]);
 

@@ -38,7 +38,7 @@ export default function FinanceCostOfLiving() {
   const finance = useFinanceData();
   const { assumptions } = useFinanceAssumptions();
   const fx = useFixedExpenses();
-  const baseCurrency = finance.settings?.base_currency || 'AUD';
+  const baseCurrency = finance.settings?.base_currency || 'GBP';
 
   useAutoLinkFixedBills({
     transactions: finance.transactions as any,
