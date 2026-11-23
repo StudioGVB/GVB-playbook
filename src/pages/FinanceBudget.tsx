@@ -386,7 +386,15 @@ export default function FinanceBudget() {
     );
 
     // Strictly match last week's displayed budget: last week's Essentials + last week's Weekly Fun Budget
-    const totalBudget = prevWeekSnapshot.weeklyEssentialBudget + prevWeekSnapshot.weeklyFunBudget;
+    // On travel weeks, your living allowance was budgeted from income but not spent on normal day-to-day living.
+    // It automatically sweeps straight into Savings Stash as an extra holiday buffer / shock absorber!
+    const isPrevTravelWeek = prevWeekSnapshot.isTravelWeek;
+    const travelWeekAllowance = isPrevTravelWeek
+      ? (prevWeekSnapshot.split?.weeklyFunAmount || assumptions.weekly_fun_budget || 100)
+      : 0;
+    const totalBudget = isPrevTravelWeek
+      ? travelWeekAllowance
+      : (prevWeekSnapshot.weeklyEssentialBudget + prevWeekSnapshot.weeklyFunBudget);
     const totalSpent = prevEssentialSpent + prevFunSpent;
     const netDifference = Math.round((totalBudget - totalSpent) * 100) / 100;
 
@@ -507,12 +515,13 @@ export default function FinanceBudget() {
       // End-of-Month Sweep: if we have entered a new calendar month relative to prevWeekStart
       // (i.e. prevWeekStart's month has now ended) and we haven't swept that month yet,
       // shift 100% of any money left in Savings Stash straight into the real "Savings" pool.
+      // NOTE: If currently traveling, pause the sweep so Stash remains available as a holiday buffer!
       const prevWeekMonthKey = format(prevWeekStart, 'yyyy-MM');
       const todayMonthKey = format(today, 'yyyy-MM');
       let sweptMonthKey = meta.last_swept_month;
       let lastMonthSweep = meta.last_month_sweep || null;
 
-      if (todayMonthKey > prevWeekMonthKey && meta.last_swept_month !== prevWeekMonthKey) {
+      if (todayMonthKey > prevWeekMonthKey && meta.last_swept_month !== prevWeekMonthKey && !snapshot.isTravelWeek) {
         const realSavingsGoal =
           finance.goals.find(
             g =>
@@ -606,7 +615,11 @@ export default function FinanceBudget() {
           const left = carryDebt - (steps.find(s => s.source === 'next_week')?.amount || 0);
           toast.warning(`Overspent ${fmt(Math.abs(netDifference))} last week → covered ${parts.join(', ')}${left > 0.01 ? ` · ${fmt(left)} still carried` : ''}`, { duration: 10000 });
         } else if (netDifference > 0) {
-          toast.success(`Underspent ${fmt(netDifference)} last week → ${fmt(netDifference)} added to Savings Stash 💰`);
+          if (isPrevTravelWeek) {
+            toast.success(`Holiday week! Added ${fmt(netDifference)} unspent living allowance to Savings Stash 🏖️💰`);
+          } else {
+            toast.success(`Underspent ${fmt(netDifference)} last week → ${fmt(netDifference)} added to Savings Stash 💰`);
+          }
         }
       }
 
