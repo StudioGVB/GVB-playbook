@@ -276,7 +276,18 @@ export function FinanceDashboard() {
       if (tx.amount >= 0) continue;
 
       if (isFixedTx(tx)) {
-        fixed += amt;
+        const overage = Number((tx as any).fixed_overage_amount) || 0;
+        const covered = (tx as any).fixed_covered_amount !== undefined
+          ? Number((tx as any).fixed_covered_amount)
+          : Math.max(0, amt - overage);
+        fixed += covered;
+        if (overage > 0) {
+          if (essentialCatIds.has(tx.category_id || '')) {
+            essential += overage;
+          } else {
+            fun += overage;
+          }
+        }
       } else if (essentialCatIds.has(tx.category_id || '')) {
         essential += amt;
       } else {

@@ -261,14 +261,26 @@ export default function FinanceMonthly() {
       const amt = Math.abs(baseAmt(tx));
 
       if (isFixedTx(tx)) {
-        fixedSpent += amt;
+        const overage = Number((tx as any).fixed_overage_amount) || 0;
+        const covered = (tx as any).fixed_covered_amount !== undefined
+          ? Number((tx as any).fixed_covered_amount)
+          : Math.max(0, amt - overage);
+        fixedSpent += covered;
         paidFixedTxns.push({
           id: tx.id,
           name: tx.merchant || tx.description || cat?.name || 'Fixed Bill',
-          amount: amt,
+          amount: covered,
           date: parseUkDate(tx.posted_at),
           fixedExpenseId: (tx as any).fixed_expense_id,
         });
+        if (overage <= 0) continue;
+        const catId = tx.category_id || '__uncategorised';
+        catTotals.set(catId, (catTotals.get(catId) || 0) + overage);
+        if (essentialCatIds.has(catId)) {
+          essentialSpent += overage;
+        } else {
+          funSpent += overage;
+        }
         continue;
       }
       if (cat?.type === 'income' || cat?.type === 'transfer') continue;
@@ -303,13 +315,15 @@ export default function FinanceMonthly() {
       if (tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') continue;
       if (isInternalTransferTx(tx)) continue;
       if ((tx as any).goal_id || (tx as any).is_travel_spend || (tx as any).trip_id) continue;
-      if (isFixedTx(tx)) continue;
+      const fixedFlag = isFixedTx(tx);
+      const fixedOverage = Number((tx as any).fixed_overage_amount) || 0;
+      if (fixedFlag && fixedOverage <= 0) continue;
       const cat = catMap.get(tx.category_id || '');
       if (cat?.exclude_from_reports || cat?.type === 'income' || cat?.type === 'transfer') continue;
       const d = parseUkDate(tx.posted_at);
       const dayIdx = getDate(d) - 1;
       if (dayIdx >= 0 && dayIdx < daysInMonth) {
-        const amt = Math.abs(baseAmt(tx));
+        const amt = fixedFlag ? fixedOverage : Math.abs(baseAmt(tx));
         if (essentialCatIds.has(tx.category_id || '')) {
           dailyData[dayIdx].essential += amt;
         } else {
@@ -412,7 +426,19 @@ export default function FinanceMonthly() {
       if (cat?.exclude_from_reports) continue;
       const amt = Math.abs(baseAmt(tx));
       if (isFixedTx(tx)) {
-        fixed += amt;
+        const overage = Number((tx as any).fixed_overage_amount) || 0;
+        const covered = (tx as any).fixed_covered_amount !== undefined
+          ? Number((tx as any).fixed_covered_amount)
+          : Math.max(0, amt - overage);
+        fixed += covered;
+        if (overage <= 0) continue;
+        const catId = tx.category_id || '__uncategorised';
+        catTotals.set(catId, (catTotals.get(catId) || 0) + overage);
+        if (essentialCatIds.has(tx.category_id || '')) {
+          essential += overage;
+        } else {
+          fun += overage;
+        }
         continue;
       }
       if (cat?.type === 'income' || cat?.type === 'transfer') continue;
@@ -517,7 +543,18 @@ export default function FinanceMonthly() {
 
         const amt = Math.abs(baseAmt(tx));
         if (isFixedTx(tx)) {
-          fixed += amt;
+          const overage = Number((tx as any).fixed_overage_amount) || 0;
+          const covered = (tx as any).fixed_covered_amount !== undefined
+            ? Number((tx as any).fixed_covered_amount)
+            : Math.max(0, amt - overage);
+          fixed += covered;
+          if (overage > 0) {
+            if (essentialCatIds.has(tx.category_id || '')) {
+              essential += overage;
+            } else {
+              fun += overage;
+            }
+          }
           continue;
         }
         if (cat?.type === 'income' || cat?.type === 'transfer') continue;

@@ -642,8 +642,10 @@ export default function FinanceBudget() {
       if (d < cutoff || d > weekEnd) return false;
       const cat = catMap.get(tx.category_id || '');
       if (cat?.exclude_from_reports) return false;
-      if (cat?.type === 'fixed' || cat?.type === 'income' || cat?.type === 'transfer') return false;
-      if (tx.is_fixed || (tx as any).fixed_expense_id) return false;
+      if (cat?.type === 'income' || cat?.type === 'transfer') return false;
+      const isFixedBill = Boolean(tx.is_fixed || (tx as any).fixed_expense_id || cat?.type === 'fixed');
+      const overage = Number((tx as any).fixed_overage_amount) || 0;
+      if (isFixedBill && overage <= 0) return false;
       return true;
     });
 
@@ -652,14 +654,18 @@ export default function FinanceBudget() {
       const catId = tx.category_id || '__uncategorised';
       const cat = catMap.get(catId);
       const isEssential = essentialCatIds.has(catId);
+      const isFixedBill = Boolean(tx.is_fixed || (tx as any).fixed_expense_id || cat?.type === 'fixed');
+      const effectiveAmt = isFixedBill
+        ? (Number((tx as any).fixed_overage_amount) || 0)
+        : Math.abs(baseAmt(tx));
       const existing = grouped.get(catId);
       if (existing) {
-        existing.total += Math.abs(baseAmt(tx));
+        existing.total += effectiveAmt;
       } else {
         grouped.set(catId, {
           name: cat?.name || 'Uncategorised',
           color: cat?.color || null,
-          total: Math.abs(baseAmt(tx)),
+          total: effectiveAmt,
           isEssential,
           catId,
         });

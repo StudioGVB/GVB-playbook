@@ -476,12 +476,15 @@ export function computeEssentialVariableMonthly(
 
     let weekTotal = 0;
     for (const tx of transactions) {
-      if (tx.is_transfer || tx.is_reimbursable || tx.is_fixed || (tx as any).fixed_expense_id) continue;
+      if (tx.is_transfer || tx.is_reimbursable) continue;
       if (tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed' || isInternalTransferTx(tx)) continue;
       if ((tx as any).goal_id || (tx as any).is_travel_spend || (tx as any).trip_id) continue;
       if (!tx.category_id || !essentialCatIds.has(tx.category_id)) continue;
       const cat = catMap.get(tx.category_id);
-      if (cat?.exclude_from_reports || cat?.type === 'fixed' || cat?.type === 'income' || cat?.type === 'transfer') continue;
+      if (cat?.exclude_from_reports || cat?.type === 'income' || cat?.type === 'transfer') continue;
+      const isFixedBill = Boolean(tx.is_fixed || (tx as any).fixed_expense_id || cat?.type === 'fixed');
+      const overageAmt = Number((tx as any).fixed_overage_amount) || 0;
+      if (isFixedBill && overageAmt <= 0) continue;
       const d = parseUkDate(tx.posted_at);
       if (isExcludedSpendDate(d)) continue;
       if (isInAnyTrip(d, trips)) continue; // Auto-exclude transactions on trip dates
@@ -489,7 +492,7 @@ export function computeEssentialVariableMonthly(
         if ((tx as any).is_refund && tx.amount > 0) {
           weekTotal -= Math.abs(baseAmt(tx));
         } else if (tx.amount < 0) {
-          weekTotal += Math.abs(baseAmt(tx));
+          weekTotal += isFixedBill ? overageAmt : Math.abs(baseAmt(tx));
         }
       }
     }
@@ -1164,10 +1167,13 @@ export function computeWeekVariableSpend(
     if (isInternalTransferTx(tx)) continue;
     if ((tx as any).goal_id) continue;
     if ((tx as any).is_travel_spend || (tx as any).trip_id) continue;
-    if (tx.is_fixed || (tx as any).fixed_expense_id) continue;
 
     if (cat?.exclude_from_reports) continue;
-    if (cat?.type === 'transfer' || cat?.type === 'fixed' || cat?.type === 'income') continue;
+    if (cat?.type === 'transfer' || cat?.type === 'income') continue;
+
+    const isFixedBill = Boolean(tx.is_fixed || (tx as any).fixed_expense_id || cat?.type === 'fixed');
+    const fixedOverage = Number((tx as any).fixed_overage_amount) || 0;
+    if (isFixedBill && fixedOverage <= 0) continue;
 
     if ((tx as any).is_refund && tx.amount > 0) {
       if (isEssential) {
@@ -1187,16 +1193,27 @@ export function computeWeekVariableSpend(
       continue;
     }
 
+    const effectiveAmt = isFixedBill ? fixedOverage : amt;
+
     if (isEssential) {
-      essentialSpent += amt;
-      daily[dayIdx].essential += amt;
+      essentialSpent += effectiveAmt;
+      daily[dayIdx].essential += effectiveAmt;
     } else {
-      funSpent += amt;
-      daily[dayIdx].fun += amt;
+      funSpent += effectiveAmt;
+      daily[dayIdx].fun += effectiveAmt;
     }
     daily[dayIdx].total = daily[dayIdx].essential + daily[dayIdx].fun;
-    byCategory.set(catId, (byCategory.get(catId) || 0) + amt);
-    matchedTxns.push(tx);
+    byCategory.set(catId, (byCategory.get(catId) || 0) + effectiveAmt);
+    matchedTxns.push(
+      isFixedBill
+        ? ({
+            ...tx,
+            base_amount: -effectiveAmt,
+            is_fixed_overage: true,
+            original_base_amount: amt,
+          } as any)
+        : tx
+    );
   }
 
   // Cross-bucket refund offset so a payback/refund in one bucket reduces total variable spend even if that bucket is < 0

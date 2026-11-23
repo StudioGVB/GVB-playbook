@@ -31,25 +31,47 @@ interface TxLite {
 const normalize = (s: string) =>
   (s || '').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
 
-const tokens = (s: string) => normalize(s).split(' ').filter(t => t.length >= 3);
+const STOP_WORDS = new Set(['bill', 'bills', 'plan', 'monthly', 'subscription', 'sub', 'the', 'and', 'for', 'fee', 'fees', 'flat', 'uk']);
+
+const tokens = (s: string) => normalize(s).split(' ').filter(t => t.length >= 3 && !STOP_WORDS.has(t));
+
+function parseFreqWeeks(freq: string): number | null {
+  const m = String(freq || '').match(/(?:every[_\s]+)?(\d+)[_\s]*weeks?/i);
+  return m ? (parseInt(m[1], 10) || null) : null;
+}
+
+function isMultiWeekOrMeds(fe: FixedExpenseLite): boolean {
+  const freq = String(fe.frequency || 'monthly').toLowerCase();
+  const w = parseFreqWeeks(freq);
+  if ((w !== null && w >= 3) || freq === 'quarterly' || freq === 'yearly') return true;
+  const nameNotes = `${fe.name || ''} ${fe.notes || ''}`.toLowerCase();
+  return /\b(meds|medication|prescription|pharmacy|chemist|elvanse|amfexa|adhd|titration|clinic)\b/i.test(nameNotes);
+}
 
 function titleMatches(expenseName: string, txDesc: string): boolean {
   const nExp = normalize(expenseName);
   const nTx = normalize(txDesc);
   if (!nExp || !nTx) return false;
-  if (nTx.includes(nExp) || nExp.includes(nTx)) return true;
-  if (/\b(lyca|lycamobile|mobile|phone|sim|vodafone|optus|telstra|ee|o2|giffgaff|three)\b/i.test(txDesc)
-    && /\b(phone|mobile|sim|plan|bill)\b/i.test(expenseName)) return true;
+  if (nExp.length >= 4 && (nTx.includes(nExp) || nExp.includes(nTx))) return true;
+  if (/\b(lyca|lycamobile|mobile|phone|sim|vodafone|optus|telstra|ee|o2|giffgaff|three|lebara|smarty|vox)\b/i.test(txDesc)
+    && /\b(phone|mobile|sim|plan|bill|data|lyca|lycamobile|vodafone|optus|telstra|ee|o2|giffgaff|three|lebara|smarty|vox)\b/i.test(expenseName)) return true;
+  if (/\b(meds|medication|prescription|pharmacy|chemist|boots|superdrug|lloyds|well pharmacy|broadway|signature|elvanse|amfexa|adhd|titration|clinic)\b/i.test(txDesc)
+    && /\b(meds|medication|prescription|pharmacy|chemist|elvanse|amfexa|adhd|titration|clinic)\b/i.test(expenseName)) return true;
   if (/\b(rent|flat|landlord|accommodation|tenancy|standing order)\b/i.test(txDesc)
     && /\b(rent|flat|housing|accommodation)\b/i.test(expenseName)) return true;
   const expTokens = tokens(expenseName);
+  if (expTokens.length === 0) return false;
   const txTokens = new Set(tokens(txDesc));
-  return expTokens.some(t => txTokens.has(t));
+  return expTokens.every(t => txTokens.has(t) || (t.length >= 4 && nTx.includes(t)));
 }
 
-function amountMatches(expenseAmt: number, txAbsAmt: number): boolean {
+function amountMatches(expenseAmt: number, txAbsAmt: number, allowOverageOrMultiWeek = false): boolean {
   const diff = Math.abs(expenseAmt - txAbsAmt);
-  return diff <= Math.max(0.5, expenseAmt * 0.02);
+  if (diff <= Math.max(0.5, expenseAmt * 0.02)) return true;
+  if (allowOverageOrMultiWeek && expenseAmt > 0) {
+    return txAbsAmt >= Math.min(2, expenseAmt * 0.2) && txAbsAmt <= Math.max(expenseAmt * 3.0, expenseAmt + 120);
+  }
+  return false;
 }
 
 function dayDiff(dueDay: number, txDateIso: string, tolerance = 5): boolean {
@@ -112,17 +134,21 @@ export function useAutoLinkFixedBills(params: {
       const baseAbsAmt = typeof tx.base_amount === 'number' ? Math.abs(tx.base_amount) : null;
       const match = fixedExpenses.find(fe => {
         if (!activeOnDate(fe, tx.posted_at)) return false;
-        const expenseCurrency = fe.currency || 'AUD';
-        const nativeMatches = expenseCurrency === (tx.currency || 'AUD') && amountMatches(Number(fe.amount), absAmt);
-        const baseMatches = !!baseCurrency && expenseCurrency === baseCurrency && baseAbsAmt != null && amountMatches(Number(fe.amount), baseAbsAmt);
-        if (!nativeMatches && !baseMatches) return false;
         const descText = `${tx.merchant || ''} ${tx.description || ''}`;
         const isRentExp = fe.name.toLowerCase().includes('rent') || fe.name.toLowerCase().includes('flat');
+        if (isRentExp && (baseAbsAmt ?? absAmt) < 100) return false;
         const descLower = descText.toLowerCase();
-        const hasRentKeyword = descLower.includes('rent') || descLower.includes('flat') || descLower.includes('landlord') || descLower.includes('accommodation') || descLower.includes('tenancy') || descLower.includes('standing order');
+        const hasRentKeyword = /\b(rent|landlord|accommodation|tenancy|standing order)\b/i.test(descLower);
         const titleOk = titleMatches(`${fe.name} ${fe.notes || ''}`, descText) || (isRentExp && hasRentKeyword);
         if (!titleOk) return false;
-        if (fe.due_day && !dayDiff(fe.due_day, tx.posted_at, isRentExp ? 6 : 5)) return false;
+
+        const multiWeek = isMultiWeekOrMeds(fe);
+        const allowFlexibleAmt = !isRentExp;
+        const expenseCurrency = fe.currency || 'AUD';
+        const nativeMatches = expenseCurrency === (tx.currency || 'AUD') && amountMatches(Number(fe.amount), absAmt, allowFlexibleAmt);
+        const baseMatches = !!baseCurrency && expenseCurrency === baseCurrency && baseAbsAmt != null && amountMatches(Number(fe.amount), baseAbsAmt, allowFlexibleAmt);
+        if (!nativeMatches && !baseMatches) return false;
+        if (!multiWeek && isRentExp && fe.due_day && !dayDiff(fe.due_day, tx.posted_at, 6)) return false;
         return true;
       });
       if (match) updates.push({ id: tx.id, fixed_expense_id: match.id });

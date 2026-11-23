@@ -124,10 +124,22 @@ export default function FinanceBalanceSheet() {
         const abs = Math.abs(amt);
         const isFixed = Boolean((tx as any).fixed_expense_id || tx.is_fixed || cat?.type === 'fixed');
         if (isFixed) {
-          fixed += abs;
+          const overage = Number((tx as any).fixed_overage_amount) || 0;
+          const covered = (tx as any).fixed_covered_amount !== undefined
+            ? Number((tx as any).fixed_covered_amount)
+            : Math.max(0, abs - overage);
+          fixed += covered;
           const label = tx.merchant || tx.description || 'Bill';
-          bills.push({ name: label, amount: abs, fixedExpenseId: (tx as any).fixed_expense_id, tx });
+          bills.push({ name: label, amount: covered, fixedExpenseId: (tx as any).fixed_expense_id, tx });
           if ((tx as any).fixed_expense_id) matchedFixedIds.add((tx as any).fixed_expense_id as string);
+          if (overage > 0) {
+            variable += overage;
+            if (cat?.is_essential && cat?.type === 'variable') {
+              essentialSpent += overage;
+            } else {
+              funSpent += overage;
+            }
+          }
         } else {
           variable += abs;
           if (cat?.is_essential && cat?.type === 'variable') {
