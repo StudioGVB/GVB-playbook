@@ -52,15 +52,33 @@ export function computeDaily8pmSummary(
     }
   }
 
-  // Calculate total weekly allowance (Essential Variable + Fun Money)
+  const fmt = (n: number) => formatCurrency(n, baseCurrency);
+
+  // If currently in travel mode: report travel pool progress instead of false weekly budget warnings!
+  if (snapshot?.isTravelWeek) {
+    const tripName = snapshot.activeTrip?.name || 'Holiday';
+    const remaining = snapshot.travelPoolRemaining;
+    const poolTotal = snapshot.travelPoolAmount;
+    const spent = snapshot.travelPoolSpent;
+    const isUnder = remaining >= 0;
+    return {
+      todaySpent,
+      weekSpent: spent,
+      weeklyBudget: poolTotal,
+      diff: remaining,
+      isUnderBudget: isUnder,
+      title: '✈️ 8 PM Travel Update',
+      body: `You're traveling! ${fmt(remaining)} remaining in your ${tripName} pool (${fmt(spent)} of ${fmt(poolTotal)} used). Enjoy your evening! 🎉`,
+    };
+  }
+
+  // Calculate total weekly allowance (Essential Variable + Fun Money including any Boosts)
   const weeklyEssential = snapshot?.weeklyEssentialBudget ?? 115;
-  const weeklyFun = snapshot?.baseWeeklyFun ?? 100;
+  const weeklyFun = snapshot?.weeklyFunBudget ?? snapshot?.baseWeeklyFun ?? 100;
   const weeklyBudget = weeklyEssential + weeklyFun;
 
   const diff = weeklyBudget - weekSpent;
   const isUnderBudget = diff >= 0;
-
-  const fmt = (n: number) => formatCurrency(n, baseCurrency);
 
   const todayStr = fmt(todaySpent);
   const weekStr = fmt(weekSpent);
@@ -171,12 +189,25 @@ export function computeDaily955pmSummary(
     }
   }
 
+  const fmt = (n: number) => formatCurrency(n, baseCurrency);
+
+  if (snapshot?.isTravelWeek) {
+    const tripName = snapshot.activeTrip?.name || 'Holiday';
+    const remaining = snapshot.travelPoolRemaining;
+    const isUnder = remaining >= 0;
+    return {
+      remaining,
+      status: isUnder ? 'right_on_track' : 'take_it_easy',
+      title: '✈️ 9:55 PM Travel Check',
+      body: `You have ${fmt(remaining)} remaining in your ${tripName} pool — ${isUnder ? 'right on track 👍' : 'take it easy 🧘'}`,
+    };
+  }
+
   const weeklyEssential = snapshot?.weeklyEssentialBudget ?? 115;
-  const weeklyFun = snapshot?.baseWeeklyFun ?? 100;
+  const weeklyFun = snapshot?.weeklyFunBudget ?? snapshot?.baseWeeklyFun ?? 100;
   const weeklyBudget = weeklyEssential + weeklyFun;
 
   const remaining = weeklyBudget - weekSpent;
-  const fmt = (n: number) => formatCurrency(n, baseCurrency);
 
   let statusText = '';
   let status: 'take_it_easy' | 'go_crazy' | 'right_on_track' = 'right_on_track';
