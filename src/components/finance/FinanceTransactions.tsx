@@ -7,13 +7,15 @@ import { Badge } from '@/components/ui/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
-import { Search, Check, Sparkles, Loader2, X, ArrowLeftRight, Target, Receipt, Undo2, DollarSign, Briefcase, RefreshCw, Wallet, Plus, Trash2 } from 'lucide-react';
+import { Search, Check, Sparkles, Loader2, X, ArrowLeftRight, Target, Receipt, Undo2, DollarSign, Briefcase, RefreshCw, Wallet, Plus, Trash2, Scissors, Handshake } from 'lucide-react';
 import { formatCurrency, formatUkDate, parseUkDate, baseAmt } from '@/lib/financeUtils';
 import { deduplicateTransactions } from '@/lib/deduplication';
 import { format, isToday, isYesterday, startOfWeek, endOfWeek, subWeeks } from 'date-fns';
 import { toast } from 'sonner';
 import type { useFinanceData } from '@/hooks/useFinanceData';
 import type { FixedExpense } from '@/hooks/useFixedExpenses';
+import SplitTransactionDialog from './SplitTransactionDialog';
+import PaybackLinkDialog from './PaybackLinkDialog';
 
 type Props = { finance: ReturnType<typeof useFinanceData>; initialAccountFilter?: string; fixedExpenses?: FixedExpense[] };
 
@@ -506,6 +508,283 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
     toast(sourceCategoryId ? `Income source → ${sourceName}` : 'Income source → Other');
   }, [updateTransaction, genericIncomeCategory, categories]);
 
+  // Split Transaction & Payback dialog states
+  const [splitDialogOpen, setSplitDialogOpen] = useState(false);
+  const [txToSplit, setTxToSplit] = useState<any | null>(null);
+
+  const [paybackDialogOpen, setPaybackDialogOpen] = useState(false);
+  const [sourceTxForPayback, setSourceTxForPayback] = useState<any | null>(null);
+
+  const handleConfirmSplit = useCallback(async (
+    parentTx: any,
+    splits: { amount: number; goalId: string | null; categoryId: string | null; label: string }[]
+  ) => {
+    if (!parentTx || splits.length < 2) return;
+
+    try {
+      const isExpense = parentTx.amount < 0;
+      const originalAmount = (parentTx.raw as any)?.split_meta?.original_amount ?? parentTx.amount;
+      const originalDescription = (parentTx.raw as any)?.split_meta?.original_description ?? parentTx.description;
+      const baseCur = finance.settings?.base_currency || 'GBP';
+      const txCur = parentTx.currency || baseCur;
+
+      const deductGoal = async (gId: string, amountAbs: number) => {
+        const goal = goals.find(g => g.id === gId);
+        if (!goal) return;
+        const amtBase = finance.convertToBase(amountAbs, txCur);
+        const oneInBase = finance.convertToBase(1, goal.currency || baseCur) || 1;
+        const deductNative = Math.round((amtBase / oneInBase) * 100) / 100;
+        const nextAssigned = Math.max(0, Math.round(((goal.assigned_amount || 0) - deductNative) * 100) / 100);
+        await finance.updateGoal(gId, { assigned_amount: nextAssigned } as any);
+      };
+
+      // If parent previously had a goal, refund it before applying new splits
+      const oldGoalId = (parentTx as any).goal_id;
+      if (oldGoalId) {
+        const oldGoal = goals.find(g => g.id === oldGoalId);
+        if (oldGoal) {
+          const amtBase = finance.convertToBase(Math.abs(parentTx.amount), txCur);
+          const oneInBase = finance.convertToBase(1, oldGoal.currency || baseCur) || 1;
+          const refundNative = Math.round((amtBase / oneInBase) * 100) / 100;
+          await finance.updateGoal(oldGoalId, {
+            assigned_amount: Math.round(((oldGoal.assigned_amount || 0) + refundNative) * 100) / 100,
+          } as any);
+        }
+      }
+
+      // Part 1: Updates the parent transaction
+      const part1 = splits[0];
+      const part1Amount = isExpense ? -Math.abs(part1.amount) : Math.abs(part1.amount);
+      const part1BaseAmount = finance.convertToBase(part1Amount, txCur);
+
+      if (part1.goalId) {
+        await deductGoal(part1.goalId, part1.amount);
+      }
+
+      await updateTransaction(parentTx.id, {
+        amount: part1Amount,
+        base_amount: part1BaseAmount,
+        category_id: part1.categoryId || parentTx.category_id,
+        goal_id: part1.goalId || null,
+        raw: {
+          ...(parentTx.raw || {}),
+          split_meta: {
+            is_split_parent: true,
+            original_amount: originalAmount,
+            original_description: originalDescription,
+            split_count: splits.length,
+          },
+        },
+      } as any);
+
+      // Remaining parts: add new child transactions
+      for (let i = 1; i < splits.length; i++) {
+        const part = splits[i];
+        const partAmount = isExpense ? -Math.abs(part.amount) : Math.abs(part.amount);
+        const partBaseAmount = finance.convertToBase(partAmount, txCur);
+
+        if (part.goalId) {
+          await deductGoal(part.goalId, part.amount);
+        }
+
+        const goalObj = part.goalId ? goals.find(g => g.id === part.goalId) : null;
+        const partDesc = `${originalDescription} (${part.label || (goalObj ? goalObj.name : 'Weekly')})`;
+
+        await finance.addTransaction({
+          account_id: parentTx.account_id,
+          amount: partAmount,
+          base_amount: partBaseAmount,
+          description: partDesc,
+          posted_at: parentTx.posted_at,
+          category_id: part.categoryId || parentTx.category_id,
+          goal_id: part.goalId || null,
+          currency: txCur,
+          merchant: parentTx.merchant,
+          is_fixed: false,
+          is_reimbursable: false,
+          is_transfer: false,
+          raw: {
+            ...(parentTx.raw || {}),
+            split_meta: {
+              is_split_child: true,
+              parent_tx_id: parentTx.id,
+              original_amount: originalAmount,
+            },
+          },
+        } as any);
+      }
+
+      toast.success(`Successfully split into ${splits.length} portions!`);
+      await finance.refetch();
+    } catch (err) {
+      console.error('Error splitting transaction:', err);
+      toast.error('Failed to split transaction');
+    }
+  }, [finance, goals, updateTransaction]);
+
+  const handleUnsplit = useCallback(async (parentTx: any) => {
+    if (!parentTx) return;
+    const parentId = (parentTx.raw as any)?.split_meta?.is_split_parent
+      ? parentTx.id
+      : (parentTx.raw as any)?.split_meta?.parent_tx_id || parentTx.id;
+
+    const actualParent = finance.transactions.find(t => t.id === parentId) || parentTx;
+    const baseCur = finance.settings?.base_currency || 'GBP';
+    const txCur = actualParent.currency || baseCur;
+
+    try {
+      const refundGoal = async (gId: string, amountAbs: number) => {
+        const goal = goals.find(g => g.id === gId);
+        if (!goal) return;
+        const amtBase = finance.convertToBase(amountAbs, txCur);
+        const oneInBase = finance.convertToBase(1, goal.currency || baseCur) || 1;
+        const refundNative = Math.round((amtBase / oneInBase) * 100) / 100;
+        await finance.updateGoal(gId, {
+          assigned_amount: Math.round(((goal.assigned_amount || 0) + refundNative) * 100) / 100,
+        } as any);
+      };
+
+      const children = finance.transactions.filter(
+        t => (t.raw as any)?.split_meta?.parent_tx_id === parentId
+      );
+
+      for (const child of children) {
+        if ((child as any).goal_id) {
+          await refundGoal((child as any).goal_id, Math.abs(child.amount));
+        }
+        await deleteTransaction(child.id);
+      }
+
+      if ((actualParent as any).goal_id) {
+        await refundGoal((actualParent as any).goal_id, Math.abs(actualParent.amount));
+      }
+
+      const origAmount = (actualParent.raw as any)?.split_meta?.original_amount ?? actualParent.amount;
+      const origDesc = (actualParent.raw as any)?.split_meta?.original_description ?? actualParent.description;
+      const origBaseAmount = finance.convertToBase(origAmount, txCur);
+
+      const updatedRaw = { ...(actualParent.raw || {}) };
+      delete updatedRaw.split_meta;
+
+      await updateTransaction(actualParent.id, {
+        amount: origAmount,
+        base_amount: origBaseAmount,
+        description: origDesc,
+        goal_id: null,
+        raw: updatedRaw,
+      } as any);
+
+      toast.success('Transaction restored back to full amount!');
+      await finance.refetch();
+    } catch (err) {
+      console.error('Error unsplitting transaction:', err);
+      toast.error('Failed to unsplit transaction');
+    }
+  }, [finance, goals, deleteTransaction, updateTransaction]);
+
+  const handleLinkPayback = useCallback(async (expenseTx: any, incomeTx: any) => {
+    if (!expenseTx || !incomeTx) return;
+
+    try {
+      const expenseAbs = Math.abs(expenseTx.amount);
+      const paybackAbs = Math.abs(incomeTx.amount);
+      const netSpend = Math.max(0, Math.round((expenseAbs - paybackAbs) * 100) / 100);
+
+      await updateTransaction(incomeTx.id, {
+        is_refund: true,
+        category_id: expenseTx.category_id || incomeTx.category_id,
+        raw: {
+          ...(incomeTx.raw || {}),
+          payback_meta: {
+            is_payback: true,
+            linked_expense_id: expenseTx.id,
+            expense_description: expenseTx.description,
+            expense_amount: expenseTx.amount,
+            payback_amount: paybackAbs,
+          },
+        },
+      } as any);
+
+      await updateTransaction(expenseTx.id, {
+        raw: {
+          ...(expenseTx.raw || {}),
+          payback_meta: {
+            has_payback: true,
+            linked_income_id: incomeTx.id,
+            income_description: incomeTx.description,
+            payback_amount: paybackAbs,
+            net_amount: netSpend,
+          },
+        },
+      } as any);
+
+      toast.success(
+        `Linked payback! +${formatCurrency(paybackAbs, incomeTx.currency || 'GBP')} offset against "${expenseTx.description}". Net spend: ${formatCurrency(netSpend, expenseTx.currency || 'GBP')}`
+      );
+      await finance.refetch();
+    } catch (err) {
+      console.error('Error linking payback:', err);
+      toast.error('Failed to link payback');
+    }
+  }, [finance, updateTransaction]);
+
+  const handleUnlinkPayback = useCallback(async (tx: any) => {
+    if (!tx) return;
+
+    try {
+      const meta = (tx.raw as any)?.payback_meta;
+      if (!meta) return;
+
+      if (meta.is_payback) {
+        const linkedExpenseId = meta.linked_expense_id;
+        const updatedIncomeRaw = { ...(tx.raw || {}) };
+        delete updatedIncomeRaw.payback_meta;
+
+        await updateTransaction(tx.id, {
+          is_refund: false,
+          raw: updatedIncomeRaw,
+        } as any);
+
+        if (linkedExpenseId) {
+          const expenseTx = finance.transactions.find(t => t.id === linkedExpenseId);
+          if (expenseTx) {
+            const updatedExpenseRaw = { ...(expenseTx.raw || {}) };
+            delete updatedExpenseRaw.payback_meta;
+            await updateTransaction(expenseTx.id, {
+              raw: updatedExpenseRaw,
+            } as any);
+          }
+        }
+      } else if (meta.has_payback) {
+        const linkedIncomeId = meta.linked_income_id;
+        const updatedExpenseRaw = { ...(tx.raw || {}) };
+        delete updatedExpenseRaw.payback_meta;
+
+        await updateTransaction(tx.id, {
+          raw: updatedExpenseRaw,
+        } as any);
+
+        if (linkedIncomeId) {
+          const incomeTx = finance.transactions.find(t => t.id === linkedIncomeId);
+          if (incomeTx) {
+            const updatedIncomeRaw = { ...(incomeTx.raw || {}) };
+            delete updatedIncomeRaw.payback_meta;
+            await updateTransaction(incomeTx.id, {
+              is_refund: false,
+              raw: updatedIncomeRaw,
+            } as any);
+          }
+        }
+      }
+
+      toast.success('Payback link removed.');
+      await finance.refetch();
+    } catch (err) {
+      console.error('Error unlinking payback:', err);
+      toast.error('Failed to unlink payback');
+    }
+  }, [finance, updateTransaction]);
+
   return (
     <div className="space-y-4">
       {/* Filters + Actions */}
@@ -894,6 +1173,67 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                               <Receipt className="w-2.5 h-2.5 mr-0.5" />{assignedFixedExpense.name}
                             </Badge>
                           )}
+                          {/* Split badges */}
+                          {Boolean((tx.raw as any)?.split_meta?.is_split_parent) && (
+                            <Badge
+                              variant="secondary"
+                              onClick={() => {
+                                setTxToSplit(tx);
+                                setSplitDialogOpen(true);
+                              }}
+                              className="text-[9px] px-1.5 py-0 shrink-0 cursor-pointer bg-fuchsia-100 text-fuchsia-700 hover:bg-fuchsia-200 dark:bg-fuchsia-950/40 dark:text-fuchsia-300 border border-fuchsia-200 transition-colors"
+                              title="Split transaction — click to view or unsplit"
+                            >
+                              <Scissors className="w-2.5 h-2.5 mr-0.5" />
+                              Split ({formatCurrency(Math.abs((tx.raw as any).split_meta.original_amount), tx.currency || baseCurrency)})
+                            </Badge>
+                          )}
+                          {Boolean((tx.raw as any)?.split_meta?.is_split_child) && (
+                            <Badge
+                              variant="secondary"
+                              onClick={() => {
+                                const parent = finance.transactions.find(t => t.id === (tx.raw as any).split_meta?.parent_tx_id);
+                                if (parent) {
+                                  setTxToSplit(parent);
+                                  setSplitDialogOpen(true);
+                                }
+                              }}
+                              className="text-[9px] px-1.5 py-0 shrink-0 cursor-pointer bg-fuchsia-50 text-fuchsia-600 hover:bg-fuchsia-100 dark:bg-fuchsia-950/20 dark:text-fuchsia-400 border border-fuchsia-200 transition-colors"
+                              title="Split portion — click to view parent split"
+                            >
+                              <Scissors className="w-2.5 h-2.5 mr-0.5" />
+                              Split portion
+                            </Badge>
+                          )}
+                          {/* Payback badges */}
+                          {Boolean((tx.raw as any)?.payback_meta?.has_payback) && (
+                            <Badge
+                              variant="secondary"
+                              onClick={() => {
+                                setSourceTxForPayback(tx);
+                                setPaybackDialogOpen(true);
+                              }}
+                              className="text-[9px] px-1.5 py-0 shrink-0 cursor-pointer bg-emerald-100 text-emerald-800 hover:bg-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 border border-emerald-300 transition-colors"
+                              title="Friend payback linked — click to view or unlink"
+                            >
+                              <Handshake className="w-2.5 h-2.5 mr-0.5" />
+                              Payback: +{formatCurrency((tx.raw as any).payback_meta.payback_amount, tx.currency || baseCurrency)} (Net: {formatCurrency(-(tx.raw as any).payback_meta.net_amount, tx.currency || baseCurrency)})
+                            </Badge>
+                          )}
+                          {Boolean((tx.raw as any)?.payback_meta?.is_payback) && (
+                            <Badge
+                              variant="secondary"
+                              onClick={() => {
+                                setSourceTxForPayback(tx);
+                                setPaybackDialogOpen(true);
+                              }}
+                              className="text-[9px] px-1.5 py-0 shrink-0 cursor-pointer bg-emerald-100 text-emerald-800 hover:bg-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 border border-emerald-300 transition-colors"
+                              title="Friend payback linked to purchase — click to view or unlink"
+                            >
+                              <Handshake className="w-2.5 h-2.5 mr-0.5" />
+                              Payback for: {(tx.raw as any).payback_meta.expense_description}
+                            </Badge>
+                          )}
                           {tx.is_reimbursable && (
                             <Badge
                               variant="secondary"
@@ -1014,7 +1354,7 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                         </div>
 
                         {/* Action Icons Toolbar (Comfortable fixed-width container ensuring all action buttons sit cleanly on the right) */}
-                        <div className="w-32 sm:w-36 flex items-center justify-end gap-1.5 shrink-0">
+                        <div className="w-40 sm:w-48 flex items-center justify-end gap-1.5 shrink-0">
                           {/* Pool assignment / refund flag */}
                           {tx.amount < 0 && goals.length > 0 ? (
                             <Popover open={openPoolPopoverTxId === tx.id} onOpenChange={open => setOpenPoolPopoverTxId(open ? tx.id : null)}>
@@ -1026,7 +1366,7 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                                   <Target className="w-4 h-4" />
                                 </button>
                               </PopoverTrigger>
-                              <PopoverContent className="w-44 p-2" align="end">
+                              <PopoverContent className="w-48 p-2" align="end">
                                 <p className="text-[10px] font-medium text-muted-foreground mb-1.5 px-1">Assign to pool</p>
                                 <div className="space-y-0.5 max-h-48 overflow-y-auto">
                                   {goals.map(g => (
@@ -1053,6 +1393,17 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                                     </button>
                                   </>
                                 )}
+                                <div className="border-t my-1.5" />
+                                <button
+                                  onClick={() => {
+                                    setOpenPoolPopoverTxId(null);
+                                    setTxToSplit(tx);
+                                    setSplitDialogOpen(true);
+                                  }}
+                                  className="w-full text-left text-xs px-2 py-1.5 rounded hover:bg-muted/60 transition-colors flex items-center gap-1.5 font-semibold text-primary"
+                                >
+                                  <Scissors className="w-3.5 h-3.5 text-primary" /> Split with a pot...
+                                </button>
                               </PopoverContent>
                             </Popover>
                           ) : tx.amount > 0 && !tx.is_transfer ? (
@@ -1068,6 +1419,52 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                               <Undo2 className="w-4 h-4" />
                             </button>
                           ) : null}
+
+                          {/* Split button (for expenses) */}
+                          {tx.amount < 0 && (
+                            <button
+                              onClick={() => {
+                                setTxToSplit(tx);
+                                setSplitDialogOpen(true);
+                              }}
+                              className={`p-1 rounded shrink-0 transition-colors ${
+                                (tx.raw as any)?.split_meta?.is_split_parent
+                                  ? 'text-fuchsia-600 font-bold'
+                                  : 'text-slate-300 hover:text-slate-600'
+                              }`}
+                              title={
+                                (tx.raw as any)?.split_meta?.is_split_parent
+                                  ? 'Split transaction (click to view or unsplit)'
+                                  : 'Split expense between pots & weekly budget'
+                              }
+                            >
+                              <Scissors className="w-4 h-4" />
+                            </button>
+                          )}
+
+                          {/* Payback Link button (for friend paybacks / repayments) */}
+                          {!tx.is_transfer && (
+                            <button
+                              onClick={() => {
+                                setSourceTxForPayback(tx);
+                                setPaybackDialogOpen(true);
+                              }}
+                              className={`p-1 rounded shrink-0 transition-colors ${
+                                (tx.raw as any)?.payback_meta
+                                  ? 'text-emerald-600 font-bold'
+                                  : 'text-slate-300 hover:text-slate-600'
+                              }`}
+                              title={
+                                (tx.raw as any)?.payback_meta
+                                  ? 'Linked Payback (click to view or unlink)'
+                                  : tx.amount > 0
+                                  ? 'Link friend payback to a purchase'
+                                  : 'Link friend payback received for this expense'
+                              }
+                            >
+                              <Handshake className="w-4 h-4" />
+                            </button>
+                          )}
 
                           {/* Fixed expense / bill assignment */}
                           {tx.amount < 0 && fixedExpenses.length > 0 && (
@@ -1248,6 +1645,30 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
           <p className="text-xs text-muted-foreground text-center py-2">{filtered.length} transactions</p>
         )}
       </div>
+
+      {/* Split Transaction Dialog */}
+      <SplitTransactionDialog
+        open={splitDialogOpen}
+        onOpenChange={setSplitDialogOpen}
+        transaction={txToSplit}
+        goals={goals}
+        categories={categories}
+        baseCurrency={baseCurrency}
+        convertToBase={finance.convertToBase}
+        onConfirmSplit={handleConfirmSplit}
+        onUnsplit={handleUnsplit}
+      />
+
+      {/* Payback / Reimbursement Link Dialog */}
+      <PaybackLinkDialog
+        open={paybackDialogOpen}
+        onOpenChange={setPaybackDialogOpen}
+        sourceTransaction={sourceTxForPayback}
+        allTransactions={finance.transactions}
+        baseCurrency={baseCurrency}
+        onLinkPayback={handleLinkPayback}
+        onUnlinkPayback={handleUnlinkPayback}
+      />
     </div>
   );
 }
