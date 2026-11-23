@@ -30,6 +30,24 @@ export function isInAnyTrip(date: Date, trips: FinanceTrip[]): boolean {
   return getActiveTripOn(date, trips) !== null;
 }
 
+/** Returns the trip that overlaps ANY day in the week starting at weekStart, or null */
+export function getTripInWeek(weekStart: Date, trips: FinanceTrip[]): FinanceTrip | null {
+  const ws = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate());
+  const we = new Date(ws);
+  we.setDate(we.getDate() + 6);
+  we.setHours(23, 59, 59, 999);
+
+  for (const t of trips) {
+    if (!t.start_date || !t.end_date) continue;
+    const s = new Date(t.start_date);
+    const e = new Date(t.end_date);
+    const ss = new Date(s.getFullYear(), s.getMonth(), s.getDate());
+    const ee = new Date(e.getFullYear(), e.getMonth(), e.getDate(), 23, 59, 59, 999);
+    if (ss <= we && ee >= ws) return t;
+  }
+  return null;
+}
+
 /** Total weeks across all trip windows from `from` onwards (clamps past portions) */
 export function computeRemainingTripWeeks(from: Date, trips: FinanceTrip[]): number {
   let total = 0;

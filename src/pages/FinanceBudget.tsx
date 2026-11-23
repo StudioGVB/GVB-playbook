@@ -9,7 +9,7 @@ import { useFixedExpensePayments } from '@/hooks/useFixedExpensePayments';
 import { useWeeklyBoosts } from '@/hooks/useWeeklyBoosts';
 import { useWeekTypes } from '@/hooks/useWeekTypes';
 import { useFinanceTrips } from '@/hooks/useFinanceTrips';
-import { computePolicySnapshot, computeActualSpendingIncome, computeWeekVariableSpend, computeTypicalWeeklyVariableSpend, evaluateMidMonthPotFeasibility, isInternalTransferTx } from '@/lib/policyEngine';
+import { computePolicySnapshot, computeActualSpendingIncome, computeWeekVariableSpend, computeTypicalWeeklyVariableSpend, evaluateMidMonthPotFeasibility, isInternalTransferTx, getTripInWeek } from '@/lib/policyEngine';
 import { deduplicateTransactions } from '@/lib/deduplication';
 import { parseCoverMeta, planOverspendCover, planUnderspendRepay, type CoverMeta, type CoverStep } from '@/lib/overspendCover';
 import { formatCurrency, baseAmt, parseUkDate } from '@/lib/financeUtils';
@@ -388,7 +388,7 @@ export default function FinanceBudget() {
     // Strictly match last week's displayed budget: last week's Essentials + last week's Weekly Fun Budget
     // On travel weeks, your living allowance was budgeted from income but not spent on normal day-to-day living.
     // It automatically sweeps straight into Savings Stash as an extra holiday buffer / shock absorber!
-    const isPrevTravelWeek = prevWeekSnapshot.isTravelWeek;
+    const isPrevTravelWeek = Boolean(getTripInWeek(prevWeekStart, trips));
     const travelWeekAllowance = isPrevTravelWeek
       ? (prevWeekSnapshot.split?.weeklyFunAmount || assumptions.weekly_fun_budget || 100)
       : 0;
