@@ -359,7 +359,21 @@ export function evaluatePoolFeasibility(params: {
 
     const gTarget = convertToBase(g.target_amount || 0, g.currency);
     const gAssigned = convertToBase(g.assigned_amount || 0, g.currency);
-    const gRemaining = Math.max(0, gTarget - gAssigned);
+
+    // Account for direct expenses already logged/linked against this competing goal
+    let directSpentBase = 0;
+    if (transactions && transactions.length > 0) {
+      for (const tx of transactions) {
+        if (tx.amount >= 0 || tx.is_transfer) continue;
+        if ((tx as any).transfer_status === 'confirmed' || (tx as any).transfer_status === 'auto_confirmed') continue;
+        if ((tx as any).goal_id === g.id) {
+          directSpentBase += convertToBase(Math.abs(tx.amount), tx.currency);
+        }
+      }
+    }
+    const refillWhenSpent = Boolean((g as any).refill_when_spent);
+    const effectiveAssigned = refillWhenSpent ? gAssigned : (gAssigned + directSpentBase);
+    const gRemaining = Math.max(0, gTarget - effectiveAssigned);
     if (gRemaining <= 0.01) continue;
 
     if (g.deadline) {
@@ -373,15 +387,16 @@ export function evaluatePoolFeasibility(params: {
 
       const calcFrom = gStart > now ? gStart : now;
       const daysLeft = Math.max(1, differenceInCalendarDays(gDl, calcFrom));
-      const weeksLeft = daysLeft / 7;
+      const weeksLeft = Math.max(1, daysLeft / 7);
       const gWeekly = gRemaining / weeksLeft;
-      const gMonthly = gWeekly * 4.33;
+      // A goal can never consume more than its total remaining target in a single month
+      const gMonthly = Math.min(gRemaining, gWeekly * 4.33);
       existingPoolsMonthlyCommitment += gMonthly;
       competingGoals.push({
         id: g.id,
         name: g.name,
         targetAmount: gTarget,
-        assignedAmount: gAssigned,
+        assignedAmount: effectiveAssigned,
         remainingAmount: gRemaining,
         monthlyCommitment: gMonthly,
         weeklyPace: gWeekly,

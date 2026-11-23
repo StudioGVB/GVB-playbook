@@ -1326,12 +1326,17 @@ export function useFinanceDataState() {
       account_id: tx.account_id,
       amount: tx.amount,
       description: tx.description,
+      merchant: (tx as any).merchant || null,
       posted_at: tx.posted_at,
       currency: tx.currency || settings?.base_currency || 'AUD',
       trip_id: tx.trip_id || null,
       category_id: tx.category_id || null,
+      goal_id: (tx as any).goal_id || null,
       is_fixed: isFixed,
       fixed_expense_id: fixedExpenseId,
+      is_refund: (tx as any).is_refund || false,
+      external_transaction_id: (tx as any).external_transaction_id || null,
+      transaction_fingerprint: (tx as any).transaction_fingerprint || null,
       raw: tx.raw || null,
     } as any).select().single();
     if (error) { toast.error('Failed to log transaction: ' + error.message); return null; }
