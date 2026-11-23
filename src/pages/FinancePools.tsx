@@ -204,6 +204,7 @@ export default function FinancePoolsPage() {
   const [newFundMode, setNewFundMode] = useState<'payday' | 'weekly_budget'>('payday');
   const [newFundWeeks, setNewFundWeeks] = useState('3');
   const [newFundStartWhen, setNewFundStartWhen] = useState<'this_week' | 'next_week'>('this_week');
+  const [newRefillWhenSpent, setNewRefillWhenSpent] = useState(false);
   // Move funds dialog
   const [moveOpen, setMoveOpen] = useState(false);
   const [moveFrom, setMoveFrom] = useState<PoolId>('');
@@ -226,6 +227,7 @@ export default function FinancePoolsPage() {
   const [editPercentAllocation, setEditPercentAllocation] = useState('0');
   const [editStartDate, setEditStartDate] = useState('');
   const [editDeadline, setEditDeadline] = useState('');
+  const [editRefillWhenSpent, setEditRefillWhenSpent] = useState(false);
 
   // Feasibility breakdown dialog
   const [feasibilityDialogOpen, setFeasibilityDialogOpen] = useState(false);
@@ -680,14 +682,22 @@ export default function FinancePoolsPage() {
       const aAssigned = a.assigned_amount || 0;
       const aTripInfo = goalTripSpent.get(a.id);
       const aSpent = aTripInfo?.spent || 0;
+      const aDirectSpent = goalDirectSpent.get(a.id)?.spentNative || 0;
       const aRemaining = Math.max(0, aAssigned - aSpent);
-      const aHit = a.target_amount > 0 && (aTripInfo ? aRemaining : aAssigned) >= a.target_amount;
+      const aEffective = a.refill_when_spent
+        ? (aTripInfo ? aRemaining : aAssigned)
+        : (aTripInfo ? aAssigned : aAssigned + aDirectSpent);
+      const aHit = a.target_amount > 0 && aEffective >= a.target_amount;
 
       const bAssigned = b.assigned_amount || 0;
       const bTripInfo = goalTripSpent.get(b.id);
       const bSpent = bTripInfo?.spent || 0;
+      const bDirectSpent = goalDirectSpent.get(b.id)?.spentNative || 0;
       const bRemaining = Math.max(0, bAssigned - bSpent);
-      const bHit = b.target_amount > 0 && (bTripInfo ? bRemaining : bAssigned) >= b.target_amount;
+      const bEffective = b.refill_when_spent
+        ? (bTripInfo ? bRemaining : bAssigned)
+        : (bTripInfo ? bAssigned : bAssigned + bDirectSpent);
+      const bHit = b.target_amount > 0 && bEffective >= b.target_amount;
 
       // 1. Completed / Fully funded goals go to the bottom (last)
       if (aHit !== bHit) {
@@ -722,7 +732,7 @@ export default function FinancePoolsPage() {
 
       return (a.priority || 99) - (b.priority || 99);
     });
-  }, [finance.goals, goalTripSpent]);
+  }, [finance.goals, goalTripSpent, goalDirectSpent]);
 
   const assignedOtherGoalsTotal = otherGoalSegments.reduce((s, seg) => s + seg.amount, 0);
 
@@ -840,9 +850,10 @@ export default function FinancePoolsPage() {
       finance.goals,
       fixedMonthlyTotal,
       essentialVariable,
-      finance.convertToBase
+      finance.convertToBase,
+      finance.transactions
     );
-  }, [paycheckTx, emergencyFloor, currentEmergencyFunded, finance.goals, fixedMonthlyTotal, essentialVariable, finance.convertToBase]);
+  }, [paycheckTx, emergencyFloor, currentEmergencyFunded, finance.goals, fixedMonthlyTotal, essentialVariable, finance.convertToBase, finance.transactions]);
 
   const handleExecutePaycheckAllocation = async () => {
     if (!paycheckTx || !waterfallBreakdown || paycheckAllocated) return;
@@ -1011,6 +1022,7 @@ export default function FinancePoolsPage() {
       percent_allocation: isSavings ? (parseFloat(editPercentAllocation) || 10) : (parseFloat(editPercentAllocation) || 0),
       start_date: editStartDate && editStartDate.trim() ? editStartDate.trim().split('T')[0] : null,
       deadline: editDeadline && editDeadline.trim() ? editDeadline.trim().split('T')[0] : null,
+      refill_when_spent: editRefillWhenSpent,
     } as any);
     toast.success('Pool updated');
     setEditOpen(false);
@@ -1039,6 +1051,7 @@ export default function FinancePoolsPage() {
     setEditColor(goal.color || POOL_COLORS[0]);
     setEditIsStash((goal as any).is_stash === true);
     setEditPercentAllocation(String(goal.percent_allocation || 0));
+    setEditRefillWhenSpent(Boolean(goal.refill_when_spent));
     const rawStart = (goal as any).start_date;
     const rawDeadline = goal.deadline;
     setEditStartDate(rawStart ? String(rawStart).split('T')[0].split(' ')[0] : '');
@@ -1065,6 +1078,7 @@ export default function FinancePoolsPage() {
       percent_allocation: isWeeklyFunded ? 0 : (parseFloat(newPercentAllocation) || 0),
       start_date: isWeeklyFunded ? null : (newStartDate || null),
       deadline: isWeeklyFunded ? null : (newDeadline || null),
+      refill_when_spent: newRefillWhenSpent,
     } as any);
 
     if (isWeeklyFunded && created && (created as any).id) {
@@ -1106,6 +1120,7 @@ export default function FinancePoolsPage() {
     setNewDeadline('');
     setNewFundMode('payday');
     setNewFundWeeks('3');
+    setNewRefillWhenSpent(false);
     setCreateOpen(false);
   };
 
@@ -1708,14 +1723,18 @@ export default function FinancePoolsPage() {
 
           const remaining = Math.max(0, assigned - tripSpent);
           const displayAmount = tripInfo ? remaining : assigned;
+          const refillWhenSpent = Boolean(goal.refill_when_spent);
+          const effectiveFundedNative = refillWhenSpent
+            ? displayAmount
+            : (tripInfo ? assigned : assigned + directSpentNative);
           const pct = goal.target_amount > 0 ? Math.min((displayAmount / goal.target_amount) * 100, 100) : 0;
-          const isHit = goal.target_amount > 0 && (displayAmount >= goal.target_amount || (!tripInfo && assigned + directSpentNative >= goal.target_amount));
+          const isHit = goal.target_amount > 0 && effectiveFundedNative >= goal.target_amount;
           const iconColor = goal.color || '#4558ff';
           const goalColor = isHit ? '#10b981' : iconColor;
           const GoalIcon = getPoolIcon(goal.name);
           const cardFeasibility = goal.deadline ? evaluatePoolFeasibility({
             targetAmount: finance.convertToBase(goal.target_amount || 0, goal.currency),
-            currentAssigned: finance.convertToBase(assigned + directSpentNative, goal.currency),
+            currentAssigned: finance.convertToBase(effectiveFundedNative, goal.currency),
             deadline: goal.deadline || null,
             startDate: goal.start_date || null,
             existingGoals: finance.goals,
@@ -1918,18 +1937,18 @@ export default function FinancePoolsPage() {
                         : `${daysRemaining}d left`;
                     const daysRemainingClamped = Math.max(1, daysRemaining);
                     const targetVal = finance.convertToBase(goal.target_amount || 0, goal.currency);
-                    const assignedVal = finance.convertToBase(assigned + directSpentNative, goal.currency);
-                    const remaining = Math.max(0, targetVal - assignedVal);
+                    const assignedVal = finance.convertToBase(effectiveFundedNative, goal.currency);
+                    const remainingToSave = Math.max(0, targetVal - assignedVal);
 
                     let weeklyRequired = 0;
                     if (isFutureStart) {
                       const st = new Date(goal.start_date!);
                       const daysBetween = Math.max(1, Math.ceil((dl.getTime() - st.getTime()) / (1000 * 60 * 60 * 24)));
                       const weeksBetween = daysBetween / 7;
-                      weeklyRequired = remaining / weeksBetween;
+                      weeklyRequired = remainingToSave / weeksBetween;
                     } else {
                       const weeksRemaining = daysRemainingClamped / 7;
-                      weeklyRequired = remaining / weeksRemaining;
+                      weeklyRequired = remainingToSave / weeksRemaining;
                     }
                     
                     return (
@@ -1949,7 +1968,7 @@ export default function FinancePoolsPage() {
                         <div className="flex justify-between">
                           <span className="text-slate-500 font-semibold">Left to Save:</span>
                           <span className="font-extrabold text-slate-700">
-                            {formatCurrency(remaining, baseCurrency)}
+                            {formatCurrency(remainingToSave, baseCurrency)}
                           </span>
                         </div>
                       </>
@@ -1982,6 +2001,32 @@ export default function FinancePoolsPage() {
                       </>
                     );
                   })()}
+                  {!isProtectedSystemGoal(goal) && (
+                    <div className="flex items-center justify-between pt-1">
+                      <span className="text-slate-500 font-semibold">When Spent From:</span>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const nextVal = !refillWhenSpent;
+                          await finance.updateGoal(goal.id, { refill_when_spent: nextVal } as any);
+                          toast.success(
+                            nextVal
+                              ? `${goal.name}: set to auto-refill back to target on payday`
+                              : `${goal.name}: once hit, won't refill spent funds on payday`
+                          );
+                        }}
+                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border transition-colors cursor-pointer ${
+                          refillWhenSpent
+                            ? 'bg-sky-50 text-sky-800 border-sky-200 hover:bg-sky-100'
+                            : 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
+                        }`}
+                        title="Click to toggle whether spending from this pot triggers a payday refill"
+                      >
+                        <RotateCcw className="w-2.5 h-2.5" />
+                        {refillWhenSpent ? 'Refill on payday' : 'Once hit, ignore'}
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 {/* Unfeasible Shortfall Callout Banner with Click Handler */}
@@ -2426,6 +2471,17 @@ export default function FinancePoolsPage() {
                 ))}
               </div>
             </div>
+            <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50/70 p-3 gap-3">
+              <div className="space-y-0.5">
+                <Label className="text-xs font-bold text-slate-900">Auto-refill on payday if spent from</Label>
+                <p className="text-[11px] text-slate-500 leading-snug">
+                  {newRefillWhenSpent
+                    ? 'On: If you spend from this pot before its due date, future paychecks will top it back up to its target.'
+                    : 'Off: Once this pot hits its target, future paychecks will ignore it even if you spend from it early (e.g. booking flights/hotels).'}
+                </p>
+              </div>
+              <Switch checked={newRefillWhenSpent} onCheckedChange={setNewRefillWhenSpent} />
+            </div>
             {newFundMode === 'payday' && newDeadline && parseFloat(newAmount) > 0 && (
               <FeasibilityAlert
                 assessment={createFeasibility}
@@ -2528,6 +2584,19 @@ export default function FinancePoolsPage() {
                 ))}
               </div>
             </div>
+            {!isEditingProtected && (
+              <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50/70 p-3 gap-3">
+                <div className="space-y-0.5">
+                  <Label className="text-xs font-bold text-slate-900">Auto-refill on payday if spent from</Label>
+                  <p className="text-[11px] text-slate-500 leading-snug">
+                    {editRefillWhenSpent
+                      ? 'On: If you spend from this pot before its due date, future paychecks will top it back up to its target.'
+                      : 'Off: Once this pot hits its target, future paychecks will ignore it even if you spend from it early (e.g. booking flights/hotels).'}
+                  </p>
+                </div>
+                <Switch checked={editRefillWhenSpent} onCheckedChange={setEditRefillWhenSpent} />
+              </div>
+            )}
             {editDeadline && parseFloat(editTarget) > 0 && (
               <FeasibilityAlert
                 assessment={editFeasibility}
