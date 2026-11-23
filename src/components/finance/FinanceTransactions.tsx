@@ -1307,7 +1307,7 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                                 </button>
                               )}
                             </PopoverTrigger>
-                            <PopoverContent className="w-48 p-2" align="end">
+                            <PopoverContent className="w-48 p-2" align="end" side="top" sideOffset={8}>
                               <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1.5 px-1">
                                 {isRealIncome ? 'Assign Income Stream' : 'Assign Expense Category'}
                               </p>
@@ -1379,7 +1379,7 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                                   <Target className="w-4 h-4" />
                                 </button>
                               </PopoverTrigger>
-                              <PopoverContent className="w-48 p-2" align="end">
+                              <PopoverContent className="w-48 p-2" align="end" side="top" sideOffset={8}>
                                 <p className="text-[10px] font-medium text-muted-foreground mb-1.5 px-1">Assign to pool</p>
                                 <div className="space-y-0.5 max-h-48 overflow-y-auto">
                                   {goals.map(g => (
@@ -1490,7 +1490,7 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                                   <Receipt className="w-4 h-4" />
                                 </button>
                               </PopoverTrigger>
-                              <PopoverContent className="w-44 p-2" align="end">
+                              <PopoverContent className="w-44 p-2" align="end" side="top" sideOffset={8}>
                                 <p className="text-[10px] font-medium text-muted-foreground mb-1.5 px-1">Mark as bill</p>
                                 <div className="space-y-0.5 max-h-48 overflow-y-auto">
                                   {fixedExpenses.map(e => (
@@ -1554,7 +1554,7 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                                   <Briefcase className="w-4 h-4" />
                                 </button>
                               </PopoverTrigger>
-                              <PopoverContent className="w-52 p-2" align="end">
+                              <PopoverContent className="w-52 p-2" align="end" side="top" sideOffset={8}>
                                 <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1.5 px-1">
                                   Work Travel Claim
                                 </p>
@@ -1651,7 +1651,7 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                                 <MoreHorizontal className="w-4 h-4" />
                               </button>
                             </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-56 p-1.5 shadow-xl">
+                            <DropdownMenuContent align="end" side="top" sideOffset={8} className="w-56 p-1.5 shadow-xl">
                               <DropdownMenuLabel className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground px-2 py-1">
                                 Actions
                               </DropdownMenuLabel>
