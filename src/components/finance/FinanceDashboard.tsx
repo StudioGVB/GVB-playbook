@@ -177,7 +177,16 @@ export function FinanceDashboard() {
       if (cat?.type === 'fixed') return true;
 
       const amt = Math.abs(baseAmt(tx));
-      const desc = `${tx.merchant || ''} ${tx.description || ''} ${cat?.name || ''}`.toLowerCase();
+      const catNameLower = String(cat?.name || '').toLowerCase();
+      const desc = `${tx.merchant || ''} ${tx.description || ''} ${catNameLower}`.toLowerCase();
+
+      if (/\b(bills?|fixed|subscriptions?|utilities|rent|housing|phone|mobile|internet|wifi|broadband|meds|medication|medical|pharmacy|healthcare|health|clinic|prescription)\b/i.test(catNameLower)) {
+        return true;
+      }
+
+      if (/\b(apple\.com\/bill|itunes|icloud|spotify|netflix|disney\+|amazon prime|prime video|audible|google one|chatgpt|openai|claude|anthropic|canva|adobe|figma|notion|patreon|substack|whoop|strava|puregym|the gym|jd gyms|vodafone|voxi|giffgaff|lyca|lycamobile|lebara|smarty|id mobile|tesco mobile|virgin media|hyperoptic|octopus|british gas|united utilities|council tax|prescription|pharmacy|chemist|well pharmacy|broadway|signature|elvanse|amfexa|adhd|titration|psychiatry|mypace|harley)\b/i.test(desc)) {
+        return true;
+      }
 
       // Explicit rent check (require word boundary and amt >= 100 so "flat white", "parent", "sorrento" etc. are never misclassified)
       if (amt >= 100 && /\b(rent|landlord|accommodation|tenancy)\b/i.test(desc)) {
@@ -188,12 +197,10 @@ export function FinanceDashboard() {
       for (const fe of fixedExpenses) {
         const feAmt = finance.convertToBase(fe.amount, fe.currency);
         const amountClose = Math.abs(amt - feAmt) <= Math.max(2, feAmt * 0.05);
-        if (!amountClose) continue;
-
         const feName = fe.name.toLowerCase();
         const feTokens = feName.split(/\s+/).filter(w => w.length >= 3);
         const nameMatches = feTokens.some(w => desc.includes(w));
-        if (nameMatches) return true;
+        if (nameMatches && amt <= Math.max(feAmt * 3.5, feAmt + 150)) return true;
 
         if (feAmt >= 200 && amountClose) {
           if (fe.due_day) {
@@ -247,10 +254,11 @@ export function FinanceDashboard() {
   }, [finance.transactions, finance.categories, weekStart, trips]);
 
   // Monthly spend (deduplicated to match Monthly Report)
-  const { essentialSpentMonth, funSpentMonth, fixedSpentMonth } = useMemo(() => {
+  const { essentialSpentMonth, funSpentMonth, fixedSpentMonth, extraFixedBillsMonth } = useMemo(() => {
     let essential = 0;
     let fun = 0;
     let fixed = 0;
+    let extraFixed = 0;
     const { cleaned: dedupedTxs } = deduplicateTransactions(finance.transactions);
 
     for (const tx of dedupedTxs) {
@@ -260,6 +268,8 @@ export function FinanceDashboard() {
       if ((tx as any).goal_id || (tx as any).is_travel_spend || (tx as any).trip_id) continue;
       const d = parseUkDate(tx.posted_at);
       if (d < monthStart || d > monthEnd) continue;
+
+      extraFixed += Number((tx as any).extra_fixed_bill_amount) || 0;
 
       const cat = catMap.get(tx.category_id || '');
       if (cat?.exclude_from_reports || cat?.type === 'income' || cat?.type === 'transfer') continue;
@@ -299,6 +309,7 @@ export function FinanceDashboard() {
       essentialSpentMonth: essential,
       funSpentMonth: fun,
       fixedSpentMonth: fixed,
+      extraFixedBillsMonth: extraFixed,
     };
   }, [finance.transactions, monthStart, monthEnd, catMap, essentialCatIds, isFixedTx]);
 
@@ -328,20 +339,10 @@ export function FinanceDashboard() {
   const combinedDailyPace = daysLeftInWeek > 0 ? combinedSafeToSpend / daysLeftInWeek : combinedSafeToSpend;
 
   // 2. Monthly Spend & Projected Under/Over
-  const extraFixedBillsMonth = useMemo(() => {
-    const { cleaned: dedupedTxs } = deduplicateTransactions(finance.transactions);
-    let extra = 0;
-    for (const tx of dedupedTxs) {
-      const d = parseUkDate(tx.posted_at);
-      if (d >= monthStart && d <= monthEnd) {
-        extra += Number((tx as any).extra_fixed_bill_amount) || 0;
-      }
-    }
-    return extra;
-  }, [finance.transactions, monthStart, monthEnd]);
-
   const fixedMonthly = Math.max(fixedExpensesMonthlyAll + extraFixedBillsMonth, fixedSpentMonth);
-  const monthlyVariableBudget = (snapshot.weeklyEssentialBudget + snapshot.baseWeeklyFun) * 4.33;
+  const effectiveWeeklyVariableAllowance =
+    snapshot.weeklyEssentialBudget + Math.max(snapshot.baseWeeklyFun, snapshot.weeklyFunBudget);
+  const monthlyVariableBudget = effectiveWeeklyVariableAllowance * 4.33;
   const autoTotalBudget = monthlyVariableBudget + fixedMonthly;
   const budgetOverride = (assumptions as any)?.monthly_budget_override;
   const monthlyTotalBudget =
@@ -353,7 +354,12 @@ export function FinanceDashboard() {
   const thisWeekDailyVariablePace = dayOfWeek > 0 ? totalSpentThisWeek / dayOfWeek : dailyVariablePace;
   const remainingDaysInMonth = Math.max(0, daysInMonth - daysElapsed);
   const futureDailyVariablePace = Math.min(dailyVariablePace, thisWeekDailyVariablePace);
-  const projectedVariableSpend = variableSpentMonth + futureDailyVariablePace * remainingDaysInMonth;
+  const isUnderspendingWeeklyAllowance = totalSpentThisWeek <= totalWeeklyBudget;
+  const rawProjectedVariableSpend = variableSpentMonth + futureDailyVariablePace * remainingDaysInMonth;
+  const projectedVariableSpend =
+    isUnderspendingWeeklyAllowance && variableSpentMonth <= monthlyVariableBudget
+      ? Math.min(rawProjectedVariableSpend, thisWeekDailyVariablePace * daysInMonth)
+      : rawProjectedVariableSpend;
   const projectedSpend = projectedVariableSpend + fixedMonthly;
   const projectedDiff = projectedSpend - monthlyTotalBudget; // <= 0 means under budget
 

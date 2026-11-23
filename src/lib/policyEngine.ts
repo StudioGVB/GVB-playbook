@@ -605,7 +605,7 @@ export function computePolicySnapshot(
       categories,
       goals,
       convertToBase,
-      fixedExpensesMonthlyAll ?? fixedMonthly,
+      fixedExpensesMonthlyAll ?? (fixedExpensesMonthly ?? 0),
       monthlyIncome,
       weekTypeMap,
       trips,
@@ -1051,25 +1051,24 @@ export function computeMoneySplit(
     essentialResult.monthly,
   );
 
-  // 4. Goal pool savings requirements
-  const poolSavingsMonthly = computeRequiredGoalSavingsMonthly(goals, convertToBase, now, effectiveIncome);
-
-  const goalSavingsAmount = poolSavingsMonthly;
-  const goalSavingsPercent = effectiveIncome > 0 ? (goalSavingsAmount / effectiveIncome) * 100 : 0;
-
-  // 5. Fun Money = Capped at user's weekly_fun_budget (default £150/wk), or genuine cashflow leftover if lower.
-  // When goal pots reach 100% funded, freed-up income goes into Base Savings / Emergency Reserve Ladder
-  // rather than inflating weekly Fun Money.
-  const rawLeftoverMonthly = Math.max(0, effectiveIncome - monthlyMandatory - essentialVariable - goalSavingsAmount);
+  // 4. Fun Money = Capped at user's weekly_fun_budget (default £150/wk), funded after Fixed Bills + Essentials
+  // so extra bills are absorbed by monthly savings surplus rather than shrinking the weekly allowance.
+  const incomeAfterEssentials = Math.max(0, effectiveIncome - monthlyMandatory - essentialVariable);
   const maxWeeklyFunCap = (assumptions.weekly_fun_budget && assumptions.weekly_fun_budget > 0)
     ? assumptions.weekly_fun_budget
     : 150;
-  const weeklyFunAmount = Math.min(maxWeeklyFunCap, rawLeftoverMonthly / 4.33);
+  const weeklyFunAmount = Math.min(maxWeeklyFunCap, incomeAfterEssentials / 4.33);
 
   const funAmount = weeklyFunAmount * 4.33;
   const funPercent = effectiveIncome > 0 ? (funAmount / effectiveIncome) * 100 : 0;
 
-  const baseSavingsAmount = Math.max(0, rawLeftoverMonthly - funAmount);
+  // 5. Goal pool savings & base savings funded from remaining monthly surplus
+  const poolSavingsMonthly = computeRequiredGoalSavingsMonthly(goals, convertToBase, now, effectiveIncome);
+  const totalSavingsCapacity = Math.max(0, incomeAfterEssentials - funAmount);
+  const goalSavingsAmount = Math.min(poolSavingsMonthly, totalSavingsCapacity);
+  const goalSavingsPercent = effectiveIncome > 0 ? (goalSavingsAmount / effectiveIncome) * 100 : 0;
+
+  const baseSavingsAmount = Math.max(0, totalSavingsCapacity - goalSavingsAmount);
   const baseSavingsPercent = effectiveIncome > 0 ? (baseSavingsAmount / effectiveIncome) * 100 : 0;
 
   return {

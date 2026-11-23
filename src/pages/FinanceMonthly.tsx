@@ -152,7 +152,7 @@ export default function FinanceMonthly() {
     ? snapshot.weeklyEssentialBudget * 4.33
     : (assumptions?.estimated_essential_variable || 400);
   const monthlyFunBudget = snapshot
-    ? snapshot.baseWeeklyFun * 4.33
+    ? Math.max(snapshot.baseWeeklyFun, snapshot.weeklyFunBudget) * 4.33
     : (assumptions ? (assumptions.weekly_fun_budget || 100) * 4.33 : 0);
   const monthlyVariableBudget = monthlyEssentialBudget + monthlyFunBudget;
   const autoTotalBudget = monthlyVariableBudget + fixedMonthly;
@@ -178,7 +178,16 @@ export default function FinanceMonthly() {
     if (cat?.type === 'fixed') return true;
 
     const amt = Math.abs(baseAmt(tx));
-    const desc = `${tx.merchant || ''} ${tx.description || ''} ${cat?.name || ''}`.toLowerCase();
+    const catNameLower = String(cat?.name || '').toLowerCase();
+    const desc = `${tx.merchant || ''} ${tx.description || ''} ${catNameLower}`.toLowerCase();
+
+    if (/\b(bills?|fixed|subscriptions?|utilities|rent|housing|phone|mobile|internet|wifi|broadband|meds|medication|medical|pharmacy|healthcare|health|clinic|prescription)\b/i.test(catNameLower)) {
+      return true;
+    }
+
+    if (/\b(apple\.com\/bill|itunes|icloud|spotify|netflix|disney\+|amazon prime|prime video|audible|google one|chatgpt|openai|claude|anthropic|canva|adobe|figma|notion|patreon|substack|whoop|strava|puregym|the gym|jd gyms|vodafone|voxi|giffgaff|lyca|lycamobile|lebara|smarty|id mobile|tesco mobile|virgin media|hyperoptic|octopus|british gas|united utilities|council tax|prescription|pharmacy|chemist|well pharmacy|broadway|signature|elvanse|amfexa|adhd|titration|psychiatry|mypace|harley)\b/i.test(desc)) {
+      return true;
+    }
 
     // Explicit rent check (require word boundary and amt >= 100 so "flat white", "parent", "sorrento" etc. are never misclassified)
     if (amt >= 100 && /\b(rent|landlord|accommodation|tenancy)\b/i.test(desc)) {
@@ -189,12 +198,10 @@ export default function FinanceMonthly() {
     for (const fe of fixedExpenses) {
       const feAmt = finance.convertToBase(fe.amount, fe.currency);
       const amountClose = Math.abs(amt - feAmt) <= Math.max(2, feAmt * 0.05);
-      if (!amountClose) continue;
-
       const feName = fe.name.toLowerCase();
       const feTokens = feName.split(/\s+/).filter(w => w.length >= 3);
       const nameMatches = feTokens.some(w => desc.includes(w));
-      if (nameMatches) return true;
+      if (nameMatches && amt <= Math.max(feAmt * 3.5, feAmt + 150)) return true;
 
       // If amount specifically matches rent (£720) or high fixed bill near due day
       if (feAmt >= 200 && amountClose) {
@@ -392,8 +399,13 @@ export default function FinanceMonthly() {
   const safeDailyRemaining = daysRemaining > 0 ? variableRemaining / daysRemaining : 0;
 
   const futureDailyVariablePace = Math.min(dailyVariablePace, thisWeekDailyVariablePace);
+  const weeklyVariableAllowance = monthlyVariableBudget / 4.33;
+  const isUnderspendingWeeklyAllowance = currentWeekSummary.totalSpent <= weeklyVariableAllowance;
+  const rawProjectedVariableSpend = variableSpent + futureDailyVariablePace * daysRemaining;
   const projectedVariableSpend = isCurrentMonth
-    ? variableSpent + futureDailyVariablePace * daysRemaining
+    ? (isUnderspendingWeeklyAllowance && variableSpent <= monthlyVariableBudget
+        ? Math.min(rawProjectedVariableSpend, thisWeekDailyVariablePace * daysInMonth)
+        : rawProjectedVariableSpend)
     : variableSpent;
   const effectiveFixedMonthly = Math.max(fixedMonthly, fixedSpent);
   const projectedSpend = projectedVariableSpend + effectiveFixedMonthly;
