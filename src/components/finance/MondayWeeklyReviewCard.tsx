@@ -8,6 +8,8 @@ import type { useFinanceData } from '@/hooks/useFinanceData';
 import type { FinanceAssumptions } from '@/hooks/useFinanceAssumptions';
 import type { FinanceTrip } from '@/hooks/useFinanceTrips';
 import { computeWeekVariableSpend, type PolicySnapshot } from '@/lib/policyEngine';
+import { deduplicateTransactions } from '@/lib/deduplication';
+import { parseCoverMeta, type CoverMeta } from '@/lib/overspendCover';
 import { startOfWeek, subWeeks, format } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
 
@@ -37,13 +39,40 @@ export function MondayWeeklyReviewCard({ finance, assumptions, trips = [], force
 
   // Dates for last week (Monday to Sunday)
   const lastWeekStart = subWeeks(currentWeekStart, 1);
+  const lastWeekKey = format(lastWeekStart, 'yyyy-MM-dd');
   const lastWeekSunday = new Date(currentWeekStart.getTime() - 1000 * 60 * 60 * 24);
   const dateRangeLabel = `${format(lastWeekStart, 'MMM d')} – ${format(lastWeekSunday, 'MMM d, yyyy')}`;
 
-  // Calculate last week's spending using the unified weekly spend helper
+  // Find closed/locked settlement record from Savings Stash
+  const stashGoal = useMemo(() => {
+    return finance?.goals?.find(g => (g as any).is_stash === true || (g.name || '').toLowerCase().includes('stash')) || null;
+  }, [finance?.goals]);
+  const meta: CoverMeta = useMemo(() => parseCoverMeta(stashGoal?.description), [stashGoal?.description]);
+  const closedRecord = meta.closed_weeks?.[lastWeekKey];
+
+  // Calculate last week's spending: prefer the locked immutable settlement record so numbers never drift!
   const lastWeekStats = useMemo(() => {
+    if (closedRecord) {
+      const isTotalOver = closedRecord.netDifference < 0;
+      return {
+        funSpent: closedRecord.funSpent,
+        essentialSpent: closedRecord.essentialSpent,
+        totalSpent: closedRecord.totalSpent,
+        weeklyFunBudget: closedRecord.baseFunBudget + closedRecord.boost,
+        weeklyEssentialBudget: closedRecord.essentialBudget,
+        totalBudget: closedRecord.totalBudget,
+        isTotalOver,
+        totalOverAmount: isTotalOver ? Math.abs(closedRecord.netDifference) : 0,
+        totalUnderAmount: isTotalOver ? 0 : Math.max(0, closedRecord.netDifference),
+        totalDiff: closedRecord.netDifference,
+        isLocked: true,
+      };
+    }
+
+    // Fallback: If not yet settled, compute from deduplicated transactions
+    const { cleaned: dedupedTxs } = deduplicateTransactions(finance?.transactions || []);
     const summary = computeWeekVariableSpend(
-      finance?.transactions || [],
+      dedupedTxs,
       finance?.categories || [],
       lastWeekStart,
       trips,
@@ -73,8 +102,9 @@ export function MondayWeeklyReviewCard({ finance, assumptions, trips = [], force
       totalOverAmount,
       totalUnderAmount,
       totalDiff,
+      isLocked: false,
     };
-  }, [finance?.transactions, finance?.categories, lastWeekStart, trips, assumptions, snapshot]);
+  }, [closedRecord, finance?.transactions, finance?.categories, lastWeekStart, trips, assumptions, snapshot]);
 
   // Only render on Mondays unless forceShow is active or toggled
   if (!isMonday && !forceShow) {
