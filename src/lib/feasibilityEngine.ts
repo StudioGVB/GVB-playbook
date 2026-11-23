@@ -95,7 +95,7 @@ export function calculateStreamIncomeEstimates(
           color: '#DB2777',
           total: 0,
           count: 0,
-          monthlyTarget: primaryGammaCat?.monthly_target || 2896.67,
+          monthlyTarget: primaryGammaCat?.monthly_target || 2800,
           months: new Set(),
           earliest: null,
           transactions: [],
@@ -126,7 +126,7 @@ export function calculateStreamIncomeEstimates(
       color: '#DB2777',
       total: 0,
       count: 0,
-      monthlyTarget: 2896.67,
+      monthlyTarget: 2800,
       months: new Set(),
       earliest: null,
       transactions: [],
@@ -243,7 +243,7 @@ export function calculateStreamIncomeEstimates(
         estimatedMonthlyAmount = (70 * 52) / 12; // ~£303.33/mo
       } else if (isGamma) {
         // Fallback only if no transactions loaded yet
-        estimatedMonthlyAmount = data.monthlyTarget || 2896.67;
+        estimatedMonthlyAmount = data.monthlyTarget || 2800;
       } else if (data.monthlyTarget && data.monthlyTarget > 0) {
         estimatedMonthlyAmount = data.monthlyTarget;
       } else {
@@ -629,8 +629,8 @@ export function calculateSpendingIncomeEstimates(
       // Monthly salary streams: A salary paycheck is a full monthly wage.
       // Do not dilute by an in-progress month before payday (e.g. October 12th).
       const maxMonthlyObserved = Math.max(...monthEntries.map(([_, a]) => a), 0);
-      // Gabriella's standard Gamma net monthly salary benchmark is ~£2,896.67
-      estimatedMonthlyAmount = Math.max(maxMonthlyObserved, 2896.67);
+      // Gabriella's standard Gamma net monthly salary benchmark is ~£2,800
+      estimatedMonthlyAmount = data.monthlyTarget || (maxMonthlyObserved > 0 ? maxMonthlyObserved : 2800);
       activeMonthsCount = Math.max(1, monthEntries.length);
     } else {
       if (completedMonths.length > 0) {
@@ -656,13 +656,13 @@ export function calculateSpendingIncomeEstimates(
     totalEstimatedMonthlyIncome += estimatedMonthlyAmount;
   }
 
-  // Guaranteed inclusion: Gamma Salary benchmark (~£2,896.67/mo)
+  // Guaranteed inclusion: Gamma Salary benchmark (~£2,800/mo)
   const hasGammaStream = streamEstimates.some(s =>
     s.name.toLowerCase().includes('gamma') || s.name.toLowerCase().includes('salary')
   );
   if (!hasGammaStream) {
-    const gammaMonthly = 2896.67;
     const gCat = incomeCategories.find(c => c.name.toLowerCase().includes('gamma') || c.name.toLowerCase().includes('salary'));
+    const gammaMonthly = gCat?.monthly_target || 2800;
     streamEstimates.unshift({
       categoryId: gCat?.id || '__gamma_salary',
       name: 'Gamma Salary',
