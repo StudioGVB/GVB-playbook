@@ -365,20 +365,6 @@ export default function FinancePoolsPage() {
             console.error('Failed to link transactions to goal', err);
           }
         }
-
-        // If the pool has expenses < target (e.g. £118 spent out of £150 = £32 left) but assigned_amount is 0, restore it
-        const manualZero = localStorage.getItem(`gvb_pool_manual_zero_${g.id}`) === 'true';
-        if (assignedNative <= 0 && expectedRemaining > 0 && !manualZero) {
-          try {
-            await supabase
-              .from('finance_goals')
-              .update({ assigned_amount: expectedRemaining })
-              .eq('id', g.id);
-            hasChanges = true;
-          } catch (err) {
-            console.error('Failed to restore goal assigned amount', err);
-          }
-        }
       }
 
       if (hasChanges) {
@@ -1046,20 +1032,9 @@ export default function FinancePoolsPage() {
     } else {
       setEditDescription(rawDesc || (isStashGoal ? 'Cash surplus' : ''));
     }
-    const spentInfo = goalDirectSpent.get(goal.id);
     const rawAssigned = goal.assigned_amount || 0;
-    const effectiveAssigned =
-      !isProtectedSystemGoal(goal) &&
-      !goalTripSpent.has(goal.id) &&
-      rawAssigned <= 0 &&
-      spentInfo &&
-      spentInfo.spentNative > 0 &&
-      (goal.target_amount || 0) > spentInfo.spentNative &&
-      localStorage.getItem(`gvb_pool_manual_zero_${goal.id}`) !== 'true'
-        ? Math.max(0, Math.round(((goal.target_amount || 0) - spentInfo.spentNative) * 100) / 100)
-        : rawAssigned;
     setEditTarget(String(goal.target_amount));
-    setEditAssigned(String(effectiveAssigned));
+    setEditAssigned(String(Math.round(rawAssigned * 100) / 100));
     setEditCurrency(goal.currency);
     setEditColor(goal.color || POOL_COLORS[0]);
     setEditIsStash((goal as any).is_stash === true);
@@ -1135,18 +1110,20 @@ export default function FinancePoolsPage() {
   };
 
   const handleMoveFunds = async (bypassCapCheck = false) => {
-    const val = parseFloat(moveAmount);
-    if (!moveFrom || !moveTo || moveFrom === moveTo || isNaN(val) || val <= 0) {
+    const rawVal = parseFloat(moveAmount);
+    if (!moveFrom || !moveTo || moveFrom === moveTo || isNaN(rawVal) || rawVal <= 0) {
       toast.error('Please select two different pools and enter an amount');
       return;
     }
 
-    // Check source has enough
+    // Check source has enough (with 1p floating-point rounding tolerance)
     const source = poolOptions.find(p => p.id === moveFrom);
-    if (!source || val > source.available) {
+    if (!source || rawVal > source.available + 0.01) {
       toast.error(`Not enough in "${source?.label}" — only ${fmt(source?.available ?? 0)} available`);
       return;
     }
+    const isFullDrain = rawVal >= source.available - 0.01;
+    const val = isFullDrain ? source.available : rawVal;
 
     // Helper: convert base-currency amount back to a goal's native currency
     const toGoalCurrency = (baseAmt: number, currency: string) => {
@@ -1213,15 +1190,19 @@ export default function FinancePoolsPage() {
       const goal = finance.goals.find(g => g.id === moveFrom);
       if (goal) {
         const isSourceCoreSavings = isSystemSavingsGoal(goal);
-        // When moving out of Core Savings into another goal pot, the first `extraSavingsCash` portion
-        // is automatically absorbed as `baseOtherGoalTotal` increases, so only deduct any amount beyond `extraSavingsCash`.
         const effectiveDeductBase = isSourceCoreSavings
           ? Math.max(0, val - extraSavingsCash)
           : val;
-        if (effectiveDeductBase > 0) {
+        if (effectiveDeductBase > 0 || isFullDrain) {
           const deltaNative = toGoalCurrency(effectiveDeductBase, goal.currency);
+          const nextAssigned = isFullDrain && !isSourceCoreSavings
+            ? 0
+            : Math.max(0, (goal.assigned_amount || 0) - deltaNative);
+          if (nextAssigned <= 0.005) {
+            localStorage.setItem(`gvb_pool_manual_zero_${goal.id}`, 'true');
+          }
           updates.push(
-            finance.updateGoal(goal.id, { assigned_amount: Math.max(0, (goal.assigned_amount || 0) - deltaNative) } as any)
+            finance.updateGoal(goal.id, { assigned_amount: nextAssigned <= 0.005 ? 0 : nextAssigned } as any)
           );
         }
       }
@@ -1242,11 +1223,9 @@ export default function FinancePoolsPage() {
         } as any)
       );
     } else if (!isVirtualPool(moveTo) && !isDestCoreSavings) {
-      // Moving into a specific goal pot increases its assigned_amount.
-      // (If moving from another goal pot into Core Savings, reducing the source pot's assigned_amount
-      // automatically increases extraSavingsCash by `val`, so Core Savings increases by `val` without double-adding.)
       const goal = finance.goals.find(g => g.id === moveTo);
       if (goal) {
+        localStorage.removeItem(`gvb_pool_manual_zero_${goal.id}`);
         const deltaNative = toGoalCurrency(val, goal.currency);
         updates.push(
           finance.updateGoal(goal.id, { assigned_amount: (goal.assigned_amount || 0) + deltaNative } as any)
@@ -1724,19 +1703,8 @@ export default function FinancePoolsPage() {
           const directSpentInfo = goalDirectSpent.get(goal.id);
           const directSpentNative = directSpentInfo?.spentNative || 0;
           const directSpentBase = directSpentInfo?.spentBase || 0;
-          const manualZero = localStorage.getItem(`gvb_pool_manual_zero_${goal.id}`) === 'true';
 
-          // If a spending pool has logged expenses < target (e.g. £28 + £90 = £118 out of £150 = £32 left)
-          // and assigned_amount was wiped to 0, immediately show the reconciled remaining balance (£32)
-          const assigned =
-            !isProtectedSystemGoal(goal) &&
-            !tripInfo &&
-            rawAssigned <= 0 &&
-            directSpentNative > 0 &&
-            (goal.target_amount || 0) > directSpentNative &&
-            !manualZero
-              ? Math.max(0, Math.round(((goal.target_amount || 0) - directSpentNative) * 100) / 100)
-              : rawAssigned;
+          const assigned = rawAssigned;
 
           const remaining = Math.max(0, assigned - tripSpent);
           const displayAmount = tripInfo ? remaining : assigned;
@@ -2640,7 +2608,7 @@ export default function FinancePoolsPage() {
                   onClick={() => {
                     const source = poolOptions.find(p => p.id === moveFrom);
                     if (source) {
-                      setMoveAmount(String(source.available));
+                      setMoveAmount((Math.round(source.available * 100) / 100).toFixed(2));
                     }
                   }}
                 >
@@ -2654,7 +2622,7 @@ export default function FinancePoolsPage() {
               <div className="p-3 rounded-lg bg-muted/50 border text-sm space-y-1">
                 <p className="font-medium text-foreground">Preview</p>
                 <p className="text-muted-foreground">
-                  {poolOptions.find(p => p.id === moveFrom)?.label}: {fmt((poolOptions.find(p => p.id === moveFrom)?.available ?? 0) - parseFloat(moveAmount))}
+                  {poolOptions.find(p => p.id === moveFrom)?.label}: {fmt(Math.max(0, (poolOptions.find(p => p.id === moveFrom)?.available ?? 0) - parseFloat(moveAmount)))}
                   {' '}(was {fmt(poolOptions.find(p => p.id === moveFrom)?.available ?? 0)})
                 </p>
                 <p className="text-muted-foreground">
