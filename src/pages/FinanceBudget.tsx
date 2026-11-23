@@ -107,6 +107,12 @@ export default function FinanceBudget() {
   const navigate = useNavigate();
 
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [loadingTimedOut, setLoadingTimedOut] = useState(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setLoadingTimedOut(true), 1500);
+    return () => clearTimeout(timer);
+  }, []);
 
   const handleRefreshTransactions = async () => {
     setIsRefreshing(true);
@@ -135,8 +141,10 @@ export default function FinanceBudget() {
     }
   };
 
-  const hasTransactionsLoaded = finance.accounts.length === 0 || finance.transactions.length > 0;
-  const allDataReady = !finance.loading && !assumptionsLoading && !fixedExpensesLoading && !boostsLoading && !weekTypesLoading && !tripsLoading && hasTransactionsLoaded;
+  const hasTransactionsLoaded = !finance.loading || loadingTimedOut;
+  const allDataReady =
+    ((!finance.loading && !assumptionsLoading && !fixedExpensesLoading && !boostsLoading && !weekTypesLoading && !tripsLoading) || loadingTimedOut) &&
+    hasTransactionsLoaded;
 
   const handleAddBoost = async (goalId: string, amount: number, note?: string) => {
     const goal = finance.goals.find(g => g.id === goalId);

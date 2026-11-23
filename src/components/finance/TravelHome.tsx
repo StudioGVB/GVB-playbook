@@ -19,6 +19,7 @@ interface TravelHomeProps {
   transactions: FinanceTransaction[];
   categories?: FinanceCategory[];
   onExitToBudget: () => void;
+  currency?: string;
 }
 
 // Decorative Palm Tree Watermark SVG
@@ -51,9 +52,10 @@ function SnowflakeWatermark({ className }: { className?: string }) {
   );
 }
 
-export function TravelHome({ trip, goal, transactions, categories = [], onExitToBudget }: TravelHomeProps) {
+export function TravelHome({ trip, goal, transactions, categories = [], onExitToBudget, currency }: TravelHomeProps) {
   const navigate = useNavigate();
-  const fmt = (n: number) => formatCurrency(n, 'AUD');
+  const effectiveCurrency = currency || goal?.currency || 'GBP';
+  const fmt = (n: number) => formatCurrency(n, effectiveCurrency);
 
   const isWinterTheme = useMemo(() => {
     const text = (trip.name + ' ' + (trip.notes || '')).toLowerCase();
@@ -283,6 +285,7 @@ export function TravelHome({ trip, goal, transactions, categories = [], onExitTo
           endDate={trip.end_date}
           transactions={transactions}
           categories={categories}
+          currency={effectiveCurrency}
           className="bg-card/90 backdrop-blur-md border-border/80"
         />
 

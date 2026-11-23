@@ -85,8 +85,8 @@ export function computeTripSpent(
     if ((tx as any).is_travel_spend === false) continue;
 
     const txTripId = (tx as any).trip_id;
-    const isExplicitForThisTrip = txTripId === tripId || (tx as any).is_travel_spend === true;
-    const isExplicitForAnotherTrip = txTripId && txTripId !== tripId;
+    const isExplicitForThisTrip = txTripId === tripId;
+    const isExplicitForAnotherTrip = Boolean(txTripId && txTripId !== tripId);
 
     if (isExplicitForAnotherTrip) continue;
 

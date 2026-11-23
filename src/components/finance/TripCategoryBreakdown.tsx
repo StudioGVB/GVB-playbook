@@ -14,6 +14,7 @@ interface TripCategoryBreakdownProps {
   transactions: FinanceTransaction[];
   categories: FinanceCategory[];
   className?: string;
+  currency?: string;
 }
 
 const FALLBACK_COLORS = [
@@ -22,9 +23,9 @@ const FALLBACK_COLORS = [
 ];
 
 export function TripCategoryBreakdown({
-  tripId, startDate, endDate, transactions, categories, className,
+  tripId, startDate, endDate, transactions, categories, className, currency = 'GBP',
 }: TripCategoryBreakdownProps) {
-  const fmt = (n: number) => formatCurrency(n, 'AUD');
+  const fmt = (n: number) => formatCurrency(n, currency);
 
   const data = useMemo(() => {
     const start = startDate ? startOfDay(new Date(startDate)) : null;

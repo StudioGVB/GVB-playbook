@@ -45,11 +45,15 @@ export default function FinanceTravel() {
 
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
 
-  const baseCurrency = finance.settings?.base_currency || 'AUD';
+  const baseCurrency = finance.settings?.base_currency || 'GBP';
+  const isBaseGbp = baseCurrency === 'GBP';
   const fxRates = (finance.settings?.fx_rates || {}) as Record<string, number>;
   const audToGbp = fxRates['AUD_GBP'] || 0.52;
+  const gbpToAud = fxRates['GBP_AUD'] || 1.92;
   const fmt = (n: number) => formatCurrency(n, baseCurrency);
-  const fmtGbp = (n: number) => formatCurrency(n * audToGbp, 'GBP');
+  const fmtGbp = (n: number) => isBaseGbp ? formatCurrency(n * gbpToAud, 'AUD') : formatCurrency(n * audToGbp, 'GBP');
+  const secondaryLabel = isBaseGbp ? 'AUD' : 'GBP';
+  const fxMultiplier = isBaseGbp ? gbpToAud : audToGbp;
 
   const wtMap = useMemo(() => weekTypeMap(), [weekTypeMap]);
   const snapshot = useMemo(() => {
@@ -169,7 +173,9 @@ export default function FinanceTravel() {
                 categories={finance.categories}
                 fmt={fmt}
                 fmtGbp={fmtGbp}
-                audToGbp={audToGbp}
+                audToGbp={fxMultiplier}
+                baseCurrency={baseCurrency}
+                secondaryLabel={secondaryLabel}
               />
             </TabsContent>
           ))}
@@ -237,9 +243,11 @@ interface TripPanelProps {
   fmt: (n: number) => string;
   fmtGbp: (n: number) => string;
   audToGbp: number;
+  baseCurrency?: string;
+  secondaryLabel?: string;
 }
 
-function TripPanel({ trip, onUpdate, onDelete, goals, fixedExpensesMonthly, snapshot, transactions, categories, fmt, fmtGbp, audToGbp }: TripPanelProps) {
+function TripPanel({ trip, onUpdate, onDelete, goals, fixedExpensesMonthly, snapshot, transactions, categories, fmt, fmtGbp, audToGbp, baseCurrency = 'GBP', secondaryLabel = 'AUD' }: TripPanelProps) {
   const [nameDraft, setNameDraft] = useState(trip.name);
   const [editingName, setEditingName] = useState(false);
   const [newChecklistItem, setNewChecklistItem] = useState('');
@@ -551,11 +559,13 @@ function TripPanel({ trip, onUpdate, onDelete, goals, fixedExpensesMonthly, snap
                 endDate={tripEnd}
                 poolTotal={poolAmount}
                 transactions={transactions}
+                currency={baseCurrency}
               />
               <TripCategoryBreakdown
                 tripId={trip.id}
                 transactions={transactions}
                 categories={categories}
+                currency={baseCurrency}
               />
             </>
           )}
@@ -646,11 +656,13 @@ function TripPanel({ trip, onUpdate, onDelete, goals, fixedExpensesMonthly, snap
                 endDate={tripEnd}
                 poolTotal={poolAmount}
                 transactions={transactions}
+                currency={baseCurrency}
               />
               <TripCategoryBreakdown
                 tripId={trip.id}
                 transactions={transactions}
                 categories={categories}
+                currency={baseCurrency}
               />
             </>
           )}
@@ -697,9 +709,9 @@ function TripPanel({ trip, onUpdate, onDelete, goals, fixedExpensesMonthly, snap
                 </Card>
                 <Card className="border-sky-500/20">
                   <CardContent className="p-4 space-y-1">
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Spend / day (£)</p>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Spend / day ({secondaryLabel})</p>
                     <p className="text-2xl font-black tabular-nums text-sky-500">{poolAmount > 0 ? fmtGbp(baselinePerDay) : '—'}</p>
-                    <p className="text-[10px] text-muted-foreground">At {audToGbp.toFixed(3)} AUD→GBP</p>
+                    <p className="text-[10px] text-muted-foreground">At {audToGbp.toFixed(2)} {baseCurrency}→{secondaryLabel}</p>
                   </CardContent>
                 </Card>
                 <Card className={cn(linkedGoal && linkedGoal.target_amount > 0 && poolAmount < linkedGoal.target_amount ? 'border-amber-500/30' : 'border-emerald-500/20')}>

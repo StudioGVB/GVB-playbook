@@ -51,7 +51,7 @@ const App = () => (
           <FinanceProvider>
             <TooltipProvider>
               <Toaster />
-              <Sonner />
+              <Sonner position="top-center" />
               <BrowserRouter>
                 <Routes>
             <Route path="/auth" element={<Auth />} />

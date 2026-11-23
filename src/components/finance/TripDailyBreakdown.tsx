@@ -13,6 +13,7 @@ interface TripDailyBreakdownProps {
   poolTotal: number;
   transactions: FinanceTransaction[];
   className?: string;
+  currency?: string;
 }
 
 const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -31,13 +32,14 @@ interface DayCell {
 }
 
 export function TripDailyBreakdown({
-  tripId, startDate, endDate, poolTotal, transactions, className,
+  tripId, startDate, endDate, poolTotal, transactions, className, currency = 'GBP',
 }: TripDailyBreakdownProps) {
-  const fmt = (n: number) => formatCurrency(n, 'AUD');
+  const fmt = (n: number) => formatCurrency(n, currency);
+  const symbol = currency === 'GBP' ? '£' : currency === 'EUR' ? '€' : '$';
   const fmtCompact = (n: number) => {
     if (n === 0) return '';
-    if (n >= 1000) return `$${(n / 1000).toFixed(1)}k`;
-    return `$${Math.round(n)}`;
+    if (n >= 1000) return `${symbol}${(n / 1000).toFixed(1)}k`;
+    return `${symbol}${Math.round(n)}`;
   };
 
   const data = useMemo(() => {
