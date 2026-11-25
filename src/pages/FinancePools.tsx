@@ -377,10 +377,17 @@ export default function FinancePoolsPage() {
     runReconcile();
   }, [allDataReady, finance.loading, finance.hasLoadedOnce, finance.goals, goalDirectSpent, goalTripSpent]);
 
+  // Paycheck Detection (evaluated first so monthly pools anchor accurately to paid cycles)
+  const detectedPaycheck = useMemo(
+    () => detectPaycheck(finance.transactions, finance.categories),
+    [finance.transactions, finance.categories]
+  );
+
   const snapshot = useMemo(() => {
     if (!assumptions) return null;
     const now = new Date();
-    const poolRefDate = now.getDate() >= 24
+    // Only anchor pool policy snapshot to next month if next month's salary has actually landed
+    const poolRefDate = detectedPaycheck?.isNextMonthPaycheck
       ? new Date(now.getFullYear(), now.getMonth() + 1, 15)
       : now;
     return computePolicySnapshot(
@@ -388,7 +395,7 @@ export default function FinancePoolsPage() {
       finance.goals, finance.convertToBase, fixedMonthlyTotal, undefined, wtMap, trips, fixedMonthlyTotalAll,
       poolRefDate,
     );
-  }, [assumptions, finance.accounts, finance.transactions, finance.categories, finance.goals, finance.convertToBase, fixedMonthlyTotal, fixedMonthlyTotalAll, wtMap, trips]);
+  }, [assumptions, finance.accounts, finance.transactions, finance.categories, finance.goals, finance.convertToBase, fixedMonthlyTotal, fixedMonthlyTotalAll, wtMap, trips, detectedPaycheck]);
 
   const totalCash = snapshot?.totalLiquidCash ?? 0;
   const weeksUntilIncome = snapshot?.weeksUntilIncome ?? 0;
@@ -438,18 +445,18 @@ export default function FinancePoolsPage() {
     });
   }, [newAmount, newCurrency, newFundWeeks, newFundStartWhen, essentialVariable, weeklyFromRemainder, totalBoostThisWeek, finance.transactions, finance.categories, finance.convertToBase, wtMap, trips, fmt]);
 
-  // Paycheck Detection & Target Month
-  const detectedPaycheck = useMemo(
-    () => detectPaycheck(finance.transactions, finance.categories),
-    [finance.transactions, finance.categories]
-  );
-
+  // Target month should ONLY advance to next month if next month's salary has landed, or if calendar month has actually turned
   const targetMonthDate = useMemo(() => {
     const now = new Date();
-    return now.getDate() >= 25 ? new Date(now.getFullYear(), now.getMonth() + 1, 1) : now;
-  }, []);
+    if (detectedPaycheck?.isNextMonthPaycheck) {
+      return new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    }
+    return now;
+  }, [detectedPaycheck]);
 
-  const targetMonthLabel = detectedPaycheck?.targetMonthName || format(targetMonthDate, 'MMMM yyyy');
+  const targetMonthLabel = (detectedPaycheck?.isNextMonthPaycheck)
+    ? detectedPaycheck.targetMonthName
+    : format(targetMonthDate, 'MMMM yyyy');
   const isCurrentMonth = useMemo(() => isSameMonth(targetMonthDate, new Date()), [targetMonthDate]);
 
   // Living & Monthly Budget Pool target (Priority #1: must be ring-fenced before Emergency Fund ladder upgrades)
