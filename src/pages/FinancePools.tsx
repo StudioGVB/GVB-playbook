@@ -22,6 +22,7 @@ import { Plus, ShoppingCart, Target, Wallet, Lock, ArrowRightLeft, Trash2, Palet
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import MonthlyPotPlanner from '@/components/finance/MonthlyPotPlanner';
+import MonthlyPotBreakdownCard from '@/components/finance/MonthlyPotBreakdownCard';
 import FinanceBalanceSheet from '@/pages/FinanceBalanceSheet';
 import WeeklyPoolSavingsCard from '@/components/finance/WeeklyPoolSavingsCard';
 import PotLinkedExpensesDialog from '@/components/finance/PotLinkedExpensesDialog';
@@ -1988,6 +1989,7 @@ export default function FinancePoolsPage() {
                       const weeksRemaining = daysRemainingClamped / 7;
                       weeklyRequired = remainingToSave / weeksRemaining;
                     }
+                    const monthlyRequired = Math.min(remainingToSave, weeklyRequired * 4.33);
                     
                     return (
                       <>
@@ -2001,6 +2003,12 @@ export default function FinancePoolsPage() {
                           <span className="text-slate-500 font-semibold">Weekly Pace:</span>
                           <span className="font-extrabold text-indigo-600">
                             {formatCurrency(weeklyRequired, baseCurrency)}/wk {isFutureStart && `(from ${format(new Date(goal.start_date!), 'MMM d')})`}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-500 font-semibold">Monthly Pace:</span>
+                          <span className="font-extrabold text-[#FF2EB8]">
+                            {formatCurrency(monthlyRequired, baseCurrency)}/mo
                           </span>
                         </div>
                         <div className="flex justify-between">
@@ -2130,6 +2138,25 @@ export default function FinancePoolsPage() {
           <p className="text-sm font-bold tracking-tight">Add Pool</p>
         </div>
       </div>
+
+      {/* Month-by-Month Expected Pot Spending & Saving Breakdown */}
+      <MonthlyPotBreakdownCard
+        goals={finance.goals}
+        transactions={finance.transactions}
+        categories={finance.categories}
+        trips={trips}
+        convertToBase={finance.convertToBase}
+        baseCurrency={baseCurrency}
+        monthlyPotCapacity={
+          Math.max(
+            0,
+            (expectedMonthlyIncomeVal || snapshot?.split.monthlyIncome || 0) -
+              effectiveFixedMonthly -
+              essentialVariable
+          )
+        }
+        onSelectGoalExpenses={(goal) => setSelectedGoalForExpenses(goal)}
+      />
 
       {/* Weekly Pool Savings Engine Card (Positioned Underneath Pools) */}
       <WeeklyPoolSavingsCard finance={finance} spendablePool={spendablePool} funMoney={funMoney} snapshot={snapshot} />

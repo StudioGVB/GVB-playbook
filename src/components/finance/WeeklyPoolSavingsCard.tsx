@@ -29,12 +29,24 @@ export default function WeeklyPoolSavingsCard({ finance, spendablePool = 0, funM
 
   // Calculate required weekly contribution for each active pool
   const poolBreakdown = useMemo(() => {
+    const spentByGoalBase = new Map<string, number>();
+    for (const tx of finance.transactions || []) {
+      const goalId = (tx as any)?.goal_id;
+      const amt = Number(tx?.amount) || 0;
+      if (!goalId || amt >= 0 || tx?.is_transfer) continue;
+      if ((tx as any).transfer_status === 'confirmed' || (tx as any).transfer_status === 'auto_confirmed') continue;
+      const baseVal = Math.abs(finance.convertToBase(amt, tx?.currency || 'GBP'));
+      spentByGoalBase.set(goalId, (spentByGoalBase.get(goalId) || 0) + baseVal);
+    }
+
     return finance.goals.map((goal) => {
       const targetNative = goal.target_amount || 0;
       const assignedNative = goal.assigned_amount || 0;
       const targetBase = finance.convertToBase(targetNative, goal.currency);
       const assignedBase = finance.convertToBase(assignedNative, goal.currency);
-      const remainingBase = Math.max(0, targetBase - assignedBase);
+      const spentBase = spentByGoalBase.get(goal.id) || 0;
+      const effectiveFundedBase = goal.refill_when_spent ? assignedBase : (assignedBase + spentBase);
+      const remainingBase = Math.max(0, targetBase - effectiveFundedBase);
 
       let weeklyRequiredBase = 0;
       let futureWeeklyPace = 0;
