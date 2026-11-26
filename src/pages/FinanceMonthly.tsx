@@ -817,10 +817,13 @@ export default function FinanceMonthly() {
         const isPhoneMatch = expLower.includes('phone') && /\b(lyca|lycamobile|vodafone|voxi|ee|o2|three|giffgaff|lebara|smarty)\b/i.test(txLower);
         const isMedsMatch = expLower.includes('meds') && /\b(boots|pharmacy|chemist|prescription|elvanse|amfexa|adhd|clinic|mypace)\b/i.test(txLower);
         const isRentMatch = (expLower.includes('rent') || expLower.includes('flat')) && tx.amount >= 100 && /\b(rent|rental|landlord|evans|tenancy)\b/i.test(txLower);
-        const isWordMatch = expWords.some(w => txLower.includes(w));
-        const isAmtMatch = Math.abs(tx.amount - singleCycleAmt) <= Math.max(2, singleCycleAmt * 0.08);
+        const isAmazonMatch = expLower.includes('amazon')
+          ? (/\bprime\b/i.test(txLower) || Math.abs(tx.amount - singleCycleAmt) <= 2.5)
+          : false;
+        const isWordMatch = !expLower.includes('amazon') && expWords.some(w => txLower.includes(w));
+        const isAmtMatch = !expLower.includes('amazon') && Math.abs(tx.amount - singleCycleAmt) <= Math.max(2, singleCycleAmt * 0.08);
 
-        if (isBusinessMatch || is11LabsMatch || isPhoneMatch || isMedsMatch || isRentMatch || isWordMatch || isAmtMatch) {
+        if (isBusinessMatch || is11LabsMatch || isPhoneMatch || isMedsMatch || isRentMatch || isAmazonMatch || isWordMatch || isAmtMatch) {
           usedTxIds.add(tx.id);
           matchedTxs.push(tx);
         }
@@ -1870,12 +1873,12 @@ export default function FinanceMonthly() {
                     {/* Legend */}
                     <div className="flex items-center gap-3 text-[11px] font-semibold text-slate-600">
                       <span className="flex items-center gap-1.5">
-                        <span className="w-2.5 h-2.5 rounded-xs bg-slate-300 border border-slate-400" />
-                        Allowance ({fmt(totalFixedAllowance)})
-                      </span>
-                      <span className="flex items-center gap-1.5">
                         <span className="w-2.5 h-2.5 rounded-xs bg-emerald-500" />
                         Spent ({fmt(totalFixedPaid)})
+                      </span>
+                      <span className="flex items-center gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded-xs bg-slate-200 border border-slate-300" />
+                        Allowance Left ({fmt(Math.max(0, totalFixedAllowance - totalFixedPaid))})
                       </span>
                       <span className="flex items-center gap-1.5">
                         <span className="w-2.5 h-2.5 rounded-xs bg-rose-500" />
@@ -1915,26 +1918,41 @@ export default function FinanceMonthly() {
                   </div>
                 </div>
 
-                {/* Vertical Grouped Bar Chart (Spent vs. Allowance) */}
+                {/* Vertical Stacked Bar Chart (Spent stacked inside/against Allowance) */}
                 <div className="rounded-xl border border-slate-100 bg-slate-50/60 p-4">
-                  <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-3 items-end min-h-[190px] pt-6">
+                  <div
+                    className="grid gap-3 items-end min-h-[210px] pt-4"
+                    style={{
+                      gridTemplateColumns: `repeat(${Math.max(1, chartBills.length)}, minmax(0, 1fr))`,
+                    }}
+                  >
                     {chartBills.map((bill) => {
-                      const allowancePct = maxChartVal > 0 ? Math.max((bill.committedAmount / maxChartVal) * 100, bill.committedAmount > 0 ? 6 : 0) : 0;
-                      const spentPct = maxChartVal > 0 ? Math.max((bill.paidAmount / maxChartVal) * 100, bill.paidAmount > 0 ? 6 : 0) : 0;
+                      const billTotal = Math.max(bill.committedAmount, bill.paidAmount);
+                      const totalColumnPct = maxChartVal > 0
+                        ? Math.max((billTotal / maxChartVal) * 100, billTotal > 0 ? 10 : 0)
+                        : 0;
                       const isOver = bill.committedAmount > 0
                         ? bill.paidAmount > bill.committedAmount + 0.5
                         : bill.paidAmount > 0;
                       const diff = bill.committedAmount - bill.paidAmount;
+
+                      // Inside the stacked column (whose height = max(allowance, spent)):
+                      // - If under/on allowance: bottom segment = spent (emerald), top segment = remaining allowance (slate)
+                      // - If over allowance: bottom segment = allowance base (emerald), top segment = excess overage (rose)
+                      const bottomGreenSharePct = billTotal > 0
+                        ? (Math.min(bill.paidAmount, bill.committedAmount) / billTotal) * 100
+                        : 0;
+                      const topSegmentSharePct = Math.max(0, 100 - bottomGreenSharePct);
 
                       return (
                         <button
                           key={bill.id}
                           type="button"
                           onClick={() => setSelectedFixedBill(bill)}
-                          className="group flex flex-col items-center text-center p-2 rounded-xl hover:bg-white hover:shadow-xs border border-transparent hover:border-slate-200/80 transition-all cursor-pointer"
+                          className="group flex flex-col items-center text-center p-2 rounded-xl hover:bg-white hover:shadow-xs border border-transparent hover:border-slate-200/80 transition-all cursor-pointer min-w-0"
                         >
                           {/* Top value readout */}
-                          <div className="mb-1.5 text-center">
+                          <div className="mb-2 text-center">
                             <span
                               className={cn(
                                 "block text-xs font-display font-black tabular-nums",
@@ -1952,44 +1970,49 @@ export default function FinanceMonthly() {
                             </span>
                           </div>
 
-                          {/* Side-by-side vertical bars container */}
-                          <div className="w-full h-28 flex items-end justify-center gap-2 px-2 border-b border-slate-200/90">
-                            {/* Allowance bar */}
-                            <div className="flex flex-col items-center justify-end h-full w-5">
-                              <div
-                                className="w-full rounded-t-md bg-slate-200/90 border border-b-0 border-slate-300/90 transition-all duration-300"
-                                style={{ height: `${Math.min(100, allowancePct)}%` }}
-                                title={`Allowance: ${fmt(bill.committedAmount)}`}
-                              />
-                            </div>
+                          {/* Single Stacked Vertical Bar container */}
+                          <div className="w-full h-32 flex items-end justify-center px-2 border-b border-slate-200/90">
+                            <div
+                              className="w-9 sm:w-11 flex flex-col justify-end rounded-t-lg overflow-hidden transition-all duration-300 shadow-2xs"
+                              style={{ height: `${Math.min(100, totalColumnPct)}%` }}
+                            >
+                              {/* Top Stacked Segment: Remaining Allowance (slate) OR Over-Allowance Excess (rose) */}
+                              {topSegmentSharePct > 0.5 && (
+                                <div
+                                  className={cn(
+                                    "w-full transition-all duration-300",
+                                    isOver
+                                      ? "bg-rose-500 border-b border-white/40"
+                                      : "bg-slate-200/90 border border-b-0 border-slate-300/90"
+                                  )}
+                                  style={{ height: `${topSegmentSharePct}%` }}
+                                  title={
+                                    isOver
+                                      ? `Over allowance by ${fmt(Math.abs(diff))}`
+                                      : `Remaining allowance: ${fmt(Math.max(0, diff))}`
+                                  }
+                                />
+                              )}
 
-                            {/* Spent so far bar */}
-                            <div className="flex flex-col items-center justify-end h-full w-5">
-                              <div
-                                className={cn(
-                                  "w-full rounded-t-md transition-all duration-300",
-                                  bill.paidAmount === 0
-                                    ? "bg-slate-200/40 border border-dashed border-slate-300 h-1.5"
-                                    : isOver
-                                    ? "bg-rose-500 shadow-2xs"
-                                    : "bg-emerald-500 shadow-2xs"
-                                )}
-                                style={{
-                                  height: bill.paidAmount === 0 ? '4px' : `${Math.min(100, spentPct)}%`,
-                                }}
-                                title={`Spent so far: ${fmt(bill.paidAmount)}`}
-                              />
+                              {/* Bottom Stacked Segment: Spent within Allowance (emerald) */}
+                              {bottomGreenSharePct > 0 && (
+                                <div
+                                  className="w-full bg-emerald-500 transition-all duration-300"
+                                  style={{ height: `${bottomGreenSharePct}%` }}
+                                  title={`Spent within allowance: ${fmt(Math.min(bill.paidAmount, bill.committedAmount))}`}
+                                />
+                              )}
                             </div>
                           </div>
 
                           {/* Bill label & status pill */}
-                          <div className="mt-2 w-full">
+                          <div className="mt-2 w-full min-w-0">
                             <p className="text-xs font-bold text-slate-800 truncate group-hover:text-slate-950">
                               {bill.shortName}
                             </p>
                             <p
                               className={cn(
-                                "text-[10px] font-semibold tabular-nums mt-0.5",
+                                "text-[10px] font-semibold tabular-nums mt-0.5 truncate",
                                 isOver
                                   ? "text-rose-600"
                                   : bill.paidAmount === 0
