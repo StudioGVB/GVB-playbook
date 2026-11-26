@@ -2,16 +2,25 @@ import { useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import {
-  Calendar,
-  ShoppingBag,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  ReferenceLine,
+  LabelList,
+} from 'recharts';
+import {
+  BarChart3,
   PiggyBank,
   Sparkles,
-  CheckCircle2,
-  AlertTriangle,
+  Calendar,
   ArrowRight,
-  Clock,
-  Receipt,
-  TrendingUp,
+  CheckCircle2,
+  Flag,
+  Play,
 } from 'lucide-react';
 import {
   addMonths,
@@ -22,7 +31,7 @@ import {
   startOfDay,
   startOfMonth,
 } from 'date-fns';
-import { formatCurrency, baseAmt, parseUkDate } from '@/lib/financeUtils';
+import { formatCurrency, baseAmt } from '@/lib/financeUtils';
 import type { FinanceGoal, FinanceTransaction, FinanceCategory } from '@/hooks/useFinanceData';
 import type { FinanceTrip } from '@/hooks/useFinanceTrips';
 
@@ -37,43 +46,58 @@ interface Props {
   onSelectGoalExpenses?: (goal: FinanceGoal) => void;
 }
 
+interface ActiveGoalMeta {
+  goal: FinanceGoal;
+  color: string;
+  targetBase: number;
+  assignedBase: number;
+  spentBase: number;
+  effectiveFundedBase: number;
+  remainingToSaveBase: number;
+  effectiveStart: Date;
+  effectiveDeadline: Date;
+  rawStart: Date | null;
+  rawDeadline: Date | null;
+  totalActiveDays: number;
+}
+
 interface MonthPotContribution {
   goal: FinanceGoal;
+  color: string;
   amount: number;
   activeDays: number;
-  totalActiveDays: number;
   weeklyPaceInMonth: number;
   projectedFundedAfterMonth: number;
   targetBase: number;
+  startsThisMonth: boolean;
+  endsThisMonth: boolean;
 }
 
-interface MonthPotSpending {
-  goal: FinanceGoal;
-  targetBase: number;
-  currentInPotBase: number;
-  spentTotalBase: number;
-  spentInMonthBase: number;
-  expectedRemainingSpendBase: number;
-  stillToSaveBase: number;
-  dueDateLabel: string;
-  isDueThisMonth: boolean;
-  isTripMonth: boolean;
-}
-
-interface MonthBreakdown {
-  monthDate: Date;
+interface MonthSeriesPoint {
   monthKey: string;
   monthLabel: string;
-  shortMonthLabel: string;
+  shortLabel: string;
+  monthDate: Date;
   isCurrentMonth: boolean;
   isNextMonth: boolean;
+  total: number;
+  totalLabel: string;
   contributions: MonthPotContribution[];
-  totalContribution: number;
-  spendings: MonthPotSpending[];
-  totalExpectedSpend: number;
-  totalAlreadySpent: number;
-  totalRemainingToSpend: number;
+  [goalId: string]: any;
 }
+
+const FALLBACK_COLORS = [
+  '#4558ff',
+  '#FF2EB8',
+  '#10b981',
+  '#f59e0b',
+  '#8b5cf6',
+  '#06b6d4',
+  '#ef4444',
+  '#14b8a6',
+  '#f97316',
+  '#6366f1',
+];
 
 const isProtectedSystemPot = (g: FinanceGoal) => {
   if ((g as any).is_emergency || (g as any).is_stash) return true;
@@ -90,19 +114,22 @@ export default function MonthlyPotBreakdownCard({
   goals,
   transactions,
   categories,
-  trips = [],
   convertToBase,
   baseCurrency,
   monthlyPotCapacity = 0,
-  onSelectGoalExpenses,
 }: Props) {
-  const [viewMode, setViewMode] = useState<'both' | 'spending' | 'saving'>('both');
-  const fmt = (n: number) => formatCurrency(n, baseCurrency);
+  const [focusedGoalId, setFocusedGoalId] = useState<string | null>(null);
+  const [selectedMonthKey, setSelectedMonthKey] = useState<string | null>(null);
 
-  // Compute total spent per goal and spent per goal per month (yyyy-MM)
-  const { spentByGoalTotal, spentByGoalByMonth } = useMemo(() => {
+  const fmt = (n: number) => formatCurrency(n, baseCurrency);
+  const fmtCompact = (n: number) => {
+    if (n <= 0) return '';
+    return formatCurrency(Math.round(n), baseCurrency).replace(/\.00$/, '');
+  };
+
+  // Compute total spent per goal
+  const spentByGoalTotal = useMemo(() => {
     const totalMap = new Map<string, number>();
-    const monthMap = new Map<string, Map<string, number>>();
     const catByLowerName = new Map<string, string>();
     categories.forEach(c => {
       if (c.name) catByLowerName.set(c.name.trim().toLowerCase(), c.id);
@@ -124,34 +151,76 @@ export default function MonthlyPotBreakdownCard({
 
       const amt = Math.abs(baseAmt(tx));
       totalMap.set(matchedGoalId, (totalMap.get(matchedGoalId) || 0) + amt);
-
-      const d = parseUkDate(tx.posted_at);
-      const mKey = format(d, 'yyyy-MM');
-      if (!monthMap.has(matchedGoalId)) {
-        monthMap.set(matchedGoalId, new Map());
-      }
-      const gMonth = monthMap.get(matchedGoalId)!;
-      gMonth.set(mKey, (gMonth.get(mKey) || 0) + amt);
     }
 
-    return { spentByGoalTotal: totalMap, spentByGoalByMonth: monthMap };
+    return totalMap;
   }, [goals, transactions, categories]);
 
-  // Build month-by-month breakdown from current month through latest deadline (up to 12 months)
-  const monthlyBreakdowns = useMemo<MonthBreakdown[]>(() => {
+  // Build active goal metadata & monthly stacked bar chart series
+  const { activeGoalMetas, chartData } = useMemo(() => {
     const today = startOfDay(new Date());
     const currentMonthStart = startOfMonth(today);
-    const activeGoals = goals.filter(g => !isProtectedSystemPot(g));
 
-    // Find farthest deadline month
-    let maxMonthDate = addMonths(currentMonthStart, 4);
-    for (const g of activeGoals) {
-      if (g.deadline) {
-        const dl = startOfMonth(new Date(String(g.deadline).split('T')[0] + 'T00:00:00'));
-        if (dl > maxMonthDate) maxMonthDate = dl;
-      }
-    }
-    // Cap horizon at 12 months forward so UI stays scannable
+    const eligibleGoals = goals.filter(g => !isProtectedSystemPot(g));
+
+    const metas: ActiveGoalMeta[] = [];
+    let maxMonthDate = addMonths(currentMonthStart, 5);
+
+    eligibleGoals.forEach((g, idx) => {
+      const targetBase = convertToBase(g.target_amount || 0, g.currency);
+      const assignedBase = convertToBase(g.assigned_amount || 0, g.currency);
+      const spentBase = spentByGoalTotal.get(g.id) || 0;
+      const refillWhenSpent = Boolean(g.refill_when_spent);
+      const effectiveFundedBase = refillWhenSpent ? assignedBase : assignedBase + spentBase;
+      const remainingToSaveBase = Math.max(0, targetBase - effectiveFundedBase);
+
+      if (remainingToSaveBase <= 0.01) return;
+
+      const rawStart = g.start_date
+        ? startOfDay(new Date(String(g.start_date).split('T')[0] + 'T00:00:00'))
+        : null;
+      const effectiveStart = rawStart && rawStart > today ? rawStart : today;
+
+      const rawDeadline = g.deadline
+        ? startOfDay(new Date(String(g.deadline).split('T')[0] + 'T00:00:00'))
+        : null;
+
+      // For goals without a deadline, spread over 6 months by default so they still appear cleanly
+      const fallbackDeadline = endOfMonth(addMonths(effectiveStart, 5));
+      const effectiveDeadline = rawDeadline
+        ? rawDeadline < effectiveStart
+          ? effectiveStart
+          : rawDeadline
+        : fallbackDeadline;
+
+      const dlMonth = startOfMonth(effectiveDeadline);
+      if (dlMonth > maxMonthDate) maxMonthDate = dlMonth;
+
+      const totalActiveDays = Math.max(
+        1,
+        differenceInCalendarDays(effectiveDeadline, effectiveStart) + 1
+      );
+
+      metas.push({
+        goal: g,
+        color: g.color || FALLBACK_COLORS[idx % FALLBACK_COLORS.length],
+        targetBase,
+        assignedBase,
+        spentBase,
+        effectiveFundedBase,
+        remainingToSaveBase,
+        effectiveStart,
+        effectiveDeadline,
+        rawStart,
+        rawDeadline,
+        totalActiveDays,
+      });
+    });
+
+    // Sort active goals by deadline (soonest first) so the bottom of the stack is the most urgent pots
+    metas.sort((a, b) => a.effectiveDeadline.getTime() - b.effectiveDeadline.getTime());
+
+    // Cap horizon at 12 months forward
     const maxHorizon = addMonths(currentMonthStart, 11);
     if (maxMonthDate > maxHorizon) maxMonthDate = maxHorizon;
 
@@ -162,525 +231,467 @@ export default function MonthlyPotBreakdownCard({
       cursor = addMonths(cursor, 1);
     }
 
-    // Pre-calculate per-goal saving window & remaining amount
-    const goalMeta = activeGoals.map(g => {
-      const targetBase = convertToBase(g.target_amount || 0, g.currency);
-      const assignedBase = convertToBase(g.assigned_amount || 0, g.currency);
-      const spentBase = spentByGoalTotal.get(g.id) || 0;
-      const refillWhenSpent = Boolean(g.refill_when_spent);
-      const effectiveFundedBase = refillWhenSpent ? assignedBase : assignedBase + spentBase;
-      const remainingToSaveBase = Math.max(0, targetBase - effectiveFundedBase);
+    const cumulativeByGoal = new Map<string, number>();
+    metas.forEach(m => cumulativeByGoal.set(m.goal.id, m.effectiveFundedBase));
 
-      const rawStart = g.start_date
-        ? startOfDay(new Date(String(g.start_date).split('T')[0] + 'T00:00:00'))
-        : today;
-      const effectiveStart = rawStart > today ? rawStart : today;
-
-      const rawDeadline = g.deadline
-        ? startOfDay(new Date(String(g.deadline).split('T')[0] + 'T00:00:00'))
-        : null;
-      const effectiveDeadline = rawDeadline && rawDeadline < effectiveStart ? effectiveStart : rawDeadline;
-
-      const totalActiveDays = effectiveDeadline
-        ? Math.max(1, differenceInCalendarDays(effectiveDeadline, effectiveStart) + 1)
-        : 0;
-
-      const linkedTrip = trips.find(t => t.goal_id === g.id);
-
-      return {
-        goal: g,
-        targetBase,
-        assignedBase,
-        spentBase,
-        effectiveFundedBase,
-        remainingToSaveBase,
-        effectiveStart,
-        effectiveDeadline,
-        rawDeadline,
-        totalActiveDays,
-        linkedTrip,
-      };
-    });
-
-    // Track cumulative projected savings across months per goal
-    const cumulativeSavedByGoal = new Map<string, number>();
-    goalMeta.forEach(m => cumulativeSavedByGoal.set(m.goal.id, m.effectiveFundedBase));
-
-    return months.map((mDate, idx) => {
+    const series: MonthSeriesPoint[] = months.map((mDate, mIdx) => {
       const mStart = startOfMonth(mDate);
       const mEnd = endOfMonth(mDate);
       const mKey = format(mDate, 'yyyy-MM');
 
-      const contributions: MonthPotContribution[] = [];
-      const spendings: MonthPotSpending[] = [];
+      const point: MonthSeriesPoint = {
+        monthKey: mKey,
+        monthLabel: format(mDate, 'MMMM yyyy'),
+        shortLabel: format(mDate, 'MMM yy'),
+        monthDate: mDate,
+        isCurrentMonth: mIdx === 0,
+        isNextMonth: mIdx === 1,
+        total: 0,
+        totalLabel: '',
+        contributions: [],
+      };
 
-      for (const meta of goalMeta) {
-        const {
-          goal,
-          targetBase,
-          assignedBase,
-          spentBase,
-          remainingToSaveBase,
-          effectiveStart,
-          effectiveDeadline,
-          rawDeadline,
-          totalActiveDays,
-          linkedTrip,
-        } = meta;
+      for (const meta of metas) {
+        const windowStart = meta.effectiveStart > mStart ? meta.effectiveStart : mStart;
+        const windowEnd = meta.effectiveDeadline < mEnd ? meta.effectiveDeadline : mEnd;
 
-        // 1. Expected Contributions in this month
-        if (remainingToSaveBase > 0.01 && effectiveDeadline && totalActiveDays > 0) {
-          const windowStart = idx === 0 ? (effectiveStart > mStart ? effectiveStart : mStart) : (effectiveStart > mStart ? effectiveStart : mStart);
-          const windowEnd = effectiveDeadline < mEnd ? effectiveDeadline : mEnd;
+        let amount = 0;
+        if (windowEnd >= windowStart) {
+          const activeDays = differenceInCalendarDays(windowEnd, windowStart) + 1;
+          amount = (meta.remainingToSaveBase * activeDays) / meta.totalActiveDays;
 
-          if (windowEnd >= windowStart) {
-            const activeDays = differenceInCalendarDays(windowEnd, windowStart) + 1;
-            const amount = (remainingToSaveBase * activeDays) / totalActiveDays;
-            if (amount > 0.01) {
-              const prevFunded = cumulativeSavedByGoal.get(goal.id) || 0;
-              const projectedFundedAfterMonth = Math.min(targetBase, prevFunded + amount);
-              cumulativeSavedByGoal.set(goal.id, projectedFundedAfterMonth);
+          if (amount > 0.01) {
+            const roundedAmt = Math.round(amount * 100) / 100;
+            const prevFunded = cumulativeByGoal.get(meta.goal.id) || 0;
+            const projectedAfter = Math.min(meta.targetBase, prevFunded + roundedAmt);
+            cumulativeByGoal.set(meta.goal.id, projectedAfter);
 
-              const weeksInActiveWindow = Math.max(1, activeDays / 7);
-              contributions.push({
-                goal,
-                amount,
-                activeDays,
-                totalActiveDays,
-                weeklyPaceInMonth: amount / weeksInActiveWindow,
-                projectedFundedAfterMonth,
-                targetBase,
-              });
-            }
+            const startsThisMonth = Boolean(meta.rawStart && isSameMonth(meta.rawStart, mDate));
+            const endsThisMonth = Boolean(meta.rawDeadline && isSameMonth(meta.rawDeadline, mDate));
+
+            point[meta.goal.id] = roundedAmt;
+            point.total += roundedAmt;
+            point.contributions.push({
+              goal: meta.goal,
+              color: meta.color,
+              amount: roundedAmt,
+              activeDays,
+              weeklyPaceInMonth: roundedAmt / Math.max(1, activeDays / 7),
+              projectedFundedAfterMonth: projectedAfter,
+              targetBase: meta.targetBase,
+              startsThisMonth,
+              endsThisMonth,
+            });
+          } else {
+            point[meta.goal.id] = 0;
           }
-        }
-
-        // 2. Expected Pot Spending in this month
-        const isDueThisMonth = Boolean(rawDeadline && isSameMonth(rawDeadline, mDate));
-        const isTripMonth = Boolean(
-          linkedTrip &&
-            linkedTrip.start_date &&
-            linkedTrip.end_date &&
-            startOfDay(new Date(linkedTrip.start_date)) <= mEnd &&
-            startOfDay(new Date(linkedTrip.end_date)) >= mStart
-        );
-        const spentInMonthBase = spentByGoalByMonth.get(goal.id)?.get(mKey) || 0;
-
-        if (isDueThisMonth || isTripMonth || spentInMonthBase > 0.01) {
-          // Expected remaining spend = total target minus already spent (or current pot balance if refill_when_spent)
-          const expectedRemainingSpendBase = goal.refill_when_spent
-            ? Math.max(0, targetBase - spentInMonthBase)
-            : Math.max(0, targetBase - spentBase);
-
-          spendings.push({
-            goal,
-            targetBase,
-            currentInPotBase: assignedBase,
-            spentTotalBase: spentBase,
-            spentInMonthBase,
-            expectedRemainingSpendBase,
-            stillToSaveBase: remainingToSaveBase,
-            dueDateLabel: rawDeadline ? format(rawDeadline, 'MMM d') : isTripMonth ? 'Trip' : 'Active',
-            isDueThisMonth,
-            isTripMonth,
-          });
+        } else {
+          point[meta.goal.id] = 0;
         }
       }
 
-      contributions.sort((a, b) => b.amount - a.amount);
-      spendings.sort((a, b) => b.targetBase - a.targetBase);
+      point.total = Math.round(point.total * 100) / 100;
+      point.totalLabel = point.total > 0 ? fmtCompact(point.total) : '';
+      return point;
+    });
 
-      const totalContribution = contributions.reduce((s, c) => s + c.amount, 0);
-      const totalExpectedSpend = spendings.reduce((s, sp) => s + sp.targetBase, 0);
-      const totalAlreadySpent = spendings.reduce((s, sp) => s + sp.spentTotalBase, 0);
-      const totalRemainingToSpend = spendings.reduce((s, sp) => s + sp.expectedRemainingSpendBase, 0);
+    // Trim trailing empty months (keep at least 4 months)
+    while (series.length > 4 && series[series.length - 1].total <= 0.01) {
+      series.pop();
+    }
 
-      return {
-        monthDate: mDate,
-        monthKey: mKey,
-        monthLabel: format(mDate, 'MMMM yyyy'),
-        shortMonthLabel: format(mDate, 'MMM yyyy'),
-        isCurrentMonth: idx === 0,
-        isNextMonth: idx === 1,
-        contributions,
-        totalContribution,
-        spendings,
-        totalExpectedSpend,
-        totalAlreadySpent,
-        totalRemainingToSpend,
-      };
-    }).filter(m => m.contributions.length > 0 || m.spendings.length > 0 || m.isCurrentMonth || m.isNextMonth);
-  }, [goals, trips, convertToBase, spentByGoalTotal, spentByGoalByMonth]);
+    return { activeGoalMetas: metas, chartData: series };
+  }, [goals, convertToBase, spentByGoalTotal]);
 
-  const currentMonthData = monthlyBreakdowns[0];
-  const nextMonthData = monthlyBreakdowns[1];
-  const totalUpcomingSpend = monthlyBreakdowns.reduce((s, m) => s + m.totalRemainingToSpend, 0);
-  const totalUpcomingSave = monthlyBreakdowns.reduce((s, m) => s + m.totalContribution, 0);
+  // Default selected month to Next Month (e.g. Dec) if available, otherwise Current Month
+  const activeSelectedMonth = useMemo(() => {
+    if (selectedMonthKey) {
+      const found = chartData.find(m => m.monthKey === selectedMonthKey);
+      if (found) return found;
+    }
+    return chartData.find(m => m.isNextMonth && m.total > 0) || chartData[0] || null;
+  }, [chartData, selectedMonthKey]);
+
+  const displayedGoalMetas = useMemo(() => {
+    if (!focusedGoalId) return activeGoalMetas;
+    return activeGoalMetas.filter(m => m.goal.id === focusedGoalId);
+  }, [activeGoalMetas, focusedGoalId]);
+
+  // Custom Tooltip for the Stacked Bar Chart
+  const renderCustomTooltip = ({ active, payload }: any) => {
+    if (!active || !payload || payload.length === 0) return null;
+    const monthPoint: MonthSeriesPoint = payload[0]?.payload;
+    if (!monthPoint) return null;
+
+    const items = monthPoint.contributions.filter(
+      c => !focusedGoalId || c.goal.id === focusedGoalId
+    );
+    const monthTotal = items.reduce((s, c) => s + c.amount, 0);
+
+    return (
+      <div className="bg-white/95 backdrop-blur-md border-2 border-slate-200 rounded-2xl p-3.5 shadow-xl min-w-[250px] max-w-[320px] font-body">
+        <div className="flex items-center justify-between gap-3 pb-2 mb-2 border-b border-slate-100">
+          <div>
+            <p className="text-xs font-display font-black text-slate-900">
+              {monthPoint.monthLabel}
+            </p>
+            <p className="text-[10px] text-slate-500 font-medium">
+              ≈ {fmt(monthTotal / 4.33)}/wk across {items.length} {items.length === 1 ? 'pot' : 'pots'}
+            </p>
+          </div>
+          <div className="text-right">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-[#FF2EB8] block">
+              Total to Pots
+            </span>
+            <span className="text-sm font-display font-black text-slate-900 tabular-nums">
+              {fmt(monthTotal)}
+            </span>
+          </div>
+        </div>
+
+        {items.length === 0 ? (
+          <p className="text-xs text-slate-400 italic">No pot contributions scheduled</p>
+        ) : (
+          <div className="space-y-1.5">
+            {items.map(item => (
+              <div key={item.goal.id} className="flex items-center justify-between gap-2 text-xs">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span
+                    className="w-2.5 h-2.5 rounded-full shrink-0"
+                    style={{ backgroundColor: item.color }}
+                  />
+                  <span className="font-semibold text-slate-800 truncate">
+                    {item.goal.name}
+                  </span>
+                  {item.startsThisMonth && (
+                    <span className="text-[9px] font-bold px-1.5 py-0 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 shrink-0">
+                      Starts
+                    </span>
+                  )}
+                  {item.endsThisMonth && (
+                    <span className="text-[9px] font-bold px-1.5 py-0 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0">
+                      Due
+                    </span>
+                  )}
+                </div>
+                <span className="font-bold text-slate-900 tabular-nums shrink-0">
+                  {fmt(item.amount)}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <Card className="bg-white rounded-3xl border-2 border-[#FF7AD1]/40 shadow-[6px_6px_0px_0px_rgba(255,46,184,0.1)] overflow-hidden">
       <CardHeader className="bg-gradient-to-r from-[#FFF5FA] via-white to-[#F0F9FF] border-b border-[#FF7AD1]/20 p-6 pb-5">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2 mb-1">
               <span className="bg-[#FF2EB8] text-white p-1.5 rounded-xl">
-                <Calendar className="w-4 h-4" />
+                <BarChart3 className="w-4 h-4" />
               </span>
               <span className="text-[#FF2EB8] font-display font-bold uppercase tracking-wider text-xs">
-                Month-by-Month Pot Forecast
+                Monthly Pot Roadmap • Stacked Forecast
               </span>
             </div>
             <CardTitle className="text-2xl font-display font-black text-slate-900">
-              Monthly Expected Pot Spending & Saving Breakdown
+              Monthly Pot Contributions Breakdown
             </CardTitle>
             <p className="text-xs text-slate-500 mt-1">
-              See exactly which pots you are expected to spend from each month, how much has already been spent, and how much goes into each pot per month.
+              See how much you’ll be putting towards your pots each month as active goals finish and new ones start. Click any bar to inspect that month, or click a pot below to isolate it.
             </p>
           </div>
 
-          {/* View Mode Filter Pills */}
-          <div className="flex items-center bg-slate-100/90 p-1 rounded-xl border border-slate-200/80 self-start">
+          {focusedGoalId && (
             <button
               type="button"
-              onClick={() => setViewMode('both')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-display font-bold transition-all cursor-pointer ${
-                viewMode === 'both'
-                  ? 'bg-white text-slate-900 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
+              onClick={() => setFocusedGoalId(null)}
+              className="self-start md:self-center text-xs font-display font-bold px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer"
             >
-              Combined
+              Show All Pots ✕
             </button>
-            <button
-              type="button"
-              onClick={() => setViewMode('spending')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-display font-bold transition-all cursor-pointer flex items-center gap-1 ${
-                viewMode === 'spending'
-                  ? 'bg-[#FF2EB8] text-white shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <ShoppingBag className="w-3 h-3" /> Expected Pot Spending
-            </button>
-            <button
-              type="button"
-              onClick={() => setViewMode('saving')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-display font-bold transition-all cursor-pointer flex items-center gap-1 ${
-                viewMode === 'saving'
-                  ? 'bg-indigo-600 text-white shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <PiggyBank className="w-3 h-3" /> Monthly Saving Pace
-            </button>
-          </div>
+          )}
         </div>
       </CardHeader>
 
       <CardContent className="p-6 space-y-6">
-        {/* Top KPI Strip */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div className="bg-[#FFF5FA] rounded-2xl p-4 border-2 border-[#FF7AD1]/30">
-            <span className="text-xs font-display font-bold text-[#FF2EB8] uppercase tracking-wider block mb-1">
-              {currentMonthData?.shortMonthLabel || 'This Month'} Expected Pot Spend
-            </span>
-            <div className="text-2xl sm:text-3xl font-display font-black text-slate-900 tabular-nums">
-              {fmt(currentMonthData?.totalRemainingToSpend || 0)}
-              <span className="text-xs font-semibold text-slate-500 ml-1">left to spend</span>
-            </div>
-            <span className="text-[11px] text-slate-600 font-medium block mt-1">
-              {currentMonthData && currentMonthData.totalExpectedSpend > 0
-                ? `${fmt(currentMonthData.totalExpectedSpend)} total pot budget (${fmt(currentMonthData.totalAlreadySpent)} spent)`
-                : 'No pots due this month'}
-            </span>
-          </div>
-
-          <div className="bg-sky-50/70 rounded-2xl p-4 border-2 border-sky-200/80">
-            <span className="text-xs font-display font-bold text-sky-700 uppercase tracking-wider block mb-1">
-              {nextMonthData?.shortMonthLabel || 'Next Month'} Expected Pot Spend
-            </span>
-            <div className="text-2xl sm:text-3xl font-display font-black text-slate-900 tabular-nums">
-              {fmt(nextMonthData?.totalRemainingToSpend || 0)}
-              <span className="text-xs font-semibold text-slate-500 ml-1">left to spend</span>
-            </div>
-            <span className="text-[11px] text-slate-600 font-medium block mt-1">
-              {nextMonthData && nextMonthData.totalExpectedSpend > 0
-                ? `${nextMonthData.spendings.map(s => s.goal.name).join(', ')} (${fmt(nextMonthData.totalExpectedSpend)} target)`
-                : 'No pots due next month'}
-            </span>
-          </div>
-
-          <div className="bg-indigo-50/70 rounded-2xl p-4 border-2 border-indigo-200/80">
-            <span className="text-xs font-display font-bold text-indigo-700 uppercase tracking-wider block mb-1">
-              Total Upcoming Pot Spending
-            </span>
-            <div className="text-2xl sm:text-3xl font-display font-black text-indigo-950 tabular-nums">
-              {fmt(totalUpcomingSpend)}
-            </div>
-            <span className="text-[11px] text-indigo-800/80 font-medium block mt-1">
-              {fmt(totalUpcomingSave)} left to save across {monthlyBreakdowns.length} months
-            </span>
-          </div>
-        </div>
-
-        {/* Month-by-Month Cards Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {monthlyBreakdowns.map(month => {
-            const isOverCapacity =
-              monthlyPotCapacity > 0 && month.totalContribution > monthlyPotCapacity * 1.05;
-
+        {/* Month Total Quick Pills Strip */}
+        <div className="flex items-center gap-2.5 overflow-x-auto pb-1 touch-scroll">
+          {chartData.map(m => {
+            const isSelected = activeSelectedMonth?.monthKey === m.monthKey;
             return (
-              <div
-                key={month.monthKey}
-                className={`rounded-2xl border-2 p-4 flex flex-col justify-between transition-all ${
-                  month.isCurrentMonth
-                    ? 'bg-gradient-to-b from-[#FFF9FC] to-white border-[#FF2EB8]/45 shadow-sm'
-                    : month.isNextMonth
-                    ? 'bg-gradient-to-b from-sky-50/40 to-white border-sky-200/90'
-                    : 'bg-white border-slate-200/80'
+              <button
+                key={m.monthKey}
+                type="button"
+                onClick={() => setSelectedMonthKey(m.monthKey)}
+                className={`shrink-0 rounded-2xl border-2 px-3.5 py-2.5 text-left transition-all cursor-pointer ${
+                  isSelected
+                    ? 'bg-[#FFF5FA] border-[#FF2EB8] shadow-xs'
+                    : 'bg-slate-50/70 border-slate-200/80 hover:border-slate-300 hover:bg-white'
                 }`}
               >
-                <div className="space-y-4">
-                  {/* Month Header */}
-                  <div className="flex items-start justify-between gap-2 pb-3 border-b border-slate-100">
-                    <div>
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <h3 className="text-base font-display font-black text-slate-900">
-                          {month.monthLabel}
-                        </h3>
-                        {month.isCurrentMonth && (
-                          <Badge className="bg-[#FF2EB8] text-white text-[10px] px-2 py-0 font-bold">
-                            This Month
-                          </Badge>
-                        )}
-                        {month.isNextMonth && (
-                          <Badge
-                            variant="outline"
-                            className="border-sky-300 text-sky-800 bg-sky-50 text-[10px] px-2 py-0 font-bold"
-                          >
-                            Next Month
-                          </Badge>
-                        )}
-                      </div>
-                      <p className="text-[11px] text-slate-500 mt-0.5">
-                        {month.spendings.length} {month.spendings.length === 1 ? 'pot' : 'pots'} to spend •{' '}
-                        {month.contributions.length} {month.contributions.length === 1 ? 'pot' : 'pots'} saving
-                      </p>
-                    </div>
-
-                    <div className="text-right">
-                      {viewMode !== 'saving' && (
-                        <div>
-                          <span className="text-[10px] font-bold uppercase tracking-wider text-rose-600 block">
-                            Expected Spend
-                          </span>
-                          <span className="text-sm font-black text-slate-900 tabular-nums">
-                            {fmt(month.totalRemainingToSpend)}
-                          </span>
-                        </div>
-                      )}
-                      {viewMode !== 'spending' && (
-                        <div className={viewMode === 'both' ? 'mt-1' : ''}>
-                          <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-600 block">
-                            To Save
-                          </span>
-                          <span className="text-xs font-extrabold text-indigo-700 tabular-nums">
-                            +{fmt(month.totalContribution)}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Section 1: Expected Pot Spending in This Month */}
-                  {viewMode !== 'saving' && (
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[11px] font-display font-bold uppercase tracking-wider text-rose-600 flex items-center gap-1">
-                          <ShoppingBag className="w-3 h-3" />
-                          Expected Pot Spending
-                        </span>
-                        {month.totalExpectedSpend > 0 && (
-                          <span className="text-[10px] font-semibold text-slate-500">
-                            Budget: {fmt(month.totalExpectedSpend)}
-                          </span>
-                        )}
-                      </div>
-
-                      {month.spendings.length === 0 ? (
-                        <div className="rounded-xl bg-slate-50/80 border border-dashed border-slate-200 px-3 py-2.5 text-[11px] text-slate-400">
-                          No pots due for spending in {month.shortMonthLabel}
-                        </div>
-                      ) : (
-                        <div className="space-y-2">
-                          {month.spendings.map(sp => {
-                            const dotColor = sp.goal.color || '#FF2EB8';
-                            const spentPct =
-                              sp.targetBase > 0
-                                ? Math.min(100, (sp.spentTotalBase / sp.targetBase) * 100)
-                                : 0;
-
-                            return (
-                              <div
-                                key={sp.goal.id}
-                                onClick={() => onSelectGoalExpenses?.(sp.goal)}
-                                className={`rounded-xl border border-rose-100 bg-rose-50/35 p-2.5 space-y-1.5 transition-colors ${
-                                  onSelectGoalExpenses ? 'cursor-pointer hover:bg-rose-50/70' : ''
-                                }`}
-                                title="Click to view or log expenses for this pot"
-                              >
-                                <div className="flex items-center justify-between gap-2">
-                                  <div className="flex items-center gap-2 min-w-0">
-                                    <span
-                                      className="w-2.5 h-2.5 rounded-full shrink-0"
-                                      style={{ backgroundColor: dotColor }}
-                                    />
-                                    <span className="text-xs font-bold text-slate-900 truncate">
-                                      {sp.goal.name}
-                                    </span>
-                                    <Badge
-                                      variant="outline"
-                                      className="text-[9px] px-1.5 py-0 border-rose-200 text-rose-700 bg-white font-semibold shrink-0"
-                                    >
-                                      Due {sp.dueDateLabel}
-                                    </Badge>
-                                  </div>
-                                  <span className="text-xs font-black text-slate-900 tabular-nums shrink-0">
-                                    {fmt(sp.expectedRemainingSpendBase)}
-                                    <span className="text-[10px] font-normal text-slate-500"> left</span>
-                                  </span>
-                                </div>
-
-                                {/* Progress of actual spending vs pot budget */}
-                                <div className="h-1.5 rounded-full bg-white overflow-hidden border border-rose-100">
-                                  <div
-                                    className="h-full rounded-full transition-all"
-                                    style={{
-                                      width: `${Math.max(spentPct, sp.currentInPotBase > 0 ? 6 : 0)}%`,
-                                      backgroundColor: dotColor,
-                                    }}
-                                  />
-                                </div>
-
-                                <div className="flex items-center justify-between text-[10px] text-slate-600">
-                                  <span>
-                                    Target: <strong className="text-slate-800">{fmt(sp.targetBase)}</strong>
-                                    {sp.spentTotalBase > 0 && (
-                                      <>
-                                        {' '}•{' '}
-                                        <span className="text-rose-600 font-semibold">
-                                          {fmt(sp.spentTotalBase)} spent
-                                        </span>
-                                      </>
-                                    )}
-                                  </span>
-                                  <span>
-                                    In pot: <strong className="text-emerald-700">{fmt(sp.currentInPotBase)}</strong>
-                                    {sp.stillToSaveBase > 0.01 && (
-                                      <span className="text-indigo-600 font-semibold">
-                                        {' '}(+{fmt(sp.stillToSaveBase)} to save)
-                                      </span>
-                                    )}
-                                  </span>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Section 2: Expected Monthly Saving Contributions Into Pots */}
-                  {viewMode !== 'spending' && (
-                    <div className="space-y-2 pt-1">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[11px] font-display font-bold uppercase tracking-wider text-indigo-600 flex items-center gap-1">
-                          <PiggyBank className="w-3 h-3" />
-                          Expected Saving Into Pots
-                        </span>
-                        <span className="text-[10px] font-semibold text-slate-500">
-                          ≈ {fmt(month.totalContribution / 4.33)}/wk
-                        </span>
-                      </div>
-
-                      {month.contributions.length === 0 ? (
-                        <div className="rounded-xl bg-slate-50/80 border border-dashed border-slate-200 px-3 py-2.5 text-[11px] text-slate-400">
-                          All active pots already funded for {month.shortMonthLabel}
-                        </div>
-                      ) : (
-                        <div className="space-y-1.5">
-                          {month.contributions.map(c => {
-                            const dotColor = c.goal.color || '#4558ff';
-                            const afterPct =
-                              c.targetBase > 0
-                                ? Math.min(100, (c.projectedFundedAfterMonth / c.targetBase) * 100)
-                                : 0;
-
-                            return (
-                              <div
-                                key={c.goal.id}
-                                className="rounded-xl border border-slate-200/70 bg-slate-50/60 px-2.5 py-2 space-y-1"
-                              >
-                                <div className="flex items-center justify-between gap-2">
-                                  <div className="flex items-center gap-1.5 min-w-0">
-                                    <span
-                                      className="w-2 h-2 rounded-full shrink-0"
-                                      style={{ backgroundColor: dotColor }}
-                                    />
-                                    <span className="text-xs font-semibold text-slate-800 truncate">
-                                      {c.goal.name}
-                                    </span>
-                                  </div>
-                                  <span className="text-xs font-extrabold text-indigo-700 tabular-nums shrink-0">
-                                    +{fmt(c.amount)}
-                                  </span>
-                                </div>
-                                <div className="flex items-center justify-between text-[10px] text-slate-500">
-                                  <span>
-                                    {fmt(c.weeklyPaceInMonth)}/wk • {c.activeDays}d active in {format(month.monthDate, 'MMM')}
-                                  </span>
-                                  <span className="font-semibold text-slate-700">
-                                    Reaches {fmt(c.projectedFundedAfterMonth)} ({afterPct.toFixed(0)}%)
-                                  </span>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[11px] font-display font-bold text-slate-600 uppercase tracking-wider">
+                    {format(m.monthDate, 'MMM yyyy')}
+                  </span>
+                  {m.isCurrentMonth && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#FF2EB8]" title="Current Month" />
                   )}
                 </div>
-
-                {/* Month Footer Capacity Check */}
-                {monthlyPotCapacity > 0 && month.totalContribution > 0 && viewMode !== 'spending' && (
-                  <div
-                    className={`mt-4 pt-2.5 border-t text-[11px] flex items-center justify-between ${
-                      isOverCapacity
-                        ? 'border-amber-200 text-amber-800'
-                        : 'border-slate-100 text-emerald-700'
-                    }`}
-                  >
-                    <span className="font-medium flex items-center gap-1">
-                      {isOverCapacity ? (
-                        <>
-                          <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                          Tight month (+{fmt(month.totalContribution - monthlyPotCapacity)} over avg pot budget)
-                        </>
-                      ) : (
-                        <>
-                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                          Fits monthly pot capacity ({fmt(monthlyPotCapacity)}/mo)
-                        </>
-                      )}
-                    </span>
-                  </div>
-                )}
-              </div>
+                <div className="text-base font-display font-black text-slate-900 tabular-nums mt-0.5">
+                  {fmt(m.total)}
+                </div>
+                <div className="text-[10px] text-slate-500 font-medium">
+                  {m.contributions.length} {m.contributions.length === 1 ? 'pot' : 'pots'} active
+                </div>
+              </button>
             );
           })}
         </div>
+
+        {/* Stacked Bar Chart */}
+        {activeGoalMetas.length === 0 ? (
+          <div className="rounded-2xl border-2 border-dashed border-slate-200 p-8 text-center text-sm text-slate-500">
+            All your active goal pots are currently 100% funded! 🎉
+          </div>
+        ) : (
+          <div className="h-[340px] w-full pt-2">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart
+                data={chartData}
+                margin={{ top: 28, right: 16, left: 4, bottom: 8 }}
+                onClick={(state: any) => {
+                  if (state?.activePayload?.[0]?.payload?.monthKey) {
+                    setSelectedMonthKey(state.activePayload[0].payload.monthKey);
+                  }
+                }}
+              >
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                <XAxis
+                  dataKey="shortLabel"
+                  axisLine={false}
+                  tickLine={false}
+                  tick={{ fill: '#334155', fontSize: 12, fontWeight: 700 }}
+                  dy={6}
+                />
+                <YAxis
+                  axisLine={false}
+                  tickLine={false}
+                  tick={{ fill: '#64748b', fontSize: 11, fontWeight: 600 }}
+                  tickFormatter={(val: number) => fmtCompact(val) || '£0'}
+                  width={56}
+                />
+                <Tooltip
+                  content={renderCustomTooltip}
+                  cursor={{ fill: 'rgba(255, 46, 184, 0.05)', radius: 12 }}
+                />
+
+                {monthlyPotCapacity > 0 && (
+                  <ReferenceLine
+                    y={monthlyPotCapacity}
+                    stroke="#10b981"
+                    strokeDasharray="5 5"
+                    strokeWidth={1.5}
+                    label={{
+                      value: `Monthly Pot Capacity (${fmtCompact(monthlyPotCapacity)})`,
+                      position: 'insideTopRight',
+                      fill: '#059669',
+                      fontSize: 10,
+                      fontWeight: 700,
+                    }}
+                  />
+                )}
+
+                {displayedGoalMetas.map((meta, idx) => {
+                  const isTopBar = idx === displayedGoalMetas.length - 1;
+                  return (
+                    <Bar
+                      key={meta.goal.id}
+                      dataKey={meta.goal.id}
+                      name={meta.goal.name}
+                      stackId="pots"
+                      fill={meta.color}
+                      maxBarSize={64}
+                      radius={isTopBar ? [8, 8, 0, 0] : [0, 0, 0, 0]}
+                      className="cursor-pointer transition-opacity"
+                    >
+                      {isTopBar && !focusedGoalId && (
+                        <LabelList
+                          dataKey="totalLabel"
+                          position="top"
+                          style={{
+                            fill: '#0f172a',
+                            fontSize: 11,
+                            fontWeight: 800,
+                          }}
+                        />
+                      )}
+                    </Bar>
+                  );
+                })}
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+
+        {/* Interactive Legend: Active Pots & Their Start -> End Windows */}
+        {activeGoalMetas.length > 0 && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-display font-bold uppercase tracking-wider text-slate-500">
+                Active Pots in Chart (Click to Isolate)
+              </span>
+              <span className="text-[11px] text-slate-400">
+                Sorted by due date
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {activeGoalMetas.map(meta => {
+                const isFocused = focusedGoalId === meta.goal.id;
+                const isDimmed = focusedGoalId !== null && !isFocused;
+                const startText =
+                  meta.rawStart && meta.rawStart > new Date()
+                    ? `Starts ${format(meta.rawStart, 'MMM d')}`
+                    : 'Active now';
+                const endText = meta.rawDeadline
+                  ? `Due ${format(meta.rawDeadline, 'MMM d')}`
+                  : 'Ongoing';
+
+                return (
+                  <button
+                    key={meta.goal.id}
+                    type="button"
+                    onClick={() =>
+                      setFocusedGoalId(prev => (prev === meta.goal.id ? null : meta.goal.id))
+                    }
+                    className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs transition-all cursor-pointer ${
+                      isFocused
+                        ? 'bg-slate-900 text-white border-slate-900 shadow-sm scale-[1.02]'
+                        : isDimmed
+                        ? 'bg-slate-50 text-slate-400 border-slate-200 opacity-50 hover:opacity-80'
+                        : 'bg-white text-slate-800 border-slate-200 hover:border-slate-300 shadow-2xs'
+                    }`}
+                  >
+                    <span
+                      className="w-3 h-3 rounded-md shrink-0"
+                      style={{ backgroundColor: meta.color }}
+                    />
+                    <span className="font-bold">{meta.goal.name}</span>
+                    <span
+                      className={`text-[10px] font-medium ${
+                        isFocused ? 'text-slate-300' : 'text-slate-500'
+                      }`}
+                    >
+                      ({startText} → {endText} • {fmt(meta.remainingToSaveBase)} left)
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Selected Month Detailed Breakdown Box */}
+        {activeSelectedMonth && (
+          <div className="rounded-2xl bg-gradient-to-r from-[#FFF9FC] via-white to-indigo-50/40 border-2 border-[#FF7AD1]/35 p-4 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2.5 border-b border-slate-100">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Badge className="bg-[#FF2EB8] text-white font-display font-bold text-xs px-2.5 py-0.5">
+                  {activeSelectedMonth.monthLabel}
+                </Badge>
+                <span className="text-xs text-slate-600 font-semibold">
+                  You will be putting{' '}
+                  <strong className="text-slate-900 font-black">
+                    {fmt(activeSelectedMonth.total)}
+                  </strong>{' '}
+                  towards your pots ({fmt(activeSelectedMonth.total / 4.33)}/wk)
+                </span>
+              </div>
+              <span className="text-[11px] font-semibold text-slate-500">
+                {activeSelectedMonth.contributions.length} active{' '}
+                {activeSelectedMonth.contributions.length === 1 ? 'pot' : 'pots'} in{' '}
+                {format(activeSelectedMonth.monthDate, 'MMMM')}
+              </span>
+            </div>
+
+            {activeSelectedMonth.contributions.length === 0 ? (
+              <p className="text-xs text-slate-500 italic py-2">
+                No pot contributions needed in {activeSelectedMonth.monthLabel}.
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                {activeSelectedMonth.contributions.map(c => {
+                  const pctOfMonth =
+                    activeSelectedMonth.total > 0
+                      ? Math.round((c.amount / activeSelectedMonth.total) * 100)
+                      : 0;
+                  const afterPct =
+                    c.targetBase > 0
+                      ? Math.min(100, Math.round((c.projectedFundedAfterMonth / c.targetBase) * 100))
+                      : 0;
+
+                  return (
+                    <div
+                      key={c.goal.id}
+                      className="rounded-xl bg-white border border-slate-200/80 p-3 flex flex-col justify-between gap-2 shadow-2xs"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span
+                            className="w-3 h-3 rounded-md shrink-0"
+                            style={{ backgroundColor: c.color }}
+                          />
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="text-xs font-bold text-slate-900 truncate">
+                                {c.goal.name}
+                              </span>
+                              {c.startsThisMonth && (
+                                <Badge
+                                  variant="outline"
+                                  className="text-[9px] px-1.5 py-0 border-indigo-200 text-indigo-700 bg-indigo-50 font-bold"
+                                >
+                                  Starts {format(new Date(String(c.goal.start_date).split('T')[0] + 'T00:00:00'), 'MMM d')}
+                                </Badge>
+                              )}
+                              {c.endsThisMonth && (
+                                <Badge
+                                  variant="outline"
+                                  className="text-[9px] px-1.5 py-0 border-emerald-200 text-emerald-700 bg-emerald-50 font-bold"
+                                >
+                                  Finishes {format(new Date(String(c.goal.deadline).split('T')[0] + 'T00:00:00'), 'MMM d')}
+                                </Badge>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <span className="text-sm font-display font-black text-slate-900 tabular-nums">
+                            +{fmt(c.amount)}
+                          </span>
+                          <span className="text-[10px] text-slate-400 font-semibold block">
+                            {pctOfMonth}% of month
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between text-[10px] text-slate-500 pt-1 border-t border-slate-100">
+                        <span>{fmt(c.weeklyPaceInMonth)}/wk pace</span>
+                        <span className="font-semibold text-slate-700">
+                          Reaches {fmt(c.projectedFundedAfterMonth)} ({afterPct}%)
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
       </CardContent>
     </Card>
   );
