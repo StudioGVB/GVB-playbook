@@ -7,6 +7,7 @@ import { isExcludedSpendDate, weekOverlapsExclusion, baseAmt, parseUkDate } from
 import { calcTakeHome } from './ukTakeHome';
 import { deduplicateTransactions } from './deduplication';
 import { parseCoverMeta, planOverspendCover } from './overspendCover';
+import { computeMonthlyPotSchedule, getPotPacingMode } from './potPacingEngine';
 
 
 // ---- Trip helpers ----
@@ -976,6 +977,29 @@ export function computeRequiredGoalSavingsMonthly(
   monthlyIncome: number = 0,
   transactions: FinanceTransaction[] = [],
 ): number {
+  const pacingMode = getPotPacingMode();
+  if (pacingMode === 'dynamic') {
+    const schedule = computeMonthlyPotSchedule({
+      goals: goals || [],
+      transactions: transactions || [],
+      convertToBase: convertToBase || ((amt: number) => amt),
+      pacingMode: 'dynamic',
+      referenceDate: now,
+    });
+    let dynamicMonthlyTotal = 0;
+    for (const g of (goals || [])) {
+      if ((g as any)?.is_stash || (g.name || '').toLowerCase().includes('stash')) continue;
+      if ((g as any)?.is_emergency === true || (g.name || '').toLowerCase().includes('emergency')) continue;
+      const plan = schedule.getGoalPlanForMonth(g.id, now);
+      if (plan && !plan.isFutureStart) {
+        dynamicMonthlyTotal += plan.monthlyAmount;
+      }
+    }
+    if (dynamicMonthlyTotal > 0) {
+      return dynamicMonthlyTotal;
+    }
+  }
+
   const anchorNow = startOfWeek(now, { weekStartsOn: 1 });
   const spentByGoalBase = new Map<string, number>();
   for (const tx of (transactions || [])) {

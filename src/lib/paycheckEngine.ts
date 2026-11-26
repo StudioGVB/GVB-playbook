@@ -1,5 +1,6 @@
 import { baseAmt, parseUkDate } from './financeUtils';
 import type { FinanceGoal } from '@/hooks/useFinanceData';
+import { computeMonthlyPotSchedule, getPotPacingMode } from './potPacingEngine';
 
 export interface PaycheckWaterfallBreakdown {
   paycheckAmount: number;

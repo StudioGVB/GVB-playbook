@@ -21,7 +21,6 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Plus, ShoppingCart, Target, Wallet, Lock, ArrowRightLeft, Trash2, Palette, Plane, Car, Home, GraduationCap, Heart, Gift, Laptop, Baby, PiggyBank, Briefcase, UtensilsCrossed, Dumbbell, Music, Gamepad2, BookOpen, Sparkles, Pencil, AlertCircle, RotateCcw, AlertTriangle, ChevronRight, HelpCircle, CheckCircle2, Milestone, ArrowUpRight, Check, Shield, Receipt, type LucideIcon } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import MonthlyPotPlanner from '@/components/finance/MonthlyPotPlanner';
 import MonthlyPotBreakdownCard from '@/components/finance/MonthlyPotBreakdownCard';
 import FinanceBalanceSheet from '@/pages/FinanceBalanceSheet';
 import WeeklyPoolSavingsCard from '@/components/finance/WeeklyPoolSavingsCard';
@@ -33,7 +32,6 @@ import { evaluatePoolFeasibility } from '@/lib/feasibilityEngine';
 import { computeEmergencyLadder } from '@/lib/emergencyLadderEngine';
 import EmergencyLadderModal from '@/components/finance/EmergencyLadderModal';
 import FeasibilityAlert from '@/components/finance/FeasibilityAlert';
-import OverspendCoverPanel from '@/components/finance/OverspendCoverPanel';
 import FeasibilityBreakdownDialog from '@/components/finance/FeasibilityBreakdownDialog';
 import PurchaseTimingEvaluator from '@/components/finance/PurchaseTimingEvaluator';
 import { useWeeklyBoosts } from '@/hooks/useWeeklyBoosts';
@@ -1352,12 +1350,6 @@ export default function FinancePoolsPage() {
               Balance Sheet & Net Worth
             </TabsTrigger>
             <TabsTrigger
-              value="allocate"
-              className="px-3 py-1.5 rounded-lg font-display font-semibold text-xs text-slate-600 hover:text-slate-900 hover:bg-slate-100/70 data-[state=active]:bg-[#FF2EB8] data-[state=active]:text-white data-[state=active]:shadow-xs transition-all whitespace-nowrap"
-            >
-              Allocate Leftover
-            </TabsTrigger>
-            <TabsTrigger
               value="can-i-buy"
               className="px-3 py-1.5 rounded-lg font-display font-semibold text-xs text-slate-600 hover:text-slate-900 hover:bg-slate-100/70 data-[state=active]:bg-[#FF2EB8] data-[state=active]:text-white data-[state=active]:shadow-xs transition-all whitespace-nowrap"
             >
@@ -2164,27 +2156,6 @@ export default function FinancePoolsPage() {
 
         <TabsContent value="balance-sheet" className="space-y-6">
           <FinanceBalanceSheet />
-        </TabsContent>
-
-        <TabsContent value="allocate" className="space-y-6">
-          <OverspendCoverPanel finance={finance} trips={trips} baseCurrency={baseCurrency} />
-          <MonthlyPotPlanner
-            transactions={finance.transactions}
-            categories={finance.categories}
-            goals={finance.goals}
-            convertToBase={finance.convertToBase}
-            updateGoal={finance.updateGoal}
-            addGoal={finance.addGoal}
-            baseCurrency={baseCurrency}
-            assumptions={assumptions}
-            fixedMonthlyTotal={fixedMonthlyTotal}
-            essentialVariable={essentialVariable}
-            emergencyFloor={emergencyFloor}
-            currentEmergencyFunded={currentEmergencyFunded}
-            onUpdateExpectedIncome={async (val) => {
-              await updateAssumptions({ expected_monthly_income: val });
-            }}
-          />
         </TabsContent>
 
         <TabsContent value="can-i-buy" className="space-y-4">
