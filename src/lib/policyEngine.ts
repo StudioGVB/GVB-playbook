@@ -974,8 +974,18 @@ export function computeRequiredGoalSavingsMonthly(
   convertToBase: (amount: number, currency: string) => number,
   now: Date = new Date(),
   monthlyIncome: number = 0,
+  transactions: FinanceTransaction[] = [],
 ): number {
   const anchorNow = startOfWeek(now, { weekStartsOn: 1 });
+  const spentByGoalBase = new Map<string, number>();
+  for (const tx of (transactions || [])) {
+    const goalId = (tx as any)?.goal_id;
+    const amt = Number(tx?.amount) || 0;
+    if (!goalId || amt >= 0 || tx?.is_transfer) continue;
+    const baseVal = Math.abs(convertToBase ? convertToBase(amt, tx?.currency || 'GBP') : amt);
+    spentByGoalBase.set(goalId, (spentByGoalBase.get(goalId) || 0) + baseVal);
+  }
+
   let poolSavingsMonthly = 0;
   for (const g of (goals || [])) {
     if ((g as any)?.is_stash || (g.name || '').toLowerCase().includes('stash')) continue;
@@ -983,7 +993,10 @@ export function computeRequiredGoalSavingsMonthly(
     if (g.start_date && new Date(g.start_date) > anchorNow) continue;
     const targetBase = convertToBase ? convertToBase(g.target_amount || 0, g.currency) : (g.target_amount || 0);
     const assignedBase = convertToBase ? convertToBase(g.assigned_amount || 0, g.currency) : (g.assigned_amount || 0);
-    const remainingBase = Math.max(0, targetBase - assignedBase);
+    const spentBase = spentByGoalBase.get(g.id) || 0;
+    const refillWhenSpent = Boolean((g as any)?.refill_when_spent);
+    const effectiveFundedBase = refillWhenSpent ? assignedBase : (assignedBase + spentBase);
+    const remainingBase = Math.max(0, targetBase - effectiveFundedBase);
 
     // Rule: If pot has reached or exceeded target amount, it receives £0.00 even if deadline is upcoming
     if (remainingBase <= 0.01) continue;
@@ -1073,7 +1086,7 @@ export function computeMoneySplit(
 
   // 4. Goal Pool Savings: POTS ARE FILLED FIRST!
   // Active goal pools with deadlines or percentages take precedence so savings targets are 100% funded.
-  const poolSavingsMonthly = computeRequiredGoalSavingsMonthly(goals, convertToBase, now, effectiveIncome);
+  const poolSavingsMonthly = computeRequiredGoalSavingsMonthly(goals, convertToBase, now, effectiveIncome, transactions);
   const goalSavingsAmount = Math.min(poolSavingsMonthly, incomeAfterEssentials);
   const goalSavingsPercent = effectiveIncome > 0 ? (goalSavingsAmount / effectiveIncome) * 100 : 0;
 

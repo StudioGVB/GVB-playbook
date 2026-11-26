@@ -96,9 +96,8 @@ import { supabase } from '@/integrations/supabase/client';
 
 type PoolId = string; // goal id or virtual id
 const UNALLOCATED = '__unallocated__';
-const LIVING_POOL = '__living_pool__';
 const EMERGENCY_VIRTUAL = '__emergency_virtual__';
-const isVirtualPool = (id: PoolId) => id === UNALLOCATED || id === LIVING_POOL || id === EMERGENCY_VIRTUAL;
+const isVirtualPool = (id: PoolId) => id === UNALLOCATED || id === EMERGENCY_VIRTUAL;
 
 export const isSystemStashGoal = (g?: { name?: string; is_stash?: boolean } | null) => {
   if (!g) return false;
@@ -763,11 +762,6 @@ export default function FinancePoolsPage() {
   // Build pool options for the move dialog
   const poolOptions: { id: PoolId; label: string; available: number; cap?: number }[] = useMemo(() => {
     const opts: { id: PoolId; label: string; available: number; cap?: number }[] = [];
-    opts.push({
-      id: LIVING_POOL,
-      label: 'Living & Monthly Budget Pool',
-      available: livingPoolReserved,
-    });
 
     // Emergency Reserve pool option
     const emId = emergencyGoal ? emergencyGoal.id : EMERGENCY_VIRTUAL;
@@ -793,7 +787,7 @@ export default function FinancePoolsPage() {
       });
     });
     return opts;
-  }, [finance.goals, livingPoolReserved, extraSavingsCash, emergencyGoal, emergencyGoalAssigned, currentEmergencyFunded, emergencyFloor, finance.convertToBase]);
+  }, [finance.goals, extraSavingsCash, emergencyGoal, emergencyGoalAssigned, currentEmergencyFunded, emergencyFloor, finance.convertToBase]);
 
   const emergencyMonthsCovered = actualMonthlySurvival > 0 ? (currentEmergencyFunded / actualMonthlySurvival) : 0;
   const isEmergencyShort = emergencyShortfallAmt > 0.01;
@@ -801,7 +795,7 @@ export default function FinancePoolsPage() {
 
   const segments = [
     ...(currentEmergencyFunded > 0 ? [{ label: 'Emergency Reserve', amount: currentEmergencyFunded, color: emergencySegColor }] : []),
-    ...(livingPoolReserved > 0.01 ? [{ label: 'Living & Budget Pool', amount: livingPoolReserved, color: '#0ea5e9' }] : []),
+    ...(livingPoolReserved > 0.01 ? [{ label: 'Living Reserve', amount: livingPoolReserved, color: '#0ea5e9' }] : []),
     ...otherGoalSegments,
   ];
   const totalForBar = Math.max(totalCash, segments.reduce((s, seg) => s + seg.amount, 0)) || 1;
@@ -2137,152 +2131,6 @@ export default function FinancePoolsPage() {
         </div>
       </div>
 
-      {/* Next Month / Monthly Living Budget (Dedicated Section Below Pools) */}
-      <div className="mt-8 pt-6 border-t border-slate-200/80 space-y-4">
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-lg sm:text-xl font-display font-bold text-slate-900 tracking-tight flex items-center gap-2">
-                <Shield className="w-5 h-5 text-sky-600" />
-                {targetMonthLabel} Living & Monthly Budget
-              </h2>
-              <Badge variant="outline" className="text-[10px] font-bold px-2 py-0.5 text-sky-800 border-sky-300 bg-sky-50">
-                🔒 Ring-Fenced
-              </Badge>
-            </div>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Operational cashflow reserve for {targetMonthLabel} (bills, essentials & weekly fun money) — kept separate from your savings pots.
-            </p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {(() => {
-            const totalLivingSpentSoFar = fixedPaidSoFar + variableSpentSoFar;
-            const totalLivingCovered = livingPoolCash + totalLivingSpentSoFar;
-            const isLivingCovered = totalLivingCovered >= monthlyLivingTarget - 0.01 || livingPoolCash >= remainingLivingReserve - 0.01;
-            const isSurvivalCovered = totalLivingCovered >= effectiveFixedMonthly + essentialVariable - 0.01;
-            const livingShortfall = Math.max(0, monthlyLivingTarget - totalLivingCovered);
-            const livingPct = monthlyLivingTarget > 0 ? Math.min(100, (totalLivingCovered / monthlyLivingTarget) * 100) : 100;
-
-            let cardStyle = 'bg-sky-50/80 border-sky-300 shadow-[4px_4px_0px_0px_rgba(14,165,233,0.15)]';
-            let iconStyle = 'bg-sky-500 text-white';
-            let barStyle = 'bg-sky-500';
-            let badgeStyle = 'bg-sky-100 text-sky-800 border-sky-300';
-
-            if (isLivingCovered) {
-              cardStyle = 'bg-emerald-50/80 border-emerald-300 shadow-[4px_4px_0px_0px_rgba(16,185,129,0.15)]';
-              barStyle = 'bg-emerald-500';
-              badgeStyle = 'bg-emerald-100 text-emerald-800 border-emerald-300';
-            } else if (!isSurvivalCovered) {
-              cardStyle = 'bg-amber-50/80 border-amber-300 shadow-[4px_4px_0px_0px_rgba(245,158,11,0.15)]';
-              barStyle = 'bg-amber-500';
-              badgeStyle = 'bg-amber-100 text-amber-800 border-amber-300';
-            }
-
-            return (
-              <div className={`${cardStyle} rounded-2xl border-2 p-5 transition-all flex flex-col justify-between hover:scale-[1.01]`}>
-                <div>
-                  <div className="flex items-start justify-between gap-2 mb-2">
-                    <div className="flex items-center gap-3">
-                      <div className={`w-10 h-10 rounded-xl ${iconStyle} flex items-center justify-center flex-shrink-0 shadow-xs`}>
-                        <Lock className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <h3 className="text-sm font-bold text-slate-900">Living & Monthly Budget</h3>
-                          <Badge variant="outline" className="text-[9px] px-1.5 py-0 text-sky-800 border-sky-300 bg-sky-100/80 font-bold">
-                            🔒 Ring-Fenced ({targetMonthLabel})
-                          </Badge>
-                        </div>
-                        <p className="text-[11px] text-slate-500 mt-0.5 leading-tight">
-                          Untouchable reserve for {targetMonthLabel} Bills, Essentials & Weekly Budget
-                        </p>
-                      </div>
-                    </div>
-                    {isLivingCovered ? (
-                      <Badge className={`${badgeStyle} border font-display font-bold text-[10px] px-2 py-0.5 rounded-full shrink-0`}>
-                        ✓ {targetMonthLabel} Funded
-                      </Badge>
-                    ) : (
-                      <Badge className={`${badgeStyle} border font-display font-bold text-[10px] px-2 py-0.5 rounded-full shrink-0`}>
-                        {fmt(livingShortfall)} to full month
-                      </Badge>
-                    )}
-                  </div>
-
-                  <div className="mt-3">
-                    <div className="flex items-baseline justify-between flex-wrap gap-1 mb-2">
-                      <div>
-                        <span className="text-2xl font-display font-black text-slate-900 tracking-tight">
-                          {fmt(livingPoolCash)}
-                        </span>
-                        <span className="text-xs text-slate-500 ml-1 font-semibold">
-                          in reserve / {fmt(monthlyLivingTarget)} for {targetMonthLabel}
-                        </span>
-                      </div>
-                      <span className="text-xs font-bold tabular-nums text-sky-700">
-                        {livingPct.toFixed(0)}%
-                      </span>
-                    </div>
-
-                    <div className="w-full bg-slate-200/60 rounded-full h-2 overflow-hidden">
-                      <div
-                        className={`h-full transition-all rounded-full ${barStyle}`}
-                        style={{ width: `${livingPct}%` }}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Breakdown of what lives inside this untouchable pool */}
-                  <div className="text-xs space-y-1.5 border-t border-slate-200/60 pt-3 mt-3">
-                    <div className="flex justify-between">
-                      <span className="text-slate-500 font-semibold">1. Fixed Bills Reserve:</span>
-                      <span className="font-bold text-slate-800">
-                        {fmt(remainingFixedBills)} remaining {fixedPaidSoFar > 0 ? `(${fmt(fixedPaidSoFar)} paid)` : ''}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-500 font-semibold">2. Variable Essentials:</span>
-                      <span className="font-bold text-slate-800">
-                        {fmt(Math.max(0, essentialVariable - variableSpentSoFar))} remaining {variableSpentSoFar > 0 ? `(${fmt(variableSpentSoFar)} spent)` : ''}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-500 font-semibold">3. Fun Money Allowance:</span>
-                      <span className="font-extrabold text-pink-600">
-                        {fmt(monthlyFunAllowance)}/mo ({fmt(effectiveWeeklyFun)}/wk)
-                      </span>
-                    </div>
-                    <div className="flex justify-between pt-1 border-t border-slate-200/50">
-                      <span className="text-slate-500 font-semibold">Protection Status:</span>
-                      <span className="font-bold text-emerald-700">🔒 Locked for Living (Untouchable)</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex gap-2 pt-3 mt-2 w-full">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-8 text-xs font-semibold gap-1.5 flex-1 border-slate-200/80 bg-white/80 hover:bg-white transition-colors"
-                    onClick={() => {
-                      const defaultSource = poolOptions.find(p => p.available > 0 && p.id !== LIVING_POOL)?.id || '';
-                      setMoveFrom(defaultSource);
-                      setMoveTo(LIVING_POOL);
-                      setMoveAmount('');
-                      setMoveOpen(true);
-                    }}
-                  >
-                    <Plus className="w-3.5 h-3.5" /> Top up from Pool
-                  </Button>
-                </div>
-              </div>
-            );
-          })()}
-        </div>
-      </div>
-
       {/* Weekly Pool Savings Engine Card (Positioned Underneath Pools) */}
       <WeeklyPoolSavingsCard finance={finance} spendablePool={spendablePool} funMoney={funMoney} snapshot={snapshot} />
       </TabsContent>
@@ -2544,8 +2392,8 @@ export default function FinancePoolsPage() {
                 <Label className="text-xs font-bold text-slate-900">Auto-refill on payday if spent from</Label>
                 <p className="text-[11px] text-slate-500 leading-snug">
                   {newRefillWhenSpent
-                    ? 'On: If you spend from this pot before its due date, future paychecks will top it back up to its target.'
-                    : 'Off: Once this pot hits its target, future paychecks will ignore it even if you spend from it early (e.g. booking flights/hotels).'}
+                    ? 'On: If you spend from this pot before its due date, future paychecks will refill the spent amount too so the pot balance reaches the full target.'
+                    : 'Off: Early spending still counts toward your goal (e.g. £300 target, £200 saved, £100 spent → £100 left in pot, and paychecks only add the remaining £100 to bring the pot to £200).'}
                 </p>
               </div>
               <Switch checked={newRefillWhenSpent} onCheckedChange={setNewRefillWhenSpent} />
@@ -2682,8 +2530,8 @@ export default function FinancePoolsPage() {
                   <Label className="text-xs font-bold text-slate-900">Auto-refill on payday if spent from</Label>
                   <p className="text-[11px] text-slate-500 leading-snug">
                     {editRefillWhenSpent
-                      ? 'On: If you spend from this pot before its due date, future paychecks will top it back up to its target.'
-                      : 'Off: Once this pot hits its target, future paychecks will ignore it even if you spend from it early (e.g. booking flights/hotels).'}
+                      ? 'On: If you spend from this pot before its due date, future paychecks will refill the spent amount too so the pot balance reaches the full target.'
+                      : 'Off: Early spending still counts toward your goal (e.g. £300 target, £200 saved, £100 spent → £100 left in pot, and paychecks only add the remaining £100 to bring the pot to £200).'}
                   </p>
                 </div>
                 <Switch checked={editRefillWhenSpent} onCheckedChange={setEditRefillWhenSpent} />
@@ -2725,11 +2573,6 @@ export default function FinancePoolsPage() {
                   ))}
                 </SelectContent>
               </Select>
-              {moveFrom === LIVING_POOL && (
-                <p className="text-[11px] text-amber-600 dark:text-amber-400 leading-snug">
-                  Heads up: this dips into bills/essentials reserve, so your runway will shorten.
-                </p>
-              )}
             </div>
 
             <div className="flex justify-center">
