@@ -788,56 +788,111 @@ export default function FinanceMonthly() {
   const essentialCats = variableCategoryBreakdown.filter(c => c.isEssential);
   const funCats = variableCategoryBreakdown.filter(c => !c.isEssential);
 
-  // Build Fixed Bills checklist (committed bills matched against paid fixed transactions this month)
+  // Build Fixed Bills checklist & bar chart data (all paid transactions per bill matched against its allowance)
   const fixedBillsStatusList = useMemo(() => {
     const activeExpenses = fixedExpenses.filter(e => (e as any).is_active !== false);
     const usedTxIds = new Set<string>();
 
+    // Pass 1: explicit fixedExpenseId match
+    const explicitMatchesByExpId = new Map<string, typeof paidFixedTxns>();
+    for (const exp of activeExpenses) {
+      const exact = paidFixedTxns.filter(tx => !usedTxIds.has(tx.id) && tx.fixedExpenseId === exp.id);
+      exact.forEach(tx => usedTxIds.add(tx.id));
+      explicitMatchesByExpId.set(exp.id, exact);
+    }
+
+    // Pass 2: fallback keyword / amount matching for any remaining unlinked fixed transactions
     const items = activeExpenses.map(exp => {
-      const monthlyAmt = finance.convertToBase(exp.amount, exp.currency) * (FREQ_TO_MONTHLY[exp.frequency] ?? 1);
-      const expWords = exp.name.toLowerCase().split(/\s+/).filter(w => w.length >= 3);
+      const singleCycleAmt = finance.convertToBase(exp.amount, exp.currency);
+      const proratedMonthlyAmt = singleCycleAmt * (FREQ_TO_MONTHLY[exp.frequency] ?? 1);
+      const expLower = exp.name.toLowerCase();
+      const expWords = expLower.split(/\s+/).filter(w => w.length >= 3 && !['flat', 'plan', 'bill', 'bills', 'incl'].includes(w));
 
-      const matchedTx = paidFixedTxns.find(tx => {
-        if (usedTxIds.has(tx.id)) return false;
-        if (tx.fixedExpenseId && tx.fixedExpenseId === exp.id) return true;
+      const matchedTxs = [...(explicitMatchesByExpId.get(exp.id) || [])];
+      for (const tx of paidFixedTxns) {
+        if (usedTxIds.has(tx.id)) continue;
         const txLower = tx.name.toLowerCase();
-        if (expWords.some(w => txLower.includes(w))) return true;
-        return Math.abs(tx.amount - monthlyAmt) <= Math.max(2, monthlyAmt * 0.08);
-      });
+        const isBusinessMatch = expLower.includes('business') && /\b(google|cloud|workspace|openai|chatgpt|claude|anthropic|canva|figma|vercel|supabase)\b/i.test(txLower);
+        const is11LabsMatch = (expLower.includes('11labs') || expLower.includes('elevenlabs')) && /\b(11labs|elevenlabs)\b/i.test(txLower);
+        const isPhoneMatch = expLower.includes('phone') && /\b(lyca|lycamobile|vodafone|voxi|ee|o2|three|giffgaff|lebara|smarty)\b/i.test(txLower);
+        const isMedsMatch = expLower.includes('meds') && /\b(boots|pharmacy|chemist|prescription|elvanse|amfexa|adhd|clinic|mypace)\b/i.test(txLower);
+        const isRentMatch = (expLower.includes('rent') || expLower.includes('flat')) && tx.amount >= 100 && /\b(rent|rental|landlord|evans|tenancy)\b/i.test(txLower);
+        const isWordMatch = expWords.some(w => txLower.includes(w));
+        const isAmtMatch = Math.abs(tx.amount - singleCycleAmt) <= Math.max(2, singleCycleAmt * 0.08);
 
-      if (matchedTx) usedTxIds.add(matchedTx.id);
+        if (isBusinessMatch || is11LabsMatch || isPhoneMatch || isMedsMatch || isRentMatch || isWordMatch || isAmtMatch) {
+          usedTxIds.add(tx.id);
+          matchedTxs.push(tx);
+        }
+      }
 
+      const paidSum = matchedTxs.reduce((s, t) => s + t.amount, 0);
       const isExternalPaid = Boolean(exp.paid_externally);
-      const isPaid = Boolean(matchedTx) || (isExternalPaid && exp.due_day ? exp.due_day <= daysElapsed : isExternalPaid);
+      const isPaid = matchedTxs.length > 0 || (isExternalPaid && exp.due_day ? exp.due_day <= daysElapsed : isExternalPaid);
+      const isMultiWeek = exp.frequency !== 'monthly' && exp.frequency !== 'weekly' && exp.frequency !== 'fortnightly';
+      // When a 6-week bill (like £200 Meds) hits this month, show its full £200 cycle allowance
+      const allowanceAmount = isMultiWeek ? Math.max(proratedMonthlyAmt, singleCycleAmt) : proratedMonthlyAmt;
 
       return {
         id: exp.id,
         name: exp.name,
-        committedAmount: monthlyAmt,
-        paidAmount: matchedTx ? matchedTx.amount : (isPaid ? monthlyAmt : 0),
+        shortName: exp.name.replace(/\s*\(.*?\)\s*/g, '').trim(),
+        frequency: exp.frequency,
+        committedAmount: allowanceAmount,
+        proratedMonthlyAmount: proratedMonthlyAmt,
+        paidAmount: matchedTxs.length > 0 ? paidSum : (isPaid ? allowanceAmount : 0),
         isPaid,
         dueDay: exp.due_day,
         paidExternally: exp.paid_externally,
+        txCount: matchedTxs.length,
+        transactions: matchedTxs,
+        isUnplannedExtra: false,
       };
     });
 
-    // Include any extra fixed transactions that didn't match a template bill
+    // Group any extra fixed transactions that didn't match a configured template bill
+    const extraGroups = new Map<string, { name: string; paidAmount: number; dueDay: number; txs: typeof paidFixedTxns }>();
     for (const tx of paidFixedTxns) {
       if (!usedTxIds.has(tx.id)) {
-        items.push({
-          id: tx.id,
-          name: tx.name,
-          committedAmount: tx.amount,
-          paidAmount: tx.amount,
-          isPaid: true,
-          dueDay: getDate(tx.date),
-          paidExternally: false,
-        });
+        const cleanKey = (tx.name || 'Extra Bill').trim();
+        const existing = extraGroups.get(cleanKey);
+        if (existing) {
+          existing.paidAmount += tx.amount;
+          existing.txs.push(tx);
+        } else {
+          extraGroups.set(cleanKey, {
+            name: cleanKey,
+            paidAmount: tx.amount,
+            dueDay: getDate(tx.date),
+            txs: [tx],
+          });
+        }
       }
     }
 
-    return items.sort((a, b) => b.committedAmount - a.committedAmount);
+    for (const [key, grp] of extraGroups.entries()) {
+      items.push({
+        id: `extra-${key}`,
+        name: grp.name,
+        shortName: grp.name.slice(0, 18),
+        frequency: 'monthly',
+        committedAmount: 0,
+        proratedMonthlyAmount: 0,
+        paidAmount: grp.paidAmount,
+        isPaid: true,
+        dueDay: grp.dueDay,
+        paidExternally: false,
+        txCount: grp.txs.length,
+        transactions: grp.txs,
+        isUnplannedExtra: true,
+      });
+    }
+
+    return items.sort((a, b) => Math.max(b.committedAmount, b.paidAmount) - Math.max(a.committedAmount, a.paidAmount));
   }, [fixedExpenses, paidFixedTxns, finance.convertToBase, daysElapsed]);
+
+  const [fixedChartExcludeRent, setFixedChartExcludeRent] = useState<boolean>(false);
+  const [selectedFixedBill, setSelectedFixedBill] = useState<(typeof fixedBillsStatusList)[number] | null>(null);
 
   // Category drill-down (for clicking any category row)
   const [selectedCategory, setSelectedCategory] = useState<{ catId: string; name: string; color: string } | null>(null);
@@ -1783,6 +1838,295 @@ export default function FinanceMonthly() {
             );
           })()}
 
+          {/* BLOCK 2.8: FIXED BILLS — SPENT SO FAR VS. ALLOWANCE BAR CHART */}
+          {fixedBillsStatusList.length > 0 && (() => {
+            const totalFixedAllowance = fixedBillsStatusList.reduce((sum, b) => sum + b.committedAmount, 0);
+            const totalFixedPaid = fixedBillsStatusList.reduce((sum, b) => sum + b.paidAmount, 0);
+            const hasLargeRent = fixedBillsStatusList.some(b => b.committedAmount >= 400);
+            const chartBills = fixedBillsStatusList.filter(b =>
+              fixedChartExcludeRent ? b.committedAmount < 400 : true
+            );
+            const maxChartVal = Math.max(
+              1,
+              ...chartBills.map(b => Math.max(b.committedAmount, b.paidAmount))
+            );
+
+            return (
+              <div className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-xs space-y-5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3.5">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <BarChart3 className="w-4 h-4 text-rose-600" />
+                      <h2 className="text-base font-display font-bold text-slate-900">
+                        Fixed Bills: Spent So Far vs. Allowance ({monthLabel})
+                      </h2>
+                    </div>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Comparing actual charges cleared this month against each fixed bill&apos;s allowance · Click any bill to inspect charges
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-3">
+                    {/* Legend */}
+                    <div className="flex items-center gap-3 text-[11px] font-semibold text-slate-600">
+                      <span className="flex items-center gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded-xs bg-slate-300 border border-slate-400" />
+                        Allowance ({fmt(totalFixedAllowance)})
+                      </span>
+                      <span className="flex items-center gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded-xs bg-emerald-500" />
+                        Spent ({fmt(totalFixedPaid)})
+                      </span>
+                      <span className="flex items-center gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded-xs bg-rose-500" />
+                        Over Allowance
+                      </span>
+                    </div>
+
+                    {/* Zoom non-rent toggle so £6-£50 bills aren't dwarfed by £720 rent */}
+                    {hasLargeRent && (
+                      <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 text-[11px] font-semibold">
+                        <button
+                          type="button"
+                          onClick={() => setFixedChartExcludeRent(false)}
+                          className={cn(
+                            "px-2.5 py-1 rounded-md transition-colors",
+                            !fixedChartExcludeRent
+                              ? "bg-white text-slate-900 shadow-2xs"
+                              : "text-slate-500 hover:text-slate-800"
+                          )}
+                        >
+                          All Bills
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setFixedChartExcludeRent(true)}
+                          className={cn(
+                            "px-2.5 py-1 rounded-md transition-colors",
+                            fixedChartExcludeRent
+                              ? "bg-white text-slate-900 shadow-2xs"
+                              : "text-slate-500 hover:text-slate-800"
+                          )}
+                        >
+                          Zoom Non-Rent
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Vertical Grouped Bar Chart (Spent vs. Allowance) */}
+                <div className="rounded-xl border border-slate-100 bg-slate-50/60 p-4">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-3 items-end min-h-[190px] pt-6">
+                    {chartBills.map((bill) => {
+                      const allowancePct = maxChartVal > 0 ? Math.max((bill.committedAmount / maxChartVal) * 100, bill.committedAmount > 0 ? 6 : 0) : 0;
+                      const spentPct = maxChartVal > 0 ? Math.max((bill.paidAmount / maxChartVal) * 100, bill.paidAmount > 0 ? 6 : 0) : 0;
+                      const isOver = bill.committedAmount > 0
+                        ? bill.paidAmount > bill.committedAmount + 0.5
+                        : bill.paidAmount > 0;
+                      const diff = bill.committedAmount - bill.paidAmount;
+
+                      return (
+                        <button
+                          key={bill.id}
+                          type="button"
+                          onClick={() => setSelectedFixedBill(bill)}
+                          className="group flex flex-col items-center text-center p-2 rounded-xl hover:bg-white hover:shadow-xs border border-transparent hover:border-slate-200/80 transition-all cursor-pointer"
+                        >
+                          {/* Top value readout */}
+                          <div className="mb-1.5 text-center">
+                            <span
+                              className={cn(
+                                "block text-xs font-display font-black tabular-nums",
+                                isOver
+                                  ? "text-rose-600"
+                                  : bill.paidAmount > 0
+                                  ? "text-emerald-700"
+                                  : "text-slate-400"
+                              )}
+                            >
+                              {fmt(bill.paidAmount)}
+                            </span>
+                            <span className="block text-[10px] text-slate-400 font-medium tabular-nums">
+                              of {fmt(bill.committedAmount)}
+                            </span>
+                          </div>
+
+                          {/* Side-by-side vertical bars container */}
+                          <div className="w-full h-28 flex items-end justify-center gap-2 px-2 border-b border-slate-200/90">
+                            {/* Allowance bar */}
+                            <div className="flex flex-col items-center justify-end h-full w-5">
+                              <div
+                                className="w-full rounded-t-md bg-slate-200/90 border border-b-0 border-slate-300/90 transition-all duration-300"
+                                style={{ height: `${Math.min(100, allowancePct)}%` }}
+                                title={`Allowance: ${fmt(bill.committedAmount)}`}
+                              />
+                            </div>
+
+                            {/* Spent so far bar */}
+                            <div className="flex flex-col items-center justify-end h-full w-5">
+                              <div
+                                className={cn(
+                                  "w-full rounded-t-md transition-all duration-300",
+                                  bill.paidAmount === 0
+                                    ? "bg-slate-200/40 border border-dashed border-slate-300 h-1.5"
+                                    : isOver
+                                    ? "bg-rose-500 shadow-2xs"
+                                    : "bg-emerald-500 shadow-2xs"
+                                )}
+                                style={{
+                                  height: bill.paidAmount === 0 ? '4px' : `${Math.min(100, spentPct)}%`,
+                                }}
+                                title={`Spent so far: ${fmt(bill.paidAmount)}`}
+                              />
+                            </div>
+                          </div>
+
+                          {/* Bill label & status pill */}
+                          <div className="mt-2 w-full">
+                            <p className="text-xs font-bold text-slate-800 truncate group-hover:text-slate-950">
+                              {bill.shortName}
+                            </p>
+                            <p
+                              className={cn(
+                                "text-[10px] font-semibold tabular-nums mt-0.5",
+                                isOver
+                                  ? "text-rose-600"
+                                  : bill.paidAmount === 0
+                                  ? "text-amber-600"
+                                  : diff > 0.5
+                                  ? "text-emerald-600"
+                                  : "text-slate-500"
+                              )}
+                            >
+                              {isOver
+                                ? `+${fmt(Math.abs(diff))} over`
+                                : bill.paidAmount === 0
+                                ? "Unpaid so far"
+                                : diff > 0.5
+                                ? `${fmt(diff)} under`
+                                : "On allowance"}
+                            </p>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Horizontal Per-Bill Allowance Fill Bars & Breakdown */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                  {fixedBillsStatusList.map((bill) => {
+                    const maxRowScale = Math.max(bill.committedAmount, bill.paidAmount, 1);
+                    const spentWidthPct = Math.min(100, (bill.paidAmount / maxRowScale) * 100);
+                    const allowanceMarkerPct = bill.paidAmount > bill.committedAmount && bill.committedAmount > 0
+                      ? (bill.committedAmount / maxRowScale) * 100
+                      : 100;
+                    const isOver = bill.committedAmount > 0
+                      ? bill.paidAmount > bill.committedAmount + 0.5
+                      : bill.paidAmount > 0;
+                    const diff = bill.committedAmount - bill.paidAmount;
+                    const pctOfAllowance = bill.committedAmount > 0
+                      ? Math.round((bill.paidAmount / bill.committedAmount) * 100)
+                      : 100;
+
+                    return (
+                      <button
+                        key={bill.id}
+                        type="button"
+                        onClick={() => setSelectedFixedBill(bill)}
+                        className="text-left p-3 rounded-xl border border-slate-200/80 bg-white hover:bg-slate-50/70 hover:border-slate-300 transition-all space-y-2 cursor-pointer"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            {bill.isPaid ? (
+                              <CheckCircle2 className={cn("w-4 h-4 shrink-0", isOver ? "text-rose-500" : "text-emerald-600")} />
+                            ) : (
+                              <Clock className="w-4 h-4 text-amber-500 shrink-0" />
+                            )}
+                            <span className="text-xs font-bold text-slate-900 truncate">
+                              {bill.name}
+                            </span>
+                            {bill.txCount > 0 && (
+                              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-600 shrink-0">
+                                {bill.txCount} {bill.txCount === 1 ? 'charge' : 'charges'}
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="text-right shrink-0 flex items-baseline gap-1">
+                            <span
+                              className={cn(
+                                "text-xs font-display font-black tabular-nums",
+                                isOver ? "text-rose-600" : "text-slate-900"
+                              )}
+                            >
+                              {fmt(bill.paidAmount)}
+                            </span>
+                            <span className="text-[11px] text-slate-400 font-medium tabular-nums">
+                              / {fmt(bill.committedAmount)}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Horizontal comparative progress bar */}
+                        <div className="relative h-2.5 w-full rounded-full bg-slate-100 overflow-hidden">
+                          <div
+                            className={cn(
+                              "h-full rounded-full transition-all duration-300",
+                              bill.paidAmount === 0
+                                ? "bg-slate-300"
+                                : isOver
+                                ? "bg-rose-500"
+                                : "bg-emerald-500"
+                            )}
+                            style={{ width: `${spentWidthPct}%` }}
+                          />
+                          {allowanceMarkerPct < 100 && (
+                            <div
+                              className="absolute top-0 bottom-0 w-0.5 bg-slate-900 z-10"
+                              style={{ left: `${allowanceMarkerPct}%` }}
+                              title={`Allowance limit: ${fmt(bill.committedAmount)}`}
+                            />
+                          )}
+                        </div>
+
+                        <div className="flex items-center justify-between text-[10px] text-slate-500">
+                          <span>
+                            {bill.committedAmount > 0
+                              ? `${pctOfAllowance}% of allowance used`
+                              : 'Unplanned fixed charge'}
+                            {bill.frequency && bill.frequency !== 'monthly' && bill.frequency !== 'unplanned'
+                              ? ` · (${bill.frequency.replace(/_/g, ' ')})`
+                              : ''}
+                          </span>
+                          <span
+                            className={cn(
+                              "font-bold tabular-nums",
+                              isOver
+                                ? "text-rose-600"
+                                : diff > 0.5
+                                ? "text-emerald-600"
+                                : "text-slate-600"
+                            )}
+                          >
+                            {isOver
+                              ? `+${fmt(Math.abs(diff))} over allowance`
+                              : bill.paidAmount === 0
+                              ? `${fmt(bill.committedAmount)} remaining`
+                              : diff > 0.5
+                              ? `${fmt(diff)} allowance left`
+                              : 'Exact match'}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
+
           {/* BLOCK 3: UNIFIED 3-COLUMN "WHERE YOUR MONEY WENT" */}
           <div className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-xs space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3.5">
@@ -1791,7 +2135,7 @@ export default function FinanceMonthly() {
                   Where Your Money Went ({monthLabel})
                 </h2>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Organized by your 3 spending pillars · Click any Essential or Fun category to inspect merchants
+                  Organized by your 3 spending pillars · Click any Fixed Bill, Essential, or Fun category to inspect merchants
                 </p>
               </div>
               {/* Proportional visual split pill */}
@@ -1836,41 +2180,65 @@ export default function FinanceMonthly() {
                     {fixedBillsStatusList.length === 0 ? (
                       <p className="text-xs text-slate-400 py-4 text-center">No fixed bills configured</p>
                     ) : (
-                      fixedBillsStatusList.map((bill) => (
-                        <div
-                          key={bill.id}
-                          className="flex items-center justify-between p-2.5 rounded-xl bg-white border border-slate-200/60 text-xs"
-                        >
-                          <div className="flex items-center gap-2 min-w-0 pr-2">
-                            {bill.isPaid ? (
-                              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                            ) : (
-                              <Clock className="w-4 h-4 text-amber-500 shrink-0" />
-                            )}
-                            <div className="min-w-0">
-                              <p className="font-semibold text-slate-800 truncate">{bill.name}</p>
-                              <p className="text-[10px] text-slate-400">
-                                {bill.isPaid
-                                  ? (bill.paidExternally ? 'Paid (External)' : 'Paid this month')
-                                  : (bill.dueDay ? `Due day ${bill.dueDay}` : 'Upcoming this month')}
-                              </p>
+                      fixedBillsStatusList.map((bill) => {
+                        const isOver = bill.committedAmount > 0
+                          ? bill.paidAmount > bill.committedAmount + 0.5
+                          : bill.paidAmount > 0;
+                        const fillPct = bill.committedAmount > 0
+                          ? Math.min(100, (bill.paidAmount / bill.committedAmount) * 100)
+                          : 100;
+                        return (
+                          <button
+                            key={bill.id}
+                            type="button"
+                            onClick={() => setSelectedFixedBill(bill)}
+                            className="w-full text-left p-2.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-200/60 text-xs space-y-1.5 transition-colors cursor-pointer"
+                          >
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2 min-w-0 pr-2">
+                                {bill.isPaid ? (
+                                  <CheckCircle2 className={cn("w-4 h-4 shrink-0", isOver ? "text-rose-500" : "text-emerald-600")} />
+                                ) : (
+                                  <Clock className="w-4 h-4 text-amber-500 shrink-0" />
+                                )}
+                                <div className="min-w-0">
+                                  <p className="font-semibold text-slate-800 truncate">{bill.name}</p>
+                                  <p className="text-[10px] text-slate-400">
+                                    {bill.isPaid
+                                      ? (bill.paidExternally
+                                          ? 'Paid (External)'
+                                          : `${bill.txCount} ${bill.txCount === 1 ? 'charge' : 'charges'} this month`)
+                                      : (bill.dueDay ? `Due day ${bill.dueDay}` : 'Upcoming this month')}
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="text-right shrink-0">
+                                <span className={cn("font-bold tabular-nums", isOver ? "text-rose-600" : "text-slate-900")}>
+                                  {fmt(bill.paidAmount)}
+                                </span>
+                                <span className="text-[10px] text-slate-400 tabular-nums"> / {fmt(bill.committedAmount)}</span>
+                                <span
+                                  className={cn(
+                                    "block text-[9px] font-bold uppercase",
+                                    isOver ? "text-rose-600" : bill.isPaid ? "text-emerald-600" : "text-amber-600"
+                                  )}
+                                >
+                                  {isOver ? 'Over Allowance' : bill.isPaid ? 'Cleared' : 'Pending'}
+                                </span>
+                              </div>
                             </div>
-                          </div>
-                          <div className="text-right shrink-0">
-                            <span className="font-bold tabular-nums text-slate-900">
-                              {fmt(bill.isPaid ? bill.paidAmount : bill.committedAmount)}
-                            </span>
-                            <span
-                              className={cn(
-                                "block text-[9px] font-bold uppercase",
-                                bill.isPaid ? "text-emerald-600" : "text-amber-600"
-                              )}
-                            >
-                              {bill.isPaid ? 'Cleared' : 'Pending'}
-                            </span>
-                          </div>
-                        </div>
-                      ))
+                            <div className="h-1.5 w-full rounded-full bg-slate-100 overflow-hidden">
+                              <div
+                                className={cn(
+                                  "h-full rounded-full",
+                                  bill.paidAmount === 0 ? "bg-slate-300" : isOver ? "bg-rose-500" : "bg-emerald-500"
+                                )}
+                                style={{ width: `${fillPct}%` }}
+                              />
+                            </div>
+                          </button>
+                        );
+                      })
                     )}
                   </div>
                 </div>
@@ -2860,6 +3228,63 @@ export default function FinanceMonthly() {
                     </div>
                   );
                 })
+              )}
+            </div>
+          </ScrollArea>
+        </DialogContent>
+      </Dialog>
+
+      {/* Fixed Bill Drill-Down Dialog */}
+      <Dialog open={!!selectedFixedBill} onOpenChange={(o) => !o && setSelectedFixedBill(null)}>
+        <DialogContent className="sm:max-w-[520px] p-0 overflow-hidden bg-white border-slate-200 rounded-2xl">
+          <div className="p-5 border-b border-slate-100 bg-slate-50/70">
+            <DialogHeader>
+              <div className="flex items-center justify-between pr-6">
+                <div>
+                  <DialogTitle className="text-lg font-display font-bold text-slate-900">
+                    {selectedFixedBill?.name}
+                  </DialogTitle>
+                  <DialogDescription className="text-xs text-slate-500 mt-0.5">
+                    {monthLabel} · Fixed bill allowance vs. actual charges
+                  </DialogDescription>
+                </div>
+                <div className="text-right">
+                  <span className="text-lg font-display font-black tabular-nums text-slate-900">
+                    {fmt(selectedFixedBill?.paidAmount ?? 0)}
+                  </span>
+                  <span className="block text-xs text-slate-500 font-medium tabular-nums">
+                    of {fmt(selectedFixedBill?.committedAmount ?? 0)} allowance
+                  </span>
+                </div>
+              </div>
+            </DialogHeader>
+          </div>
+
+          <ScrollArea className="max-h-[60vh]">
+            <div className="p-4 space-y-2">
+              {(!selectedFixedBill?.transactions || selectedFixedBill.transactions.length === 0) ? (
+                <div className="text-center py-8 text-xs text-slate-400">
+                  {selectedFixedBill?.paidExternally
+                    ? 'Marked as paid externally for this month.'
+                    : 'No charges matched for this bill so far this month.'}
+                </div>
+              ) : (
+                selectedFixedBill.transactions.map((tx: any) => (
+                  <div
+                    key={tx.id}
+                    className="flex items-center justify-between p-3 rounded-xl border border-slate-200/70 bg-white text-xs"
+                  >
+                    <div className="min-w-0 pr-3">
+                      <p className="font-semibold text-slate-900 truncate">{tx.name}</p>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        {format(parseISO(tx.date), 'EEE, d MMM yyyy')}
+                      </p>
+                    </div>
+                    <span className="font-display font-bold tabular-nums text-slate-900 shrink-0">
+                      {fmt(toDisplayAmount(tx))}
+                    </span>
+                  </div>
+                ))
               )}
             </div>
           </ScrollArea>

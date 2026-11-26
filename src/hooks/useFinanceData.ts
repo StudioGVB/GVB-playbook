@@ -860,19 +860,32 @@ export function useFinanceDataState() {
           const nFe = normText(fe.name || '');
           const nTx = normText(txRaw);
           if (!nFe || !nTx) return false;
+          const absBase = Math.abs(Number(tx.base_amount ?? tx.amount) || 0);
 
           const isRentExp = /\b(rent|flat|housing|accommodation)\b/i.test(feRaw);
           if (isRentExp) {
-            const absBase = Math.abs(Number(tx.base_amount ?? tx.amount) || 0);
             return absBase >= 100 && /\b(rent|landlord|accommodation|tenancy|standing order)\b/i.test(txRaw);
           }
           if (/\b(phone|mobile|sim|data|lyca|lycamobile|vodafone|voxi|o2|ee|three|giffgaff|optus|telstra|lebara|smarty|vox)\b/i.test(feRaw) &&
               /\b(lyca|lycamobile|vodafone|voxi|optus|telstra|ee|o2|giffgaff|three|lebara|smarty|vox|mobile|phone bill|id mobile|tesco mobile)\b/i.test(txRaw)) {
             return true;
           }
-          if (/\b(meds|medication|prescription|pharmacy|chemist|elvanse|amfexa|adhd|titration|clinic)\b/i.test(feRaw) &&
-              /\b(meds|medication|prescription|pharmacy|chemist|boots|superdrug|lloyds|well pharmacy|broadway|signature|elvanse|amfexa|adhd|titration|clinic|psychiatry|mypace|harley)\b/i.test(txRaw)) {
-            return true;
+          if (/\b(meds|medication|prescription|pharmacy|chemist|elvanse|amfexa|adhd|titration|clinic)\b/i.test(feRaw)) {
+            if (/\b(online doctor|prescription|pharmacy|chemist|well pharmacy|broadway|signature|elvanse|amfexa|adhd|titration|clinic|psychiatry|mypace|harley)\b/i.test(txRaw)) {
+              return true;
+            }
+            if (/\bboots\b/i.test(txRaw) && absBase >= 40) return true;
+            return false;
+          }
+          if (/\bbusiness\b/i.test(feRaw)) {
+            return /\b(google\s*\*?\s*cloud|google\s*workspace|openai|chatgpt|anthropic|claude|canva|figma|vercel|supabase)\b/i.test(txRaw);
+          }
+          if (/\b(11labs|elevenlabs)\b/i.test(feRaw)) {
+            return /\b(11labs|elevenlabs)\b/i.test(txRaw);
+          }
+          if (/\bamazon\b/i.test(feRaw)) {
+            const feMonthlyBase = toBase((Number(fe.amount) || 0) * getMonthlyMult(fe.frequency), fe.currency || baseCurrency);
+            return /\bprime\b/i.test(txRaw) || (/\b(amazon|amzn)\b/i.test(txRaw) && Math.abs(absBase - feMonthlyBase) <= 2.5);
           }
           if (nFe.length >= 4 && nTx.includes(nFe)) return true;
           const feTokens = nFe.split(' ').filter(w => w.length >= 3 && !stopWords.has(w));
