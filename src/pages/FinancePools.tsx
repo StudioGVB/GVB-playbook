@@ -35,7 +35,7 @@ import FeasibilityAlert from '@/components/finance/FeasibilityAlert';
 import FeasibilityBreakdownDialog from '@/components/finance/FeasibilityBreakdownDialog';
 import PurchaseTimingEvaluator from '@/components/finance/PurchaseTimingEvaluator';
 import { useWeeklyBoosts } from '@/hooks/useWeeklyBoosts';
-import { usePotPacingMode, computeMonthlyPotSchedule } from '@/lib/potPacingEngine';
+import { computeMonthlyPotSchedule, getGoalPacingMode } from '@/lib/potPacingEngine';
 import { useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 
@@ -389,17 +389,14 @@ export default function FinancePoolsPage() {
     runReconcile();
   }, [allDataReady, finance.loading, finance.hasLoadedOnce, finance.goals, goalDirectSpent, goalTripSpent]);
 
-  const [pacingMode] = usePotPacingMode();
-
   const potSchedule = useMemo(() => {
     return computeMonthlyPotSchedule({
       goals: finance.goals,
       transactions: finance.transactions,
       categories: finance.categories,
       convertToBase: finance.convertToBase,
-      pacingMode,
     });
-  }, [finance.goals, finance.transactions, finance.categories, finance.convertToBase, pacingMode]);
+  }, [finance.goals, finance.transactions, finance.categories, finance.convertToBase]);
 
   // Paycheck Detection (evaluated first so monthly pools anchor accurately to paid cycles)
   const detectedPaycheck = useMemo(
@@ -419,7 +416,7 @@ export default function FinancePoolsPage() {
       finance.goals, finance.convertToBase, fixedMonthlyTotal, undefined, wtMap, trips, fixedMonthlyTotalAll,
       poolRefDate,
     );
-  }, [assumptions, finance.accounts, finance.transactions, finance.categories, finance.goals, finance.convertToBase, fixedMonthlyTotal, fixedMonthlyTotalAll, wtMap, trips, detectedPaycheck, pacingMode]);
+  }, [assumptions, finance.accounts, finance.transactions, finance.categories, finance.goals, finance.convertToBase, fixedMonthlyTotal, fixedMonthlyTotalAll, wtMap, trips, detectedPaycheck]);
 
   const totalCash = snapshot?.totalLiquidCash ?? 0;
   const weeksUntilIncome = snapshot?.weeksUntilIncome ?? 0;
@@ -879,7 +876,7 @@ export default function FinancePoolsPage() {
       finance.convertToBase,
       finance.transactions
     );
-  }, [paycheckTx, emergencyFloor, currentEmergencyFunded, finance.goals, fixedMonthlyTotal, essentialVariable, finance.convertToBase, finance.transactions, pacingMode]);
+  }, [paycheckTx, emergencyFloor, currentEmergencyFunded, finance.goals, fixedMonthlyTotal, essentialVariable, finance.convertToBase, finance.transactions]);
 
   const handleExecutePaycheckAllocation = async () => {
     if (!paycheckTx || !waterfallBreakdown || paycheckAllocated) return;
@@ -2138,8 +2135,8 @@ export default function FinancePoolsPage() {
                           <span className="text-slate-500 font-semibold">Monthly Pace:</span>
                           <span className="font-extrabold text-[#FF2EB8]">
                             {formatCurrency(monthlyRequired, baseCurrency)}/mo
-                            {scheduledPlan && pacingMode === 'dynamic' && scheduledPlan.isLighterThisMonth && (
-                              <span className="text-[10px] font-semibold text-slate-500 ml-1" title="Lighter right now under Dynamic Smart Pace while urgent goals finish first">
+                            {scheduledPlan && scheduledPlan.pacingMode === 'dynamic' && scheduledPlan.isLighterThisMonth && (
+                              <span className="text-[10px] font-semibold text-slate-500 ml-1" title="Lighter right now under Dynamic pacing while urgent goals finish first">
                                 (ramps up later)
                               </span>
                             )}
@@ -2181,32 +2178,65 @@ export default function FinancePoolsPage() {
                       </>
                     );
                   })()}
-                  {!isProtectedSystemGoal(goal) && (
-                    <div className="flex items-center justify-between pt-1">
-                      <span className="text-slate-500 font-semibold">When Spent From:</span>
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          const nextVal = !refillWhenSpent;
-                          await finance.updateGoal(goal.id, { refill_when_spent: nextVal } as any);
-                          toast.success(
-                            nextVal
-                              ? `${goal.name}: set to auto-refill back to target on payday`
-                              : `${goal.name}: once hit, won't refill spent funds on payday`
-                          );
-                        }}
-                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border transition-colors cursor-pointer ${
-                          refillWhenSpent
-                            ? 'bg-sky-50 text-sky-800 border-sky-200 hover:bg-sky-100'
-                            : 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
-                        }`}
-                        title="Click to toggle whether spending from this pot triggers a payday refill"
-                      >
-                        <RotateCcw className="w-2.5 h-2.5" />
-                        {refillWhenSpent ? 'Refill on payday' : 'Once hit, ignore'}
-                      </button>
-                    </div>
-                  )}
+                  {!isProtectedSystemGoal(goal) && (() => {
+                    const tilePacingMode = getGoalPacingMode(goal);
+                    const isFixedPace = tilePacingMode === 'fixed';
+                    return (
+                      <>
+                        <div className="flex items-center justify-between pt-1">
+                          <span className="text-slate-500 font-semibold">Saving Pace:</span>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const nextMode = isFixedPace ? 'dynamic' : 'fixed';
+                              await finance.updateGoal(goal.id, { safety_mode: nextMode } as any);
+                              toast.success(
+                                nextMode === 'fixed'
+                                  ? `📏 ${goal.name}: locked to Fixed monthly (same steady amount every month)`
+                                  : `✨ ${goal.name}: set to Dynamic (calculated over the top of fixed pots)`
+                              );
+                            }}
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border transition-colors cursor-pointer ${
+                              isFixedPace
+                                ? 'bg-slate-100 text-slate-800 border-slate-300 hover:bg-slate-200'
+                                : 'bg-pink-50 text-[#FF2EB8] border-pink-200 hover:bg-pink-100'
+                            }`}
+                            title={
+                              isFixedPace
+                                ? 'Fixed monthly: puts down the exact same rate every month. Click to switch to Dynamic.'
+                                : 'Dynamic: flexes around fixed pots and ramps up as earlier goals finish. Click to lock to Fixed monthly.'
+                            }
+                          >
+                            {isFixedPace ? '📏 Fixed monthly' : '✨ Dynamic'}
+                          </button>
+                        </div>
+                        <div className="flex items-center justify-between pt-0.5">
+                          <span className="text-slate-500 font-semibold">When Spent From:</span>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const nextVal = !refillWhenSpent;
+                              await finance.updateGoal(goal.id, { refill_when_spent: nextVal } as any);
+                              toast.success(
+                                nextVal
+                                  ? `${goal.name}: set to auto-refill back to target on payday`
+                                  : `${goal.name}: once hit, won't refill spent funds on payday`
+                              );
+                            }}
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border transition-colors cursor-pointer ${
+                              refillWhenSpent
+                                ? 'bg-sky-50 text-sky-800 border-sky-200 hover:bg-sky-100'
+                                : 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
+                            }`}
+                            title="Click to toggle whether spending from this pot triggers a payday refill"
+                          >
+                            <RotateCcw className="w-2.5 h-2.5" />
+                            {refillWhenSpent ? 'Refill on payday' : 'Once hit, ignore'}
+                          </button>
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
 
                 {/* Unfeasible Shortfall Callout Banner with Click Handler */}

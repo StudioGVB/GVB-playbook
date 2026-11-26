@@ -15,14 +15,11 @@ import {
 import {
   BarChart3,
   Sparkles,
-  Scale,
-  CheckCircle2,
+  Lock,
 } from 'lucide-react';
 import { format } from 'date-fns';
-import { toast } from 'sonner';
 import { formatCurrency } from '@/lib/financeUtils';
 import {
-  usePotPacingMode,
   computeMonthlyPotSchedule,
   type MonthSeriesPoint,
 } from '@/lib/potPacingEngine';
@@ -48,7 +45,6 @@ export default function MonthlyPotBreakdownCard({
   baseCurrency,
   monthlyPotCapacity = 0,
 }: Props) {
-  const [pacingMode, setPacingMode] = usePotPacingMode();
   const [focusedGoalId, setFocusedGoalId] = useState<string | null>(null);
   const [selectedMonthKey, setSelectedMonthKey] = useState<string | null>(null);
 
@@ -58,23 +54,12 @@ export default function MonthlyPotBreakdownCard({
     return formatCurrency(Math.round(n), baseCurrency).replace(/\.00$/, '');
   };
 
-  const handleSwitchPacingMode = (mode: 'dynamic' | 'even') => {
-    if (mode === pacingMode) return;
-    setPacingMode(mode);
-    toast.success(
-      mode === 'dynamic'
-        ? '✨ Switched to Dynamic Smart Pace — pool cards, paycheck allocator & weekly targets now prioritize urgent pots first and ramp up later goals as early ones finish!'
-        : '📏 Switched to Even Linear Pace — all pool cards, paycheck allocator & weekly targets now use a flat daily rate.'
-    );
-  };
-
-  const { activeGoalMetas, chartData } = useMemo(() => {
+  const { activeGoalMetas, chartData, fixedCount, dynamicCount } = useMemo(() => {
     const schedule = computeMonthlyPotSchedule({
       goals,
       transactions,
       categories,
       convertToBase,
-      pacingMode,
     });
 
     const withLabels = schedule.months.map(m => ({
@@ -85,8 +70,10 @@ export default function MonthlyPotBreakdownCard({
     return {
       activeGoalMetas: schedule.activeGoalMetas,
       chartData: withLabels,
+      fixedCount: schedule.fixedCount,
+      dynamicCount: schedule.dynamicCount,
     };
-  }, [goals, transactions, categories, convertToBase, pacingMode, baseCurrency]);
+  }, [goals, transactions, categories, convertToBase, baseCurrency]);
 
   // Default selected month to Next Month (e.g. Dec) if available, otherwise Current Month
   const activeSelectedMonth = useMemo(() => {
@@ -114,7 +101,7 @@ export default function MonthlyPotBreakdownCard({
     const monthTotal = items.reduce((s, c) => s + c.amount, 0);
 
     return (
-      <div className="bg-white/95 backdrop-blur-md border-2 border-slate-200 rounded-2xl p-3.5 shadow-xl min-w-[260px] max-w-[340px] font-body">
+      <div className="bg-white/95 backdrop-blur-md border-2 border-slate-200 rounded-2xl p-3.5 shadow-xl min-w-[270px] max-w-[350px] font-body">
         <div className="flex items-center justify-between gap-3 pb-2 mb-2 border-b border-slate-100">
           <div>
             <p className="text-xs font-display font-black text-slate-900">
@@ -148,12 +135,26 @@ export default function MonthlyPotBreakdownCard({
                   <span className="font-semibold text-slate-800 truncate">
                     {item.goal.name}
                   </span>
-                  {item.isBoosted && (
+                  {item.pacingMode === 'fixed' ? (
+                    <span
+                      className="text-[9px] font-bold px-1.5 py-0 rounded bg-slate-100 text-slate-700 border border-slate-200 shrink-0"
+                      title="Fixed monthly rate set on this pot tile"
+                    >
+                      📏 Fixed
+                    </span>
+                  ) : item.isBoosted ? (
                     <span
                       className="text-[9px] font-bold px-1.5 py-0 rounded bg-amber-50 text-amber-800 border border-amber-200 shrink-0"
-                      title="Ramped up this month because earlier pots finished"
+                      title="Dynamic pot ramped up this month because earlier pots finished"
                     >
                       ⚡ Ramped up
+                    </span>
+                  ) : (
+                    <span
+                      className="text-[9px] font-bold px-1.5 py-0 rounded bg-pink-50 text-[#FF2EB8] border border-pink-200 shrink-0"
+                      title="Dynamic pot calculated over the top of fixed pots"
+                    >
+                      ✨ Dynamic
                     </span>
                   )}
                   {item.startsThisMonth && (
@@ -183,7 +184,7 @@ export default function MonthlyPotBreakdownCard({
       <CardHeader className="bg-gradient-to-r from-[#FFF5FA] via-white to-[#F0F9FF] border-b border-[#FF7AD1]/20 p-6 pb-5">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2 mb-1">
+            <div className="flex items-center gap-2 mb-1 flex-wrap">
               <span className="bg-[#FF2EB8] text-white p-1.5 rounded-xl">
                 <BarChart3 className="w-4 h-4" />
               </span>
@@ -192,61 +193,28 @@ export default function MonthlyPotBreakdownCard({
               </span>
               <Badge
                 variant="outline"
-                className="text-[10px] px-2 py-0 border-emerald-300 bg-emerald-50 text-emerald-800 font-bold flex items-center gap-1"
+                className="text-[10px] px-2 py-0.5 border-slate-200 bg-white text-slate-700 font-bold"
               >
-                <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600" />
-                Active Across All Allocations
+                📏 {fixedCount} Fixed • ✨ {dynamicCount} Dynamic (Controlled on each tile)
               </Badge>
             </div>
             <CardTitle className="text-2xl font-display font-black text-slate-900">
               Monthly Pot Contributions Breakdown
             </CardTitle>
             <p className="text-xs text-slate-500 mt-1">
-              {pacingMode === 'dynamic'
-                ? 'Dynamic Smart Pace (Active): prioritizes soonest due dates first, then automatically puts more towards later goals (like Italy or Ski trip) once earlier pots finish.'
-                : 'Even Linear Pace (Active): spreads each pot evenly by day count between its start date and due date across all pool cards & allocations.'}
+              Fixed monthly pots lock in their steady base rate first, and Dynamic pots automatically calculate over the top—putting more towards later goals as earlier pots finish. Toggle <strong>Saving Pace</strong> on any pot tile above to customize.
             </p>
           </div>
 
-          <div className="flex items-center gap-2 flex-wrap self-start lg:self-center">
-            {focusedGoalId && (
-              <button
-                type="button"
-                onClick={() => setFocusedGoalId(null)}
-                className="text-xs font-display font-bold px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer"
-              >
-                Show All Pots ✕
-              </button>
-            )}
-
-            {/* Pacing Mode Switcher (Drives Live Saving & Allocation Engine) */}
-            <div className="flex items-center bg-slate-100/90 p-1 rounded-xl border border-slate-200/80">
-              <button
-                type="button"
-                onClick={() => handleSwitchPacingMode('dynamic')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-display font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                  pacingMode === 'dynamic'
-                    ? 'bg-[#FF2EB8] text-white shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-                title="Automatically shifts more contribution into months where fewer competing pots are active"
-              >
-                <Sparkles className="w-3.5 h-3.5" /> Dynamic Smart Pace
-              </button>
-              <button
-                type="button"
-                onClick={() => handleSwitchPacingMode('even')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-display font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                  pacingMode === 'even'
-                    ? 'bg-white text-slate-900 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-                title="Flat daily rate per pot from start date to due date"
-              >
-                <Scale className="w-3.5 h-3.5" /> Even Linear Pace
-              </button>
-            </div>
-          </div>
+          {focusedGoalId && (
+            <button
+              type="button"
+              onClick={() => setFocusedGoalId(null)}
+              className="self-start lg:self-center text-xs font-display font-bold px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer"
+            >
+              Show All Pots ✕
+            </button>
+          )}
         </div>
       </CardHeader>
 
@@ -380,6 +348,17 @@ export default function MonthlyPotBreakdownCard({
                     />
                     <span className="font-bold">{meta.goal.name}</span>
                     <span
+                      className={`text-[9px] font-bold px-1.5 py-0.2 rounded ${
+                        isFocused
+                          ? 'bg-white/15 text-white'
+                          : meta.pacingMode === 'fixed'
+                          ? 'bg-slate-100 text-slate-700'
+                          : 'bg-pink-50 text-[#FF2EB8]'
+                      }`}
+                    >
+                      {meta.pacingMode === 'fixed' ? '📏 Fixed' : '✨ Dynamic'}
+                    </span>
+                    <span
                       className={`text-[10px] font-medium ${
                         isFocused ? 'text-slate-300' : 'text-slate-500'
                       }`}
@@ -410,9 +389,10 @@ export default function MonthlyPotBreakdownCard({
                 </span>
               </div>
               <span className="text-[11px] font-semibold text-slate-500">
-                {activeSelectedMonth.contributions.length} active{' '}
-                {activeSelectedMonth.contributions.length === 1 ? 'pot' : 'pots'} in{' '}
-                {format(activeSelectedMonth.monthDate, 'MMMM')}
+                {activeSelectedMonth.fixedTotal > 0 && (
+                  <>📏 {fmt(activeSelectedMonth.fixedTotal)} fixed • </>
+                )}
+                ✨ {fmt(activeSelectedMonth.dynamicTotal)} dynamic
               </span>
             </div>
 
@@ -448,13 +428,27 @@ export default function MonthlyPotBreakdownCard({
                               <span className="text-xs font-bold text-slate-900 truncate">
                                 {c.goal.name}
                               </span>
-                              {c.isBoosted && (
+                              {c.pacingMode === 'fixed' ? (
+                                <Badge
+                                  variant="outline"
+                                  className="text-[9px] px-1.5 py-0 border-slate-200 text-slate-700 bg-slate-50 font-bold"
+                                >
+                                  📏 Fixed
+                                </Badge>
+                              ) : c.isBoosted ? (
                                 <Badge
                                   variant="outline"
                                   className="text-[9px] px-1.5 py-0 border-amber-200 text-amber-800 bg-amber-50 font-bold"
                                   title="Ramped up this month because earlier pots finished"
                                 >
                                   ⚡ Ramped up
+                                </Badge>
+                              ) : (
+                                <Badge
+                                  variant="outline"
+                                  className="text-[9px] px-1.5 py-0 border-pink-200 text-[#FF2EB8] bg-pink-50 font-bold"
+                                >
+                                  ✨ Dynamic
                                 </Badge>
                               )}
                               {c.startsThisMonth && (

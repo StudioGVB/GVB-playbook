@@ -5,7 +5,7 @@ import { Sparkles, CheckCircle2, Layers } from 'lucide-react';
 import { formatCurrency } from '@/lib/financeUtils';
 import type { useFinanceData } from '@/hooks/useFinanceData';
 import { format, differenceInCalendarDays } from 'date-fns';
-import { usePotPacingMode, computeMonthlyPotSchedule } from '@/lib/potPacingEngine';
+import { computeMonthlyPotSchedule } from '@/lib/potPacingEngine';
 
 import type { PolicySnapshot } from '@/lib/policyEngine';
 
@@ -17,7 +17,6 @@ interface Props {
 }
 
 export default function WeeklyPoolSavingsCard({ finance, spendablePool = 0, funMoney = 0, snapshot }: Props) {
-  const [pacingMode] = usePotPacingMode();
   const baseCurrency = finance.settings?.base_currency || 'AUD';
   const fmt = (n: number) => formatCurrency(n, baseCurrency);
 
@@ -28,7 +27,6 @@ export default function WeeklyPoolSavingsCard({ finance, spendablePool = 0, funM
       transactions: finance.transactions,
       categories: finance.categories,
       convertToBase: finance.convertToBase,
-      pacingMode,
     });
 
     return finance.goals.map((goal) => {
@@ -105,7 +103,7 @@ export default function WeeklyPoolSavingsCard({ finance, spendablePool = 0, funM
         isStash,
       };
     });
-  }, [finance.goals, finance.transactions, finance.categories, finance.convertToBase, pacingMode, snapshot]);
+  }, [finance.goals, finance.transactions, finance.categories, finance.convertToBase, snapshot]);
 
   const sortedPoolBreakdown = useMemo(() => {
     return [...poolBreakdown].sort((a, b) => {

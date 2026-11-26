@@ -1,4 +1,3 @@
-import { useEffect, useState, useCallback } from 'react';
 import {
   addMonths,
   differenceInCalendarDays,
@@ -11,45 +10,7 @@ import {
 import { baseAmt } from '@/lib/financeUtils';
 import type { FinanceGoal, FinanceTransaction, FinanceCategory } from '@/hooks/useFinanceData';
 
-export type PotPacingMode = 'dynamic' | 'even';
-
-const STORAGE_KEY = 'gvb_pot_pacing_mode';
-const EVENT_NAME = 'gvb-pot-pacing-mode-change';
-
-export function getPotPacingMode(): PotPacingMode {
-  if (typeof window === 'undefined') return 'dynamic';
-  const stored = window.localStorage.getItem(STORAGE_KEY);
-  return stored === 'even' ? 'even' : 'dynamic';
-}
-
-export function setPotPacingMode(mode: PotPacingMode): void {
-  if (typeof window === 'undefined') return;
-  window.localStorage.setItem(STORAGE_KEY, mode);
-  window.dispatchEvent(new CustomEvent(EVENT_NAME, { detail: mode }));
-}
-
-export function usePotPacingMode(): [PotPacingMode, (mode: PotPacingMode) => void] {
-  const [mode, setModeState] = useState<PotPacingMode>(() => getPotPacingMode());
-
-  useEffect(() => {
-    const handler = (e: Event) => {
-      const custom = e as CustomEvent<PotPacingMode>;
-      setModeState(custom.detail || getPotPacingMode());
-    };
-    window.addEventListener(EVENT_NAME, handler);
-    window.addEventListener('storage', () => setModeState(getPotPacingMode()));
-    return () => {
-      window.removeEventListener(EVENT_NAME, handler);
-    };
-  }, []);
-
-  const updateMode = useCallback((next: PotPacingMode) => {
-    setModeState(next);
-    setPotPacingMode(next);
-  }, []);
-
-  return [mode, updateMode];
-}
+export type GoalPacingMode = 'fixed' | 'dynamic';
 
 export const FALLBACK_POT_COLORS = [
   '#4558ff',
@@ -76,8 +37,35 @@ export const isProtectedSystemPot = (g?: Partial<FinanceGoal> | null) => {
   );
 };
 
+/**
+ * Resolves a goal's per-tile pacing mode ('fixed' vs 'dynamic').
+ * Stored in goal.safety_mode ('fixed' | 'dynamic').
+ * If a goal still has legacy 'balanced', Visa defaults to 'fixed' and other pots default to 'dynamic'.
+ */
+export function getGoalPacingMode(goal?: Partial<FinanceGoal> | null): GoalPacingMode {
+  if (!goal) return 'dynamic';
+  const mode = String(goal.safety_mode || '').toLowerCase().trim();
+  if (mode === 'fixed' || mode === 'even' || mode === 'linear' || mode === 'strict') {
+    return 'fixed';
+  }
+  if (mode === 'dynamic') {
+    return 'dynamic';
+  }
+  // Legacy 'balanced' fallback: default Visa to fixed monthly, others to dynamic
+  const nameLower = String(goal.name || '').toLowerCase().trim();
+  if (nameLower.includes('visa')) {
+    return 'fixed';
+  }
+  return 'dynamic';
+}
+
+export function isGoalFixedPace(goal?: Partial<FinanceGoal> | null): boolean {
+  return getGoalPacingMode(goal) === 'fixed';
+}
+
 export interface ActiveGoalMeta {
   goal: FinanceGoal;
+  pacingMode: GoalPacingMode;
   color: string;
   targetBase: number;
   assignedBase: number;
@@ -93,6 +81,7 @@ export interface ActiveGoalMeta {
 
 export interface MonthPotContribution {
   goal: FinanceGoal;
+  pacingMode: GoalPacingMode;
   color: string;
   amount: number;
   evenAmount: number;
@@ -114,20 +103,24 @@ export interface MonthSeriesPoint {
   isCurrentMonth: boolean;
   isNextMonth: boolean;
   total: number;
+  fixedTotal: number;
+  dynamicTotal: number;
   contributions: MonthPotContribution[];
   [goalId: string]: any;
 }
 
 export interface PotScheduleResult {
-  pacingMode: PotPacingMode;
   activeGoalMetas: ActiveGoalMeta[];
   months: MonthSeriesPoint[];
   spentByGoalTotal: Map<string, number>;
+  fixedCount: number;
+  dynamicCount: number;
   /** Returns a goal's planned contribution & weekly pace for the requested month (or first active month if future-start) */
   getGoalPlanForMonth: (
     goalId: string,
     targetMonth?: Date
   ) => {
+    pacingMode: GoalPacingMode;
     monthlyAmount: number;
     weeklyPace: number;
     evenMonthlyAmount: number;
@@ -176,12 +169,17 @@ export function computeSpentByGoalBase(
   return totalMap;
 }
 
+/**
+ * Computes the monthly pot contribution schedule where:
+ * 1. Every 'fixed' pot (e.g. Visa) locks in a constant daily/monthly rate across its active window first.
+ * 2. Every 'dynamic' pot (e.g. Ski trip, Italy) is calculated OVER THE TOP of the fixed pots
+ *    (and earlier-due dynamic pots), automatically putting less in busy months and ramping up as earlier pots finish.
+ */
 export function computeMonthlyPotSchedule(params: {
   goals: FinanceGoal[];
   transactions?: FinanceTransaction[];
   categories?: FinanceCategory[];
   convertToBase: (amount: number, currency: string) => number;
-  pacingMode?: PotPacingMode;
   referenceDate?: Date;
 }): PotScheduleResult {
   const {
@@ -189,7 +187,6 @@ export function computeMonthlyPotSchedule(params: {
     transactions = [],
     categories = [],
     convertToBase,
-    pacingMode = getPotPacingMode(),
     referenceDate = new Date(),
   } = params;
 
@@ -238,6 +235,7 @@ export function computeMonthlyPotSchedule(params: {
 
     metas.push({
       goal: g,
+      pacingMode: getGoalPacingMode(g),
       color: g.color || FALLBACK_POT_COLORS[idx % FALLBACK_POT_COLORS.length],
       targetBase,
       assignedBase,
@@ -252,7 +250,7 @@ export function computeMonthlyPotSchedule(params: {
     });
   });
 
-  // Sort active goals by deadline (soonest first) so urgent short-term goals claim capacity first
+  // Sort active goals by deadline (soonest first)
   metas.sort((a, b) => a.effectiveDeadline.getTime() - b.effectiveDeadline.getTime());
 
   // Cap horizon at 12 months forward
@@ -275,7 +273,7 @@ export function computeMonthlyPotSchedule(params: {
 
   const activeDaysMatrix = new Map<string, number[]>();
   const evenAllocMatrix = new Map<string, number[]>();
-  const dynamicAllocMatrix = new Map<string, number[]>();
+  const finalAllocMatrix = new Map<string, number[]>();
 
   for (const meta of metas) {
     const daysPerMonth: number[] = [];
@@ -301,10 +299,22 @@ export function computeMonthlyPotSchedule(params: {
     evenAllocMatrix.set(meta.goal.id, evenPerMonth);
   }
 
-  // Urgency-ordered water-filling for Dynamic Smart Pace
+  // PASS 1: Lock in all 'fixed' pots first as the foundation layer
   const monthCommittedLoad = new Array(monthDates.length).fill(0);
 
   for (const meta of metas) {
+    if (meta.pacingMode !== 'fixed') continue;
+    const evenPerMonth = evenAllocMatrix.get(meta.goal.id)!;
+    finalAllocMatrix.set(meta.goal.id, [...evenPerMonth]);
+    evenPerMonth.forEach((amt, mIdx) => {
+      monthCommittedLoad[mIdx] += amt;
+    });
+  }
+
+  // PASS 2: Calculate all 'dynamic' pots OVER THE TOP of the fixed pots (in deadline order)
+  for (const meta of metas) {
+    if (meta.pacingMode !== 'dynamic') continue;
+
     const daysPerMonth = activeDaysMatrix.get(meta.goal.id)!;
     const evenPerMonth = evenAllocMatrix.get(meta.goal.id)!;
     const activeMonthIndices = daysPerMonth
@@ -312,7 +322,7 @@ export function computeMonthlyPotSchedule(params: {
       .filter(idx => idx !== -1);
 
     if (activeMonthIndices.length <= 1) {
-      dynamicAllocMatrix.set(meta.goal.id, [...evenPerMonth]);
+      finalAllocMatrix.set(meta.goal.id, [...evenPerMonth]);
       activeMonthIndices.forEach(idx => {
         monthCommittedLoad[idx] += evenPerMonth[idx];
       });
@@ -323,6 +333,7 @@ export function computeMonthlyPotSchedule(params: {
     const baselinePerMonth = evenPerMonth.map(amt => amt * BASELINE_RATIO);
     const flexRemaining = meta.remainingToSaveBase * (1 - BASELINE_RATIO);
 
+    // Existing daily load u_m includes all FIXED pots + more-urgent DYNAMIC pots
     const dailyLoad = monthDates.map((_, mIdx) => {
       return (monthCommittedLoad[mIdx] + baselinePerMonth[mIdx]) / monthAvailableDays[mIdx];
     });
@@ -354,7 +365,7 @@ export function computeMonthlyPotSchedule(params: {
       return baselinePerMonth[mIdx] + flexAdd;
     });
 
-    dynamicAllocMatrix.set(meta.goal.id, dynPerMonth);
+    finalAllocMatrix.set(meta.goal.id, dynPerMonth);
     activeMonthIndices.forEach(mIdx => {
       monthCommittedLoad[mIdx] += dynPerMonth[mIdx];
     });
@@ -374,35 +385,42 @@ export function computeMonthlyPotSchedule(params: {
       isCurrentMonth: mIdx === 0,
       isNextMonth: mIdx === 1,
       total: 0,
+      fixedTotal: 0,
+      dynamicTotal: 0,
       contributions: [],
     };
 
     for (const meta of metas) {
       const activeDays = activeDaysMatrix.get(meta.goal.id)![mIdx];
       const evenAmt = evenAllocMatrix.get(meta.goal.id)![mIdx];
-      const dynAmt = dynamicAllocMatrix.get(meta.goal.id)![mIdx];
-      const chosenAmt = pacingMode === 'dynamic' ? dynAmt : evenAmt;
+      const chosenAmt = finalAllocMatrix.get(meta.goal.id)![mIdx];
 
       if (activeDays > 0 && chosenAmt > 0.01) {
         const roundedAmt = Math.round(chosenAmt * 100) / 100;
         const roundedEven = Math.round(evenAmt * 100) / 100;
-        const roundedDyn = Math.round(dynAmt * 100) / 100;
         const prevFunded = cumulativeByGoal.get(meta.goal.id) || 0;
         const projectedAfter = Math.min(meta.targetBase, prevFunded + roundedAmt);
         cumulativeByGoal.set(meta.goal.id, projectedAfter);
 
         const startsThisMonth = Boolean(meta.rawStart && isSameMonth(meta.rawStart, mDate));
         const endsThisMonth = Boolean(meta.rawDeadline && isSameMonth(meta.rawDeadline, mDate));
-        const isBoosted = pacingMode === 'dynamic' && roundedAmt > roundedEven * 1.12;
+        const isBoosted = meta.pacingMode === 'dynamic' && roundedAmt > roundedEven * 1.12;
 
         point[meta.goal.id] = roundedAmt;
         point.total += roundedAmt;
+        if (meta.pacingMode === 'fixed') {
+          point.fixedTotal += roundedAmt;
+        } else {
+          point.dynamicTotal += roundedAmt;
+        }
+
         point.contributions.push({
           goal: meta.goal,
+          pacingMode: meta.pacingMode,
           color: meta.color,
           amount: roundedAmt,
           evenAmount: roundedEven,
-          dynamicAmount: roundedDyn,
+          dynamicAmount: roundedAmt,
           isBoosted,
           activeDays,
           weeklyPaceInMonth: roundedAmt / Math.max(1, activeDays / 7),
@@ -417,6 +435,8 @@ export function computeMonthlyPotSchedule(params: {
     }
 
     point.total = Math.round(point.total * 100) / 100;
+    point.fixedTotal = Math.round(point.fixedTotal * 100) / 100;
+    point.dynamicTotal = Math.round(point.dynamicTotal * 100) / 100;
     return point;
   });
 
@@ -430,15 +450,13 @@ export function computeMonthlyPotSchedule(params: {
 
     const daysArr = activeDaysMatrix.get(goalId);
     const evenArr = evenAllocMatrix.get(goalId);
-    const dynArr = dynamicAllocMatrix.get(goalId);
-    if (!daysArr || !evenArr || !dynArr) return null;
+    const finalArr = finalAllocMatrix.get(goalId);
+    if (!daysArr || !evenArr || !finalArr) return null;
 
     const targetKey = format(targetMonth, 'yyyy-MM');
     let mIdx = monthDates.findIndex(d => format(d, 'yyyy-MM') === targetKey);
     if (mIdx === -1) mIdx = 0;
 
-    // If only a few days are left in the current month (e.g. Nov 26–30) and the goal spans into next month,
-    // or if the goal starts in a future month, use the first full/active month for its ongoing monthly/weekly rate display
     const isFutureStart = Boolean(meta.rawStart && meta.rawStart > today);
     let displayIdx = mIdx;
     if (daysArr[displayIdx] <= 0) {
@@ -450,39 +468,42 @@ export function computeMonthlyPotSchedule(params: {
       monthDates.length > 1 &&
       daysArr[1] >= 14
     ) {
-      // Use the first full month (e.g. December) when current month only has a few days remaining
       displayIdx = 1;
     }
 
     const activeDays = Math.max(1, daysArr[displayIdx] || 30.44);
     const weeksInWindow = Math.max(1, activeDays / 7);
     const evenMonthlyAmount = evenArr[displayIdx] || 0;
-    const dynamicMonthlyAmount = dynArr[displayIdx] || 0;
+    const chosenMonthlyAmount = finalArr[displayIdx] || 0;
     const evenWeeklyPace = evenMonthlyAmount / weeksInWindow;
-    const dynamicWeeklyPace = dynamicMonthlyAmount / weeksInWindow;
-
-    const monthlyAmount = pacingMode === 'dynamic' ? dynamicMonthlyAmount : evenMonthlyAmount;
-    const weeklyPace = pacingMode === 'dynamic' ? dynamicWeeklyPace : evenWeeklyPace;
+    const chosenWeeklyPace = chosenMonthlyAmount / weeksInWindow;
 
     return {
-      monthlyAmount,
-      weeklyPace,
+      pacingMode: meta.pacingMode,
+      monthlyAmount: chosenMonthlyAmount,
+      weeklyPace: chosenWeeklyPace,
       evenMonthlyAmount,
       evenWeeklyPace,
-      dynamicMonthlyAmount,
-      dynamicWeeklyPace,
+      dynamicMonthlyAmount: chosenMonthlyAmount,
+      dynamicWeeklyPace: chosenWeeklyPace,
       activeMonthLabel: format(monthDates[displayIdx], 'MMM'),
       isFutureStart,
-      isLighterThisMonth: pacingMode === 'dynamic' && dynamicMonthlyAmount < evenMonthlyAmount * 0.88,
-      isBoostedThisMonth: pacingMode === 'dynamic' && dynamicMonthlyAmount > evenMonthlyAmount * 1.12,
+      isLighterThisMonth:
+        meta.pacingMode === 'dynamic' && chosenMonthlyAmount < evenMonthlyAmount * 0.88,
+      isBoostedThisMonth:
+        meta.pacingMode === 'dynamic' && chosenMonthlyAmount > evenMonthlyAmount * 1.12,
     };
   };
 
+  const fixedCount = metas.filter(m => m.pacingMode === 'fixed').length;
+  const dynamicCount = metas.filter(m => m.pacingMode === 'dynamic').length;
+
   return {
-    pacingMode,
     activeGoalMetas: metas,
     months: series,
     spentByGoalTotal,
+    fixedCount,
+    dynamicCount,
     getGoalPlanForMonth,
   };
 }

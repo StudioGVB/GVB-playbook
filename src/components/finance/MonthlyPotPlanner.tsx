@@ -11,7 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { Slider } from '@/components/ui/slider';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { formatCurrency, baseAmt } from '@/lib/financeUtils';
-import { usePotPacingMode, computeMonthlyPotSchedule } from '@/lib/potPacingEngine';
+import { computeMonthlyPotSchedule } from '@/lib/potPacingEngine';
 import type { FinanceGoal, FinanceCategory, FinanceTransaction } from '@/hooks/useFinanceData';
 import type { FinanceAssumptions } from '@/hooks/useFinanceAssumptions';
 
@@ -117,8 +117,6 @@ export default function MonthlyPotPlanner({
     return map;
   }, [transactions, convertToBase]);
 
-  const [pacingMode] = usePotPacingMode();
-
   // Goal-driven recommendations
   const recommendations = useMemo(() => {
     const potSchedule = computeMonthlyPotSchedule({
@@ -126,7 +124,6 @@ export default function MonthlyPotPlanner({
       transactions,
       categories,
       convertToBase,
-      pacingMode,
       referenceDate: targetDate,
     });
     const list: { goal: FinanceGoal; remaining: number; isFull: boolean; monthlyTarget: number; recommendedPct: number }[] = [];
@@ -166,7 +163,7 @@ export default function MonthlyPotPlanner({
       const pct = sumTargets > 0 ? (item.monthlyTarget / sumTargets) * 100 : (100 / Math.max(1, allocatablePots.length));
       return { ...item, recommendedPct: pct };
     });
-  }, [allocatablePots, goals, transactions, categories, convertToBase, targetDate, potPoolTotal, spentByGoalBase, pacingMode]);
+  }, [allocatablePots, goals, transactions, categories, convertToBase, targetDate, potPoolTotal, spentByGoalBase]);
 
   // Pct state for the interactive sliders
   const [pcts, setPcts] = useState<Record<string, number>>({});

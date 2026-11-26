@@ -1,6 +1,6 @@
 import { baseAmt, parseUkDate } from './financeUtils';
 import type { FinanceGoal } from '@/hooks/useFinanceData';
-import { computeMonthlyPotSchedule, getPotPacingMode } from './potPacingEngine';
+import { computeMonthlyPotSchedule } from './potPacingEngine';
 
 export interface PaycheckWaterfallBreakdown {
   paycheckAmount: number;
@@ -207,12 +207,10 @@ export function calculatePaycheckWaterfall(
 
   // Step 3: Goal Pool Monthly Contributions
   const now = new Date();
-  const pacingMode = getPotPacingMode();
   const potSchedule = computeMonthlyPotSchedule({
     goals,
     transactions: transactions || [],
     convertToBase,
-    pacingMode,
     referenceDate: now,
   });
   const goalAllocations: { goalId: string; goalName: string; monthlyTarget: number; allocatedAmount: number }[] = [];
