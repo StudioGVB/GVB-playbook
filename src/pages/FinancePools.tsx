@@ -482,29 +482,16 @@ export default function FinancePoolsPage() {
 
   // Living & Monthly Budget Pool target (Priority #1: must be ring-fenced before Emergency Fund ladder upgrades)
   const effectiveFixedMonthly = fixedMonthlyTotalAll || fixedMonthlyTotal;
-  const monthlyGoalSavingsTarget = useMemo(() => {
+  const rawMonthlyGoalSavingsTarget = useMemo(() => {
+    const currentScheduleMonth = potSchedule?.months?.[0];
+    if (currentScheduleMonth && currentScheduleMonth.total >= 0) {
+      return currentScheduleMonth.total;
+    }
     if (snapshot?.split?.goalSavingsAmount && snapshot.split.goalSavingsAmount > 0) {
       return snapshot.split.goalSavingsAmount;
     }
-    const anchorNow = startOfWeek(new Date(), { weekStartsOn: 1 });
-    let totalPaceMonthly = 0;
-    for (const g of finance.goals) {
-      if ((g as any)?.is_stash || g.name.toLowerCase().includes('stash')) continue;
-      if ((g as any)?.is_emergency || g.name.toLowerCase().includes('emergency')) continue;
-      if (g.start_date && new Date(g.start_date) > anchorNow) continue;
-      const targetBase = finance.convertToBase(g.target_amount || 0, g.currency);
-      const assignedBase = finance.convertToBase(g.assigned_amount || 0, g.currency);
-      const remainingBase = Math.max(0, targetBase - assignedBase);
-      if (remainingBase <= 0.01) continue;
-      if (g.deadline) {
-        const dl = new Date(g.deadline);
-        const daysLeft = Math.max(1, Math.ceil((dl.getTime() - anchorNow.getTime()) / (1000 * 60 * 60 * 24)));
-        const weeksLeft = Math.max(1, daysLeft / 7);
-        totalPaceMonthly += Math.min(remainingBase, (remainingBase / weeksLeft) * 4.33);
-      }
-    }
-    return totalPaceMonthly;
-  }, [snapshot, finance.goals, finance.convertToBase]);
+    return 0;
+  }, [potSchedule, snapshot]);
 
   const weeksInMonth = useMemo(() => computeWeeksInMonth(targetMonthDate), [targetMonthDate]);
 
@@ -515,11 +502,7 @@ export default function FinancePoolsPage() {
   const effectiveWeeklyFun = snapshot?.weeklyFunBudget ?? snapshot?.baseWeeklyFun ?? 0;
   const monthlyTotalIncome = (snapshot?.split?.monthlyIncome && snapshot.split.monthlyIncome > 0)
     ? snapshot.split.monthlyIncome
-    : (effectiveFixedMonthly + essentialVariable + monthlyGoalSavingsTarget + (snapshot?.split?.funAmount || (effectiveWeeklyFun * weeksInMonth)));
-
-  // Fun money for the whole month = whatever is left over after Fixed, Essentials, and Pot commitments
-  const monthlyFunBudget = Math.max(0, monthlyTotalIncome - effectiveFixedMonthly - essentialVariable - monthlyGoalSavingsTarget);
-  const monthlyLivingTarget = effectiveFixedMonthly + essentialVariable + monthlyFunBudget;
+    : (effectiveFixedMonthly + essentialVariable + rawMonthlyGoalSavingsTarget + (snapshot?.split?.funAmount || (effectiveWeeklyFun * weeksInMonth)));
 
   // Track living expenses already paid so far this month (Fixed Bills / Rent, Essentials, Discretionary/Fun)
   // When bills like rent are paid on the 1st, they are paid OUT OF this month's living reserve.
@@ -571,6 +554,24 @@ export default function FinancePoolsPage() {
 
     return { fixedPaidSoFar: fixedPaid, essentialSpentSoFar: essentialSpent, funSpentSoFar: funSpent };
   }, [finance.transactions, finance.categories, fixedExpenses, finance.convertToBase, essentialCatIds]);
+
+  // In the current month, removing a future start_date mid-month must NEVER backtrack and
+  // claw back money that has already been spent or reserved for this month's living costs.
+  const maxAvailableForPotsThisMonth = isCurrentMonth
+    ? Math.max(
+        0,
+        monthlyTotalIncome -
+          Math.max(effectiveFixedMonthly, fixedPaidSoFar) -
+          Math.max(essentialVariable, essentialSpentSoFar) -
+          funSpentSoFar
+      )
+    : Math.max(0, monthlyTotalIncome - effectiveFixedMonthly - essentialVariable);
+
+  const monthlyGoalSavingsTarget = Math.min(rawMonthlyGoalSavingsTarget, maxAvailableForPotsThisMonth);
+
+  // Fun money for the whole month = whatever is left over after Fixed, Essentials, and Pot commitments
+  const monthlyFunBudget = Math.max(0, monthlyTotalIncome - effectiveFixedMonthly - essentialVariable - monthlyGoalSavingsTarget);
+  const monthlyLivingTarget = effectiveFixedMonthly + essentialVariable + monthlyFunBudget;
 
   const remainingFixedBills = Math.max(0, effectiveFixedMonthly - fixedPaidSoFar);
   const remainingEssentials = Math.max(0, essentialVariable - essentialSpentSoFar);

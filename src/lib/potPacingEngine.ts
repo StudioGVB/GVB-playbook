@@ -121,6 +121,7 @@ export interface PotScheduleResult {
     targetMonth?: Date
   ) => {
     pacingMode: GoalPacingMode;
+    remainingToSaveBase: number;
     monthlyAmount: number;
     weeklyPace: number;
     evenMonthlyAmount: number;
@@ -466,13 +467,14 @@ export function computeMonthlyPotSchedule(params: {
 
     const activeDays = Math.max(1, daysArr[displayIdx] || 30.44);
     const weeksInWindow = Math.max(1, activeDays / 7);
-    const evenMonthlyAmount = evenArr[displayIdx] || 0;
-    const chosenMonthlyAmount = finalArr[displayIdx] || 0;
+    const evenMonthlyAmount = Math.min(meta.remainingToSaveBase, evenArr[displayIdx] || 0);
+    const chosenMonthlyAmount = Math.min(meta.remainingToSaveBase, finalArr[displayIdx] || 0);
     const evenWeeklyPace = evenMonthlyAmount / weeksInWindow;
     const chosenWeeklyPace = chosenMonthlyAmount / weeksInWindow;
 
     return {
       pacingMode: meta.pacingMode,
+      remainingToSaveBase: meta.remainingToSaveBase,
       monthlyAmount: chosenMonthlyAmount,
       weeklyPace: chosenWeeklyPace,
       evenMonthlyAmount,

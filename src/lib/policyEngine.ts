@@ -644,7 +644,7 @@ export function computePolicySnapshot(
       monthlyIncome,
       weekTypeMap,
       trips,
-      weekStart,
+      now,
     );
     baseWeeklyFun = split.weeklyFunAmount;
     weeklyGross = split.monthlyIncome / weeksInMonth;
@@ -1072,8 +1072,10 @@ export function computeRequiredGoalSavingsMonthly(
     if ((g as any)?.is_stash || (g.name || '').toLowerCase().includes('stash')) continue;
     if ((g as any)?.is_emergency === true || (g.name || '').toLowerCase().includes('emergency')) continue;
     const plan = schedule.getGoalPlanForMonth(g.id, now);
-    if (plan && !plan.isFutureStart && plan.weeklyPace > 0) {
-      const monthlyPace = Math.min(plan.remainingToSaveBase, plan.weeklyPace * 4.33);
+    if (plan && !plan.isFutureStart && plan.monthlyAmount > 0) {
+      // Use plan.monthlyAmount (scheduled for the remaining days of the active month, NOT weeklyPace * 4.33)
+      // so removing a future start_date mid-month never backtracks and deducts a full 30-day share out of the current month.
+      const monthlyPace = Math.min(plan.remainingToSaveBase, plan.monthlyAmount);
       scheduledMonthlyTotal += monthlyPace;
     }
   }
@@ -1109,10 +1111,10 @@ export function computeRequiredGoalSavingsMonthly(
     if (g.deadline) {
       const dl = new Date(g.deadline);
       const daysLeft = Math.max(1, Math.ceil((dl.getTime() - anchorNow.getTime()) / (1000 * 60 * 60 * 24)));
-      const weeksLeft = Math.max(1, daysLeft / 7);
-      // Cap monthly requirement at remainingBase (matching MonthlyPotPlanner & paycheckEngine)
-      // so a goal with <4.33 weeks left never deducts up to 4.33x its remaining balance in a single month
-      const monthlyTarget = Math.min(remainingBase, (remainingBase / weeksLeft) * 4.33);
+      const mEnd = endOfMonth(now);
+      const activeDaysLeftThisMonth = Math.max(1, differenceInCalendarDays(dl < mEnd ? dl : mEnd, now) + 1);
+      // Only charge for the days actually remaining in this calendar month
+      const monthlyTarget = Math.min(remainingBase, (remainingBase / daysLeft) * activeDaysLeftThisMonth);
       poolSavingsMonthly += monthlyTarget;
     } else if (g.percent_allocation && g.percent_allocation > 0 && monthlyIncome > 0) {
       poolSavingsMonthly += Math.min(remainingBase, (g.percent_allocation / 100) * monthlyIncome);
@@ -1196,7 +1198,7 @@ export function computeMoneySplit(
 
   // 4. Goal Pool Savings: POTS ARE FILLED FIRST!
   // Active goal pools with deadlines or percentages take precedence so savings targets are 100% funded.
-  const poolSavingsMonthly = computeRequiredGoalSavingsMonthly(goals, convertToBase, now, effectiveIncome, transactions);
+  const poolSavingsMonthly = computeRequiredGoalSavingsMonthly(goals, convertToBase, referenceDate, effectiveIncome, transactions);
   const goalSavingsAmount = Math.min(poolSavingsMonthly, incomeAfterEssentials);
   const goalSavingsPercent = effectiveIncome > 0 ? (goalSavingsAmount / effectiveIncome) * 100 : 0;
 
