@@ -600,7 +600,7 @@ export function computePolicySnapshot(
 
   if (isDrawdownMode) {
     // Calculate required goal savings even in drawdown mode so active goals with deadlines are not zeroed out
-    const drawdownGoalSavings = computeRequiredGoalSavingsMonthly(goals, convertToBase, weekStart, 0);
+    const drawdownGoalSavings = computeRequiredGoalSavingsMonthly(goals, convertToBase, weekStart, 0, transactions);
     // In drawdown mode (no incoming income), fun money is whatever unallocated spendable pool remains
     baseWeeklyFun = spendablePool > 0 ? spendablePool / 4.33 : 0;
     // Weekly gross = all weekly costs combined

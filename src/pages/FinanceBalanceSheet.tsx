@@ -284,9 +284,10 @@ export default function FinanceBalanceSheet() {
       finance.goals,
       finance.convertToBase,
       monthStart,
-      stats.income || expectedIncomeValue
+      stats.income || expectedIncomeValue,
+      finance.transactions
     );
-  }, [finance.goals, finance.convertToBase, monthStart, stats.income, expectedIncomeValue]);
+  }, [finance.goals, finance.convertToBase, monthStart, stats.income, expectedIncomeValue, finance.transactions]);
 
   const poolSavingsMonthly = (snapshot?.split.goalSavingsAmount && snapshot.split.goalSavingsAmount > 0)
     ? snapshot.split.goalSavingsAmount

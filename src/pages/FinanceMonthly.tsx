@@ -362,12 +362,13 @@ export default function FinanceMonthly() {
       finance.goals,
       finance.convertToBase,
       selectedMonth,
-      incomeTotal || expectedIncomeVal
+      incomeTotal || expectedIncomeVal,
+      finance.transactions
     );
     return (snapshot?.split.goalSavingsAmount && snapshot.split.goalSavingsAmount > 0)
       ? snapshot.split.goalSavingsAmount
       : directGoalSavings;
-  }, [finance.goals, finance.convertToBase, selectedMonth, incomeTotal, expectedIncomeVal, snapshot]);
+  }, [finance.goals, finance.convertToBase, selectedMonth, incomeTotal, expectedIncomeVal, finance.transactions, snapshot]);
 
   // Savings Stash: shock absorber pool that absorbs weekly/monthly overspend
   const stashGoal = useMemo(() => {
