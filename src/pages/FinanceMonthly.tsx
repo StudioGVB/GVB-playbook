@@ -199,6 +199,10 @@ export default function FinanceMonthly() {
       const feAmt = finance.convertToBase(fe.amount, fe.currency);
       const amountClose = Math.abs(amt - feAmt) <= Math.max(2, feAmt * 0.05);
       const feName = fe.name.toLowerCase();
+      if (feName.includes('amazon')) {
+        if (/\bprime\b/i.test(desc) || Math.abs(amt - feAmt) <= 2.5) return true;
+        continue;
+      }
       const feTokens = feName.split(/\s+/).filter(w => w.length >= 3);
       const nameMatches = feTokens.some(w => desc.includes(w));
       if (nameMatches && amt <= Math.max(feAmt * 3.5, feAmt + 150)) return true;
@@ -1841,21 +1845,13 @@ export default function FinanceMonthly() {
             );
           })()}
 
-          {/* BLOCK 2.8: FIXED BILLS — SPENT SO FAR VS. ALLOWANCE BAR CHART */}
+          {/* BLOCK 2.8: FIXED BILLS — SPENT SO FAR VS. ALLOWANCE */}
           {fixedBillsStatusList.length > 0 && (() => {
             const totalFixedAllowance = fixedBillsStatusList.reduce((sum, b) => sum + b.committedAmount, 0);
             const totalFixedPaid = fixedBillsStatusList.reduce((sum, b) => sum + b.paidAmount, 0);
-            const hasLargeRent = fixedBillsStatusList.some(b => b.committedAmount >= 400);
-            const chartBills = fixedBillsStatusList.filter(b =>
-              fixedChartExcludeRent ? b.committedAmount < 400 : true
-            );
-            const maxChartVal = Math.max(
-              1,
-              ...chartBills.map(b => Math.max(b.committedAmount, b.paidAmount))
-            );
 
             return (
-              <div className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-xs space-y-5">
+              <div className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-xs space-y-4">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3.5">
                   <div>
                     <div className="flex items-center gap-2">
@@ -1869,171 +1865,20 @@ export default function FinanceMonthly() {
                     </p>
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-3">
-                    {/* Legend */}
-                    <div className="flex items-center gap-3 text-[11px] font-semibold text-slate-600">
-                      <span className="flex items-center gap-1.5">
-                        <span className="w-2.5 h-2.5 rounded-xs bg-emerald-500" />
-                        Spent ({fmt(totalFixedPaid)})
-                      </span>
-                      <span className="flex items-center gap-1.5">
-                        <span className="w-2.5 h-2.5 rounded-xs bg-slate-200 border border-slate-300" />
-                        Allowance Left ({fmt(Math.max(0, totalFixedAllowance - totalFixedPaid))})
-                      </span>
-                      <span className="flex items-center gap-1.5">
-                        <span className="w-2.5 h-2.5 rounded-xs bg-rose-500" />
-                        Over Allowance
-                      </span>
-                    </div>
-
-                    {/* Zoom non-rent toggle so £6-£50 bills aren't dwarfed by £720 rent */}
-                    {hasLargeRent && (
-                      <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 text-[11px] font-semibold">
-                        <button
-                          type="button"
-                          onClick={() => setFixedChartExcludeRent(false)}
-                          className={cn(
-                            "px-2.5 py-1 rounded-md transition-colors",
-                            !fixedChartExcludeRent
-                              ? "bg-white text-slate-900 shadow-2xs"
-                              : "text-slate-500 hover:text-slate-800"
-                          )}
-                        >
-                          All Bills
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setFixedChartExcludeRent(true)}
-                          className={cn(
-                            "px-2.5 py-1 rounded-md transition-colors",
-                            fixedChartExcludeRent
-                              ? "bg-white text-slate-900 shadow-2xs"
-                              : "text-slate-500 hover:text-slate-800"
-                          )}
-                        >
-                          Zoom Non-Rent
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Vertical Stacked Bar Chart (Spent stacked inside/against Allowance) */}
-                <div className="rounded-xl border border-slate-100 bg-slate-50/60 p-4">
-                  <div
-                    className="grid gap-3 items-end min-h-[210px] pt-4"
-                    style={{
-                      gridTemplateColumns: `repeat(${Math.max(1, chartBills.length)}, minmax(0, 1fr))`,
-                    }}
-                  >
-                    {chartBills.map((bill) => {
-                      const billTotal = Math.max(bill.committedAmount, bill.paidAmount);
-                      const totalColumnPct = maxChartVal > 0
-                        ? Math.max((billTotal / maxChartVal) * 100, billTotal > 0 ? 10 : 0)
-                        : 0;
-                      const isOver = bill.committedAmount > 0
-                        ? bill.paidAmount > bill.committedAmount + 0.5
-                        : bill.paidAmount > 0;
-                      const diff = bill.committedAmount - bill.paidAmount;
-
-                      // Inside the stacked column (whose height = max(allowance, spent)):
-                      // - If under/on allowance: bottom segment = spent (emerald), top segment = remaining allowance (slate)
-                      // - If over allowance: bottom segment = allowance base (emerald), top segment = excess overage (rose)
-                      const bottomGreenSharePct = billTotal > 0
-                        ? (Math.min(bill.paidAmount, bill.committedAmount) / billTotal) * 100
-                        : 0;
-                      const topSegmentSharePct = Math.max(0, 100 - bottomGreenSharePct);
-
-                      return (
-                        <button
-                          key={bill.id}
-                          type="button"
-                          onClick={() => setSelectedFixedBill(bill)}
-                          className="group flex flex-col items-center text-center p-2 rounded-xl hover:bg-white hover:shadow-xs border border-transparent hover:border-slate-200/80 transition-all cursor-pointer min-w-0"
-                        >
-                          {/* Top value readout */}
-                          <div className="mb-2 text-center">
-                            <span
-                              className={cn(
-                                "block text-xs font-display font-black tabular-nums",
-                                isOver
-                                  ? "text-rose-600"
-                                  : bill.paidAmount > 0
-                                  ? "text-emerald-700"
-                                  : "text-slate-400"
-                              )}
-                            >
-                              {fmt(bill.paidAmount)}
-                            </span>
-                            <span className="block text-[10px] text-slate-400 font-medium tabular-nums">
-                              of {fmt(bill.committedAmount)}
-                            </span>
-                          </div>
-
-                          {/* Single Stacked Vertical Bar container */}
-                          <div className="w-full h-32 flex items-end justify-center px-2 border-b border-slate-200/90">
-                            <div
-                              className="w-9 sm:w-11 flex flex-col justify-end rounded-t-lg overflow-hidden transition-all duration-300 shadow-2xs"
-                              style={{ height: `${Math.min(100, totalColumnPct)}%` }}
-                            >
-                              {/* Top Stacked Segment: Remaining Allowance (slate) OR Over-Allowance Excess (rose) */}
-                              {topSegmentSharePct > 0.5 && (
-                                <div
-                                  className={cn(
-                                    "w-full transition-all duration-300",
-                                    isOver
-                                      ? "bg-rose-500 border-b border-white/40"
-                                      : "bg-slate-200/90 border border-b-0 border-slate-300/90"
-                                  )}
-                                  style={{ height: `${topSegmentSharePct}%` }}
-                                  title={
-                                    isOver
-                                      ? `Over allowance by ${fmt(Math.abs(diff))}`
-                                      : `Remaining allowance: ${fmt(Math.max(0, diff))}`
-                                  }
-                                />
-                              )}
-
-                              {/* Bottom Stacked Segment: Spent within Allowance (emerald) */}
-                              {bottomGreenSharePct > 0 && (
-                                <div
-                                  className="w-full bg-emerald-500 transition-all duration-300"
-                                  style={{ height: `${bottomGreenSharePct}%` }}
-                                  title={`Spent within allowance: ${fmt(Math.min(bill.paidAmount, bill.committedAmount))}`}
-                                />
-                              )}
-                            </div>
-                          </div>
-
-                          {/* Bill label & status pill */}
-                          <div className="mt-2 w-full min-w-0">
-                            <p className="text-xs font-bold text-slate-800 truncate group-hover:text-slate-950">
-                              {bill.shortName}
-                            </p>
-                            <p
-                              className={cn(
-                                "text-[10px] font-semibold tabular-nums mt-0.5 truncate",
-                                isOver
-                                  ? "text-rose-600"
-                                  : bill.paidAmount === 0
-                                  ? "text-amber-600"
-                                  : diff > 0.5
-                                  ? "text-emerald-600"
-                                  : "text-slate-500"
-                              )}
-                            >
-                              {isOver
-                                ? `+${fmt(Math.abs(diff))} over`
-                                : bill.paidAmount === 0
-                                ? "Unpaid so far"
-                                : diff > 0.5
-                                ? `${fmt(diff)} under`
-                                : "On allowance"}
-                            </p>
-                          </div>
-                        </button>
-                      );
-                    })}
+                  {/* Legend */}
+                  <div className="flex flex-wrap items-center gap-3 text-[11px] font-semibold text-slate-600">
+                    <span className="flex items-center gap-1.5">
+                      <span className="w-2.5 h-2.5 rounded-xs bg-emerald-500" />
+                      Spent ({fmt(totalFixedPaid)})
+                    </span>
+                    <span className="flex items-center gap-1.5">
+                      <span className="w-2.5 h-2.5 rounded-xs bg-slate-200 border border-slate-300" />
+                      Allowance ({fmt(totalFixedAllowance)})
+                    </span>
+                    <span className="flex items-center gap-1.5">
+                      <span className="w-2.5 h-2.5 rounded-xs bg-rose-500" />
+                      Over Allowance
+                    </span>
                   </div>
                 </div>
 
