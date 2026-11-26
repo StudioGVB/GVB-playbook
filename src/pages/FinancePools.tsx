@@ -90,7 +90,7 @@ import { useFinanceAssumptions } from '@/hooks/useFinanceAssumptions';
 import { useFixedExpenses } from '@/hooks/useFixedExpenses';
 import { useWeekTypes } from '@/hooks/useWeekTypes';
 import { useFinanceTrips } from '@/hooks/useFinanceTrips';
-import { computePolicySnapshot, computeTripSpent, computeTypicalWeeklyVariableSpend, computeWeekVariableSpend, evaluateMidMonthPotFeasibility, isInternalTransferTx } from '@/lib/policyEngine';
+import { computePolicySnapshot, computeTripSpent, computeTypicalWeeklyVariableSpend, computeWeekVariableSpend, evaluateMidMonthPotFeasibility, isInternalTransferTx, computeWeeksInMonth } from '@/lib/policyEngine';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -506,6 +506,8 @@ export default function FinancePoolsPage() {
     return totalPaceMonthly;
   }, [snapshot, finance.goals, finance.convertToBase]);
 
+  const weeksInMonth = useMemo(() => computeWeeksInMonth(targetMonthDate), [targetMonthDate]);
+
   const essentialCatIds = useMemo(() => new Set(
     finance.categories.filter(c => c.is_essential && c.type === 'variable').map(c => c.id)
   ), [finance.categories]);
@@ -513,7 +515,7 @@ export default function FinancePoolsPage() {
   const effectiveWeeklyFun = snapshot?.weeklyFunBudget ?? snapshot?.baseWeeklyFun ?? 0;
   const monthlyTotalIncome = (snapshot?.split?.monthlyIncome && snapshot.split.monthlyIncome > 0)
     ? snapshot.split.monthlyIncome
-    : (effectiveFixedMonthly + essentialVariable + monthlyGoalSavingsTarget + (snapshot?.split?.funAmount || (effectiveWeeklyFun * 4.33)));
+    : (effectiveFixedMonthly + essentialVariable + monthlyGoalSavingsTarget + (snapshot?.split?.funAmount || (effectiveWeeklyFun * weeksInMonth)));
 
   // Fun money for the whole month = whatever is left over after Fixed, Essentials, and Pot commitments
   const monthlyFunBudget = Math.max(0, monthlyTotalIncome - effectiveFixedMonthly - essentialVariable - monthlyGoalSavingsTarget);
@@ -1868,7 +1870,7 @@ export default function FinancePoolsPage() {
                       3. Pot Savings:
                     </span>
                     <span className="font-extrabold text-purple-700">
-                      {fmt(monthlyGoalSavingsTarget)} to pots 🔒 ({fmt(monthlyGoalSavingsTarget / 4.33)}/wk)
+                      {fmt(monthlyGoalSavingsTarget)} to pots 🔒 ({fmt(monthlyGoalSavingsTarget / weeksInMonth)}/wk)
                     </span>
                   </div>
                   <div className="flex justify-between items-center">
@@ -1877,7 +1879,7 @@ export default function FinancePoolsPage() {
                       {remainingFun <= 0.01 ? (
                         <span className="text-amber-700">£0.00 left of {fmt(monthlyFunBudget)} ({fmt(funSpentSoFar)} spent)</span>
                       ) : (
-                        `${fmt(remainingFun)} left of ${fmt(monthlyFunBudget)} (${fmt(monthlyFunBudget / 4.33)}/wk)`
+                        `${fmt(remainingFun)} left of ${fmt(monthlyFunBudget)} (${fmt(monthlyFunBudget / weeksInMonth)}/wk)`
                       )}
                     </span>
                   </div>

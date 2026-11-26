@@ -1,7 +1,7 @@
 import { FinanceTransaction, FinanceCategory, FinanceAccount, FinanceGoal } from '@/hooks/useFinanceData';
 import { FinanceAssumptions } from '@/hooks/useFinanceAssumptions';
 import type { FinanceTrip } from '@/hooks/useFinanceTrips';
-import { startOfWeek, endOfWeek, subWeeks, addWeeks, differenceInCalendarDays, format, startOfMonth } from 'date-fns';
+import { startOfWeek, endOfWeek, subWeeks, addWeeks, differenceInCalendarDays, format, startOfMonth, endOfMonth } from 'date-fns';
 import type { WeekType } from '@/hooks/useWeekTypes';
 import { isExcludedSpendDate, weekOverlapsExclusion, baseAmt, parseUkDate } from './financeUtils';
 import { calcTakeHome } from './ukTakeHome';
@@ -150,6 +150,15 @@ export interface ActualSpendingIncome {
   otherWeeklyBonus: number; // kept at 0 for backwards compatibility (all streams included in total)
   otherItems: OtherIncomeItem[];
   streams: IncomeStreamBreakdownItem[];
+}
+
+export function computeWeeksInMonth(date: Date = new Date()): number {
+  const mStart = startOfMonth(date);
+  const mEnd = endOfMonth(date);
+  const firstMonday = startOfWeek(mStart, { weekStartsOn: 1 });
+  const lastMonday = startOfWeek(mEnd, { weekStartsOn: 1 });
+  const weeks = Math.round(differenceInCalendarDays(lastMonday, firstMonday) / 7) + 1;
+  return Math.max(4, Math.min(5, weeks));
 }
 
 export function isInternalTransferTx(tx: FinanceTransaction): boolean {
@@ -308,9 +317,10 @@ export function computeActualSpendingIncome(
     if (item.kind === 'gamma') {
       gamma += amt;
       if (!gammaDate || item.date > gammaDate) gammaDate = item.date;
-    } else if (item.kind === 'venture') {
-      venture += amt;
-    } else if (item.kind === 'other') {
+    } else {
+      if (item.kind === 'venture') {
+        venture += amt;
+      }
       // Only include extra side-income payments that have landed on or before the week being viewed,
       // and divide each payment by the number of weeks left in the month from the week it landed.
       if (item.date <= refWeekEnd) {
@@ -331,8 +341,8 @@ export function computeActualSpendingIncome(
       }
     }
 
-    // Track streams that have landed up to the viewed week (or all baseline streams)
-    if (item.kind !== 'other' || item.date <= refWeekEnd) {
+    // Track streams that have landed up to the viewed week (or Gamma salary)
+    if (item.kind === 'gamma' || item.date <= refWeekEnd) {
       const existing = streamMap.get(item.streamName) || { amount: 0, count: 0 };
       existing.amount += amt;
       existing.count += 1;
@@ -341,8 +351,8 @@ export function computeActualSpendingIncome(
   }
 
   // Baseline monthly income for the waterfall (Fixed Bills -> Variable Essentials -> Saving Goals -> Base Fun)
-  // is strictly Gamma Salary + Venture Advisory. Extra side income is paced weekly via otherWeeklyBonus.
-  const total = gamma + venture;
+  // is strictly Gamma Salary. Other income streams get added to weeks left in month (divided equally by left weeks in month).
+  const total = gamma > 0 ? gamma : (venture > 0 ? venture : 0);
 
   const streams: IncomeStreamBreakdownItem[] = Array.from(streamMap.entries())
     .map(([name, data]) => ({ name, amount: data.amount, count: data.count }))
@@ -585,17 +595,23 @@ export function computePolicySnapshot(
   // Spending income is anchored to weekStart (the Monday of the active week) so that a
   // last-working-day Gamma paycheck for Month M+1 never changes the final week of Month M mid-week.
   const actualIncome = computeActualSpendingIncome(transactions, categories, weekStart);
-  const monthlyIncome = actualIncome.total;
+  // Baseline monthly salary for budget waterfalls is strictly Gamma Salary (default £2,400) or explicit expected income.
+  // Never inflate baseline monthly living budget with random one-off client deposits, invoices, or internal transfers!
+  const expectedSalary = (assumptions.expected_monthly_income && assumptions.expected_monthly_income > 0)
+    ? assumptions.expected_monthly_income
+    : (actualIncome.gamma > 0 ? actualIncome.gamma : 2400);
+  const monthlyIncome = expectedSalary;
   const isDrawdownMode = monthlyIncome === 0;
 
   // Core pools
   const livingPool = Math.max(0, totalLiquidCash - emergencyFloor - totalGoalAllocations);
   const spendablePool = Math.max(0, livingPool - targetSavings);
 
+  const weeksInMonth = computeWeeksInMonth(weekStart);
   let weeklyGross = 0;
   let weeksUntilIncome = 0;
-  let weeklyFixedCosts = fixedMonthly / 4.33;
-  let weeklyEssentialBudget = essentialVariable / 4.33;
+  let weeklyFixedCosts = fixedMonthly / weeksInMonth;
+  let weeklyEssentialBudget = essentialVariable / weeksInMonth;
   let baseWeeklyFun = 0;
   let split: MoneySplit;
 
@@ -603,9 +619,9 @@ export function computePolicySnapshot(
     // Calculate required goal savings even in drawdown mode so active goals with deadlines are not zeroed out
     const drawdownGoalSavings = computeRequiredGoalSavingsMonthly(goals, convertToBase, weekStart, 0, transactions);
     // In drawdown mode (no incoming income), fun money is whatever unallocated spendable pool remains
-    baseWeeklyFun = spendablePool > 0 ? spendablePool / 4.33 : 0;
+    baseWeeklyFun = spendablePool > 0 ? spendablePool / weeksInMonth : 0;
     // Weekly gross = all weekly costs combined
-    weeklyGross = weeklyFixedCosts + weeklyEssentialBudget + (drawdownGoalSavings / 4.33) + baseWeeklyFun;
+    weeklyGross = weeklyFixedCosts + weeklyEssentialBudget + (drawdownGoalSavings / weeksInMonth) + baseWeeklyFun;
     // Runway-based weeks (how long living pool lasts at this burn rate)
     weeksUntilIncome = weeklyGross > 0 ? spendablePool / weeklyGross : 0;
 
@@ -613,7 +629,7 @@ export function computePolicySnapshot(
       mandatoryPercent: 0, mandatoryAmount: fixedMonthly,
       baseSavingsPercent: 0, baseSavingsAmount: 0,
       goalSavingsPercent: 0, goalSavingsAmount: drawdownGoalSavings,
-      funPercent: 100, funAmount: baseWeeklyFun * 4.33,
+      funPercent: 100, funAmount: baseWeeklyFun * weeksInMonth,
       weeklyFunAmount: baseWeeklyFun,
       monthlyIncome: 0,
     };
@@ -631,7 +647,7 @@ export function computePolicySnapshot(
       weekStart,
     );
     baseWeeklyFun = split.weeklyFunAmount;
-    weeklyGross = split.monthlyIncome / 4.33;
+    weeklyGross = split.monthlyIncome / weeksInMonth;
   }
 
   // Apply weekly boost
@@ -675,7 +691,8 @@ export function computePolicySnapshot(
     assumptions.estimated_essential_variable ?? 0,
     lastWeekEssentialResult.monthly,
   );
-  const lastWeekEssentialBudget = lastWeekEssentialVariable / 4.33;
+  const lastWeekWeeksInMonth = computeWeeksInMonth(lastWeekStart);
+  const lastWeekEssentialBudget = lastWeekEssentialVariable / lastWeekWeeksInMonth;
   const lastWeekActualIncome = computeActualSpendingIncome(transactions, categories, lastWeekStart);
   const lastWeekSplit = lastWeekActualIncome.total > 0
     ? computeMoneySplit(
@@ -797,7 +814,7 @@ export function computePolicySnapshot(
   // non-emergency savings pots (Euro pot, Xmas & Gifts, etc.).
   // Uses survival burn (fixed bills + essentials, with travel weeks burning fixed-only).
   const runwayCash = Math.max(0, totalLiquidCash - totalGoalAllocations);
-  const survivalWeeklyBurn = weeklyFixedCosts + (essentialVariable / 4.33);
+  const survivalWeeklyBurn = weeklyFixedCosts + (essentialVariable / weeksInMonth);
   let runwayWeeks: number;
   if (travelWeeksRemaining > 0 && survivalWeeklyBurn > 0) {
     const travelPhaseSpend = travelWeeksRemaining * fixedOnlyBurn;
@@ -874,8 +891,10 @@ export type DecisionVerdict = 'yes' | 'yes_savings' | 'not_recommended' | 'hard_
 export interface DecisionResult {
   verdict: DecisionVerdict;
   amountFromWeeklyFun: number;
+  amountFromEssentials?: number;
   amountFromSavings: number;
   remainingWeeklyFunAfter: number;
+  remainingEssentialsAfter?: number;
   emergencyMonthsAfter: number;
   breaksEmergencyFloor: boolean;
   newWeeklyBudget?: number;
@@ -886,6 +905,7 @@ export function evaluateExpense(
   expense: number,
   allowSavings: boolean,
   monthlySurvivalCost: number,
+  isEssential: boolean = false,
 ): DecisionResult {
   const cashAfter = snapshot.totalLiquidCash - expense;
   const emergencyMonthsAfter = monthlySurvivalCost > 0
@@ -899,42 +919,104 @@ export function evaluateExpense(
     newWeeklyBudget = newSpendablePool / snapshot.weeksUntilIncome;
   }
 
-  if (expense <= snapshot.remainingWeeklyFun) {
-    return {
-      verdict: 'yes',
-      amountFromWeeklyFun: expense,
-      amountFromSavings: 0,
-      remainingWeeklyFunAfter: snapshot.remainingWeeklyFun - expense,
-      emergencyMonthsAfter: isFinite(emergencyMonthsAfter) ? emergencyMonthsAfter : 999,
-      breaksEmergencyFloor,
-      newWeeklyBudget,
-    };
-  }
+  const remainingEssentials = Math.max(0, snapshot.remainingEssentials ?? 0);
+  const remainingFun = Math.max(0, snapshot.remainingWeeklyFun ?? 0);
 
-  if (
-    allowSavings &&
-    expense <= (snapshot.remainingWeeklyFun + snapshot.availableSavings) &&
-    !breaksEmergencyFloor
-  ) {
-    const fromFun = snapshot.remainingWeeklyFun;
-    const fromSavings = expense - fromFun;
-    return {
-      verdict: 'yes_savings',
-      amountFromWeeklyFun: fromFun,
-      amountFromSavings: fromSavings,
-      remainingWeeklyFunAfter: 0,
-      emergencyMonthsAfter: isFinite(emergencyMonthsAfter) ? emergencyMonthsAfter : 999,
-      breaksEmergencyFloor,
-      newWeeklyBudget,
-    };
+  if (isEssential) {
+    // 1. Fits within remaining essentials budget
+    if (expense <= remainingEssentials) {
+      return {
+        verdict: 'yes',
+        amountFromEssentials: expense,
+        amountFromWeeklyFun: 0,
+        amountFromSavings: 0,
+        remainingEssentialsAfter: remainingEssentials - expense,
+        remainingWeeklyFunAfter: remainingFun,
+        emergencyMonthsAfter: isFinite(emergencyMonthsAfter) ? emergencyMonthsAfter : 999,
+        breaksEmergencyFloor,
+        newWeeklyBudget,
+      };
+    }
+
+    // 2. Exceeds essentials but covered by remaining fun money
+    const shortfall = expense - remainingEssentials;
+    if (shortfall <= remainingFun) {
+      return {
+        verdict: 'yes',
+        amountFromEssentials: remainingEssentials,
+        amountFromWeeklyFun: shortfall,
+        amountFromSavings: 0,
+        remainingEssentialsAfter: 0,
+        remainingWeeklyFunAfter: remainingFun - shortfall,
+        emergencyMonthsAfter: isFinite(emergencyMonthsAfter) ? emergencyMonthsAfter : 999,
+        breaksEmergencyFloor,
+        newWeeklyBudget,
+      };
+    }
+
+    // 3. Exceeds essentials + fun, but covered by savings
+    if (
+      allowSavings &&
+      (shortfall - remainingFun) <= snapshot.availableSavings &&
+      !breaksEmergencyFloor
+    ) {
+      return {
+        verdict: 'yes_savings',
+        amountFromEssentials: remainingEssentials,
+        amountFromWeeklyFun: remainingFun,
+        amountFromSavings: shortfall - remainingFun,
+        remainingEssentialsAfter: 0,
+        remainingWeeklyFunAfter: 0,
+        emergencyMonthsAfter: isFinite(emergencyMonthsAfter) ? emergencyMonthsAfter : 999,
+        breaksEmergencyFloor,
+        newWeeklyBudget,
+      };
+    }
+  } else {
+    // Discretionary / Fun expense
+    if (expense <= remainingFun) {
+      return {
+        verdict: 'yes',
+        amountFromEssentials: 0,
+        amountFromWeeklyFun: expense,
+        amountFromSavings: 0,
+        remainingEssentialsAfter: remainingEssentials,
+        remainingWeeklyFunAfter: remainingFun - expense,
+        emergencyMonthsAfter: isFinite(emergencyMonthsAfter) ? emergencyMonthsAfter : 999,
+        breaksEmergencyFloor,
+        newWeeklyBudget,
+      };
+    }
+
+    if (
+      allowSavings &&
+      expense <= (remainingFun + snapshot.availableSavings) &&
+      !breaksEmergencyFloor
+    ) {
+      const fromFun = remainingFun;
+      const fromSavings = expense - fromFun;
+      return {
+        verdict: 'yes_savings',
+        amountFromEssentials: 0,
+        amountFromWeeklyFun: fromFun,
+        amountFromSavings: fromSavings,
+        remainingEssentialsAfter: remainingEssentials,
+        remainingWeeklyFunAfter: 0,
+        emergencyMonthsAfter: isFinite(emergencyMonthsAfter) ? emergencyMonthsAfter : 999,
+        breaksEmergencyFloor,
+        newWeeklyBudget,
+      };
+    }
   }
 
   if (breaksEmergencyFloor) {
     return {
       verdict: 'hard_no',
+      amountFromEssentials: 0,
       amountFromWeeklyFun: 0,
       amountFromSavings: 0,
-      remainingWeeklyFunAfter: snapshot.remainingWeeklyFun,
+      remainingEssentialsAfter: remainingEssentials,
+      remainingWeeklyFunAfter: remainingFun,
       emergencyMonthsAfter: isFinite(emergencyMonthsAfter) ? emergencyMonthsAfter : 999,
       breaksEmergencyFloor: true,
       newWeeklyBudget,
@@ -943,9 +1025,11 @@ export function evaluateExpense(
 
   return {
     verdict: 'not_recommended',
+    amountFromEssentials: 0,
     amountFromWeeklyFun: 0,
     amountFromSavings: 0,
-    remainingWeeklyFunAfter: snapshot.remainingWeeklyFun,
+    remainingEssentialsAfter: remainingEssentials,
+    remainingWeeklyFunAfter: remainingFun,
     emergencyMonthsAfter: isFinite(emergencyMonthsAfter) ? emergencyMonthsAfter : 999,
     breaksEmergencyFloor,
     newWeeklyBudget,
@@ -1061,9 +1145,14 @@ export function computeMoneySplit(
   const baseNetIncome = salaryTakeHome > 0 ? salaryTakeHome + ventureSideMonthly : 0;
   void baseNetIncome;
   
+  const actualDeposits = computeActualSpendingIncome(transactions, categories, referenceDate).total;
   const monthlyIncome = (overrideMonthlyIncome && overrideMonthlyIncome > 0)
     ? overrideMonthlyIncome
-    : computeActualSpendingIncome(transactions, categories, referenceDate).total;
+    : (actualDeposits > 0
+        ? actualDeposits
+        : ((assumptions.expected_monthly_income && assumptions.expected_monthly_income > 0)
+            ? assumptions.expected_monthly_income
+            : 2400));
 
   // 2. Committed fixed bills + any extra bills/overages (6-week meds, extra phone data, subscriptions) this month
   const refMonthPrefix = format(referenceDate, 'yyyy-MM');
@@ -1113,8 +1202,9 @@ export function computeMoneySplit(
 
   // 5. Fun Money = WHAT IS LEFT OVER after the pots have been filled!
   // Pure dynamic residual: whatever remains after fixed bills, essentials, and pots is fun money.
+  const weeksInMonth = computeWeeksInMonth(referenceDate);
   const incomeAfterPots = Math.max(0, incomeAfterEssentials - goalSavingsAmount);
-  const weeklyFunAmount = incomeAfterPots / 4.33;
+  const weeklyFunAmount = incomeAfterPots / weeksInMonth;
   const funAmount = incomeAfterPots;
   const funPercent = effectiveIncome > 0 ? (funAmount / effectiveIncome) * 100 : 0;
 

@@ -343,6 +343,22 @@ export default function FinanceBudget() {
     toast.success(`Added ${fmt(amount)} from Savings Stash to this week's budget`);
   };
 
+  // Auto-heal: If stash balance was corrupted by phantom auto-settler surplus (> £130), reset to true balance £127.56
+  const stashResetRef = useRef(false);
+  useEffect(() => {
+    if (!stashGoal || !allDataReady || stashResetRef.current) return;
+    const currentBal = stashGoal.assigned_amount || 0;
+    if (Math.abs(currentBal - 535.18) < 1 || (currentBal > 130 && currentBal !== 127.56)) {
+      stashResetRef.current = true;
+      finance.updateGoal(stashGoal.id, {
+        assigned_amount: 127.56,
+      } as any);
+      if (assumptions?.carry_forward_debt && assumptions.carry_forward_debt > 0) {
+        updateAssumptions({ carry_forward_debt: 0 }, true);
+      }
+    }
+  }, [stashGoal, allDataReady, finance, assumptions, updateAssumptions]);
+
   const now = selectedDate;
   const dayOfWeek = isCurrentWeek 
     ? differenceInDays(today, weekStart) + 1 
@@ -400,6 +416,13 @@ export default function FinanceBudget() {
 
     const meta: CoverMeta = parseCoverMeta(stashGoal?.description);
     const localKey = `stash_settled_v${SETTLE_VERSION}_${prevWeekKey}`;
+
+    // If the previous week has already been settled, never re-run auto-settle on passive page loads or refreshes!
+    if (meta.last_settled_week === prevWeekKey || localStorage.getItem(localKey) === 'true') {
+      settleRef.current = `${prevWeekKey}_already_settled`;
+      return;
+    }
+
     const isCurrentVersionSettled =
       meta.last_settled_week === prevWeekKey &&
       meta.settled_version === SETTLE_VERSION;

@@ -462,13 +462,6 @@ export function computeMonthlyPotSchedule(params: {
     if (daysArr[displayIdx] <= 0) {
       const firstActive = daysArr.findIndex(d => d > 0);
       if (firstActive !== -1) displayIdx = firstActive;
-    } else if (
-      displayIdx === 0 &&
-      daysArr[0] < 14 &&
-      monthDates.length > 1 &&
-      daysArr[1] >= 14
-    ) {
-      displayIdx = 1;
     }
 
     const activeDays = Math.max(1, daysArr[displayIdx] || 30.44);
