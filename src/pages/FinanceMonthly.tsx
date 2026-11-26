@@ -390,6 +390,7 @@ export default function FinanceMonthly() {
   }, [finance.transactions, finance.categories, trips]);
 
   const currentDayOfWeek = Math.max(1, ((today.getDay() + 6) % 7) + 1); // 1=Mon..7=Sun
+  const daysLeftInActiveWeek = Math.max(1, 8 - currentDayOfWeek);
   const thisWeekDailyEssPace = currentWeekSummary.essentialSpent / currentDayOfWeek;
   const thisWeekDailyFunPace = currentWeekSummary.funSpent / currentDayOfWeek;
   const thisWeekDailyVariablePace = currentWeekSummary.totalSpent / currentDayOfWeek;
@@ -397,10 +398,25 @@ export default function FinanceMonthly() {
   const dailyVariablePace = daysElapsed > 0 ? variableSpent / daysElapsed : 0;
   const targetDailyVariable = daysInMonth > 0 ? monthlyVariableBudget / daysInMonth : 0;
   const variableRemaining = Math.max(0, monthlyVariableBudget - variableSpent);
-  const safeDailyRemaining = daysRemaining > 0 ? variableRemaining / daysRemaining : 0;
+
+  // Weekly allowance & active week remaining budget
+  // Past closed weeks automatically sweep their underspend into Savings Stash (untouchable for reporting).
+  // Therefore, real daily safe-to-spend is strictly governed by the active week's remaining allowance,
+  // not by dumping all past weeks' saved money onto the final few days of the month!
+  const weeklyVariableAllowance = snapshot
+    ? (snapshot.weeklyEssentialBudget + snapshot.weeklyFunBudget)
+    : (monthlyVariableBudget / 4.33);
+  const activeWeekSpent = currentWeekSummary.totalSpent;
+  const activeWeekRemaining = Math.max(0, weeklyVariableAllowance - activeWeekSpent);
+  const activeWeekDailyPace = activeWeekRemaining / daysLeftInActiveWeek;
+
+  // Safe daily spend: anchored to active weekly allowance so past underspend is protected
+  const safeDailyRemaining = isCurrentMonth
+    ? activeWeekDailyPace
+    : (daysRemaining > 0 ? variableRemaining / daysRemaining : 0);
+  const unspentSavedSurplus = Math.max(0, variableRemaining - activeWeekRemaining);
 
   const futureDailyVariablePace = Math.min(dailyVariablePace, thisWeekDailyVariablePace);
-  const weeklyVariableAllowance = monthlyVariableBudget / 4.33;
   const isUnderspendingWeeklyAllowance = currentWeekSummary.totalSpent <= weeklyVariableAllowance;
   const rawProjectedVariableSpend = variableSpent + futureDailyVariablePace * daysRemaining;
   const projectedVariableSpend = isCurrentMonth
@@ -1246,7 +1262,7 @@ export default function FinanceMonthly() {
                   </span>
                   <span className="tabular-nums">
                     {variableSpent <= monthlyVariableBudget
-                      ? `${fmt(monthlyVariableBudget - variableSpent)} left`
+                      ? `${fmt(monthlyVariableBudget - variableSpent)} under budget`
                       : `${fmt(variableSpent - monthlyVariableBudget)} over`}
                   </span>
                 </div>
@@ -1398,15 +1414,21 @@ export default function FinanceMonthly() {
                   {/* Pillar 2: Safe Daily Spend for Remaining Days */}
                   <div className={cn("rounded-xl border p-3.5", paceBg)}>
                     <p className="text-[10px] font-bold uppercase tracking-wider" style={{ color: paceColor }}>
-                      {isCurrentMonth ? `Safe to Spend (${daysRemaining}d left)` : 'Variable Remaining'}
+                      {isCurrentMonth ? `Safe to Spend (Active Week · ${daysLeftInActiveWeek}d left)` : 'Variable Remaining'}
                     </p>
                     <div className="flex items-baseline gap-2 mt-1">
                       <span className="text-2xl font-display font-black tabular-nums" style={{ color: paceColor }}>
-                        {isCurrentMonth && daysRemaining > 0 ? `${fmt(safeDailyRemaining)}/day` : fmt(variableRemaining)}
+                        {isCurrentMonth ? `${fmt(safeDailyRemaining)}/day` : fmt(variableRemaining)}
                       </span>
                     </div>
-                    <p className="text-[11px] font-medium mt-1" style={{ color: paceColor }}>
-                      {fmt(variableRemaining)} variable budget left ({fmt(Math.max(0, monthlyEssentialBudget - essentialSpent))} Ess · {fmt(Math.max(0, monthlyFunBudget - funSpent))} Fun)
+                    <p className="text-[11px] font-medium mt-1 leading-snug" style={{ color: paceColor }}>
+                      {isCurrentMonth ? (
+                        <>
+                          <strong className="text-slate-800">{fmt(activeWeekRemaining)}</strong> in active week · <span className="text-slate-500">{fmt(unspentSavedSurplus)} swept to Stash / buffer</span>
+                        </>
+                      ) : (
+                        `${fmt(variableRemaining)} unspent variable budget`
+                      )}
                     </p>
                   </div>
 
