@@ -390,7 +390,7 @@ export default function FinanceBudget() {
     // It automatically sweeps straight into Savings Stash as an extra holiday buffer / shock absorber!
     const isPrevTravelWeek = Boolean(getTripInWeek(prevWeekStart, trips));
     const travelWeekAllowance = isPrevTravelWeek
-      ? (prevWeekSnapshot.split?.weeklyFunAmount || assumptions.weekly_fun_budget || 100)
+      ? (prevWeekSnapshot.split?.weeklyFunAmount ?? prevWeekSnapshot.weeklyFunBudget ?? 0)
       : 0;
     const totalBudget = isPrevTravelWeek
       ? travelWeekAllowance

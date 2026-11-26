@@ -93,7 +93,7 @@ export function MondayWeeklyReviewCard({ finance, assumptions, trips = [], force
 
     const weeklyFunBudget = closedRecord
       ? (closedRecord.baseFunBudget + closedRecord.boost)
-      : (snapshot?.weeklyFunBudget ?? snapshot?.baseWeeklyFun ?? assumptions?.weekly_fun_budget ?? 100);
+      : (snapshot?.weeklyFunBudget ?? snapshot?.baseWeeklyFun ?? 0);
 
     const weeklyEssentialBudget = closedRecord
       ? closedRecord.essentialBudget

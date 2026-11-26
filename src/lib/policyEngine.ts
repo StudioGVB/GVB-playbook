@@ -599,10 +599,10 @@ export function computePolicySnapshot(
   let split: MoneySplit;
 
   if (isDrawdownMode) {
-    // Fun money is the user-configured weekly amount (default $100/wk)
-    baseWeeklyFun = assumptions.weekly_fun_budget > 0 ? assumptions.weekly_fun_budget : 100;
     // Calculate required goal savings even in drawdown mode so active goals with deadlines are not zeroed out
     const drawdownGoalSavings = computeRequiredGoalSavingsMonthly(goals, convertToBase, weekStart, 0);
+    // In drawdown mode (no incoming income), fun money is whatever unallocated spendable pool remains
+    baseWeeklyFun = spendablePool > 0 ? spendablePool / 4.33 : 0;
     // Weekly gross = all weekly costs combined
     weeklyGross = weeklyFixedCosts + weeklyEssentialBudget + (drawdownGoalSavings / 4.33) + baseWeeklyFun;
     // Runway-based weeks (how long living pool lasts at this burn rate)
@@ -1078,20 +1078,15 @@ export function computeMoneySplit(
   const goalSavingsPercent = effectiveIncome > 0 ? (goalSavingsAmount / effectiveIncome) * 100 : 0;
 
   // 5. Fun Money = WHAT IS LEFT OVER after the pots have been filled!
-  // If the user configured an optional ceiling via weekly_fun_budget, cap fun money at that ceiling
-  // so any excess above the ceiling flows into base savings. Otherwise, all residual is fun money.
+  // Pure dynamic residual: whatever remains after fixed bills, essentials, and pots is fun money.
   const incomeAfterPots = Math.max(0, incomeAfterEssentials - goalSavingsAmount);
-  const maxWeeklyFunCap = (assumptions.weekly_fun_budget && assumptions.weekly_fun_budget > 0)
-    ? assumptions.weekly_fun_budget
-    : Infinity;
-
-  const weeklyFunAmount = Math.min(maxWeeklyFunCap, incomeAfterPots / 4.33);
-  const funAmount = weeklyFunAmount * 4.33;
+  const weeklyFunAmount = incomeAfterPots / 4.33;
+  const funAmount = incomeAfterPots;
   const funPercent = effectiveIncome > 0 ? (funAmount / effectiveIncome) * 100 : 0;
 
-  // 6. Base savings: whatever remains after both pots and fun money
-  const baseSavingsAmount = Math.max(0, incomeAfterPots - funAmount);
-  const baseSavingsPercent = effectiveIncome > 0 ? (baseSavingsAmount / effectiveIncome) * 100 : 0;
+  // 6. Base savings: residual after pots and fun money (0 by default since fun takes remaining surplus)
+  const baseSavingsAmount = 0;
+  const baseSavingsPercent = 0;
 
   return {
     mandatoryPercent,

@@ -74,7 +74,7 @@ export function computeDaily8pmSummary(
 
   // Calculate total weekly allowance (Essential Variable + Fun Money including any Boosts)
   const weeklyEssential = snapshot?.weeklyEssentialBudget ?? 115;
-  const weeklyFun = snapshot?.weeklyFunBudget ?? snapshot?.baseWeeklyFun ?? 100;
+  const weeklyFun = snapshot?.weeklyFunBudget ?? snapshot?.baseWeeklyFun ?? 0;
   const weeklyBudget = weeklyEssential + weeklyFun;
 
   const diff = weeklyBudget - weekSpent;
@@ -204,7 +204,7 @@ export function computeDaily955pmSummary(
   }
 
   const weeklyEssential = snapshot?.weeklyEssentialBudget ?? 115;
-  const weeklyFun = snapshot?.weeklyFunBudget ?? snapshot?.baseWeeklyFun ?? 100;
+  const weeklyFun = snapshot?.weeklyFunBudget ?? snapshot?.baseWeeklyFun ?? 0;
   const weeklyBudget = weeklyEssential + weeklyFun;
 
   const remaining = weeklyBudget - weekSpent;

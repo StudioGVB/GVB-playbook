@@ -164,7 +164,7 @@ export default function FinanceSalarySnapshot() {
 
   // ---------- VARIABLE ----------
   const essentialsMonthly = snapshot?.computedEssentialVariable ?? assumptions?.estimated_essential_variable ?? 0;
-  const funWeekly = snapshot?.baseWeeklyFun ?? assumptions?.weekly_fun_budget ?? 100;
+  const funWeekly = snapshot?.baseWeeklyFun ?? snapshot?.split?.weeklyFunAmount ?? 0;
   const funMonthly = funWeekly * 4.33;
   const variableMonthly = essentialsMonthly + funMonthly;
   const surplus = afterFixed - variableMonthly;

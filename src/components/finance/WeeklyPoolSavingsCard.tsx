@@ -135,7 +135,7 @@ export default function WeeklyPoolSavingsCard({ finance, spendablePool = 0, funM
   // True Safe-to-Spend (Unified safe-to-spend allowance from live cashflow model)
   const trueWeeklySafeToSpend = snapshot
     ? (snapshot.weeklyFunBudget + snapshot.weeklyEssentialBudget)
-    : Math.max(0, (funMoney > 0 ? funMoney / 4.33 : (spendablePool > 0 ? spendablePool / 4.33 : 100)) - totalWeeklyRequired);
+    : Math.max(0, (funMoney > 0 ? funMoney / 4.33 : (spendablePool > 0 ? spendablePool / 4.33 : 0)) - totalWeeklyRequired);
   const activePoolsCount = poolBreakdown.filter(p => p.remainingBase > 0.01).length;
 
   // Execute 1-Click Weekly Transfer into Pools

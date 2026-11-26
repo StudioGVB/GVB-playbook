@@ -153,7 +153,7 @@ export default function FinanceMonthly() {
     : (assumptions?.estimated_essential_variable || 400);
   const monthlyFunBudget = snapshot
     ? Math.max(snapshot.baseWeeklyFun, snapshot.weeklyFunBudget) * 4.33
-    : (assumptions ? (assumptions.weekly_fun_budget || 100) * 4.33 : 0);
+    : 0;
   const monthlyVariableBudget = monthlyEssentialBudget + monthlyFunBudget;
   const autoTotalBudget = monthlyVariableBudget + fixedMonthly;
   const budgetOverride = (assumptions as any)?.monthly_budget_override;
