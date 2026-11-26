@@ -482,8 +482,37 @@ export default function FinancePoolsPage() {
 
   // Living & Monthly Budget Pool target (Priority #1: must be ring-fenced before Emergency Fund ladder upgrades)
   const effectiveFixedMonthly = fixedMonthlyTotalAll || fixedMonthlyTotal;
+  const monthlyGoalSavingsTarget = useMemo(() => {
+    if (snapshot?.split?.goalSavingsAmount && snapshot.split.goalSavingsAmount > 0) {
+      return snapshot.split.goalSavingsAmount;
+    }
+    const anchorNow = startOfWeek(new Date(), { weekStartsOn: 1 });
+    let totalPaceMonthly = 0;
+    for (const g of finance.goals) {
+      if ((g as any)?.is_stash || g.name.toLowerCase().includes('stash')) continue;
+      if ((g as any)?.is_emergency || g.name.toLowerCase().includes('emergency')) continue;
+      if (g.start_date && new Date(g.start_date) > anchorNow) continue;
+      const targetBase = finance.convertToBase(g.target_amount || 0, g.currency);
+      const assignedBase = finance.convertToBase(g.assigned_amount || 0, g.currency);
+      const remainingBase = Math.max(0, targetBase - assignedBase);
+      if (remainingBase <= 0.01) continue;
+      if (g.deadline) {
+        const dl = new Date(g.deadline);
+        const daysLeft = Math.max(1, Math.ceil((dl.getTime() - anchorNow.getTime()) / (1000 * 60 * 60 * 24)));
+        const weeksLeft = Math.max(1, daysLeft / 7);
+        totalPaceMonthly += Math.min(remainingBase, (remainingBase / weeksLeft) * 4.33);
+      }
+    }
+    return totalPaceMonthly;
+  }, [snapshot, finance.goals, finance.convertToBase]);
+
   const effectiveWeeklyFun = snapshot?.weeklyFunBudget ?? snapshot?.baseWeeklyFun ?? 0;
-  const monthlyFunAllowance = effectiveWeeklyFun * 4.33;
+  const monthlyFunAllowance = (snapshot?.split?.funAmount && snapshot.split.funAmount > 0)
+    ? snapshot.split.funAmount
+    : effectiveWeeklyFun * 4.33;
+  const monthlyTotalIncome = (snapshot?.split?.monthlyIncome && snapshot.split.monthlyIncome > 0)
+    ? snapshot.split.monthlyIncome
+    : (effectiveFixedMonthly + essentialVariable + monthlyGoalSavingsTarget + monthlyFunAllowance);
   const monthlyLivingTarget = effectiveFixedMonthly + essentialVariable + monthlyFunAllowance;
 
   // Track living expenses already paid so far this month (Fixed Bills / Rent, Essentials, Discretionary)
@@ -1722,7 +1751,7 @@ export default function FinancePoolsPage() {
           );
         })()}
 
-        {/* Current Monthly Living & Spending Pot */}
+        {/* Current Monthly Living & Spending Pot (System Auto-Calculated Pot) */}
         {(() => {
           const totalSpentSoFar = fixedPaidSoFar + variableSpentSoFar;
           const remainingEssentials = Math.max(0, essentialVariable - variableSpentSoFar);
@@ -1734,18 +1763,18 @@ export default function FinancePoolsPage() {
           const isLow = pctRemaining <= 15 && remainingLivingReserve > 0;
           const isExhausted = remainingLivingReserve <= 0.01;
 
-          let cardBorder = 'border-sky-300 bg-sky-50/60 shadow-[4px_4px_0px_0px_rgba(14,165,233,0.12)]';
-          let iconBg = 'bg-sky-500 text-white';
-          let barBg = 'bg-sky-500';
-          let badgeClass = 'bg-sky-100 text-sky-800 border-sky-300';
+          let cardBorder = 'border-purple-300/80 bg-gradient-to-b from-purple-50/60 via-white to-sky-50/40 shadow-[4px_4px_0px_0px_rgba(168,85,247,0.15)]';
+          let iconBg = 'bg-gradient-to-tr from-purple-600 to-[#FF2EB8] text-white';
+          let barBg = 'bg-purple-600';
+          let badgeClass = 'bg-purple-100 text-purple-900 border-purple-300';
 
           if (isExhausted) {
-            cardBorder = 'border-rose-300 bg-rose-50/60 shadow-[4px_4px_0px_0px_rgba(244,63,94,0.12)]';
+            cardBorder = 'border-rose-300 bg-rose-50/60 shadow-[4px_4px_0px_0px_rgba(244,63,94,0.15)]';
             iconBg = 'bg-rose-500 text-white';
             barBg = 'bg-rose-500';
             badgeClass = 'bg-rose-100 text-rose-800 border-rose-300';
           } else if (isLow) {
-            cardBorder = 'border-amber-300 bg-amber-50/60 shadow-[4px_4px_0px_0px_rgba(245,158,11,0.12)]';
+            cardBorder = 'border-amber-300 bg-amber-50/60 shadow-[4px_4px_0px_0px_rgba(245,158,11,0.15)]';
             iconBg = 'bg-amber-500 text-white';
             barBg = 'bg-amber-500';
             badgeClass = 'bg-amber-100 text-amber-800 border-amber-300';
@@ -1756,21 +1785,21 @@ export default function FinancePoolsPage() {
               className={`rounded-2xl border-2 p-5 transition-all hover:scale-[1.01] flex flex-col justify-between ${cardBorder}`}
             >
               <div>
-                {/* Header */}
+                {/* Header with System Auto-Calculated Pot Badging */}
                 <div className="flex items-start justify-between gap-2 mb-3">
                   <div className="flex items-center gap-3">
                     <div className={`w-10 h-10 rounded-xl ${iconBg} flex items-center justify-center flex-shrink-0 shadow-xs`}>
-                      <Wallet className="w-5 h-5" />
+                      <Sparkles className="w-5 h-5" />
                     </div>
                     <div>
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <h3 className="text-sm font-bold text-slate-900">{targetMonthLabel} Living Budget</h3>
-                        <Badge variant="outline" className="text-[9px] px-1.5 py-0 text-sky-800 border-sky-300 bg-sky-100/70 font-bold">
-                          Monthly Spending
+                        <Badge className="bg-purple-100 text-purple-900 border-purple-300 font-bold text-[9px] px-1.5 py-0">
+                          🤖 Auto-Calculated Pot
                         </Badge>
                       </div>
                       <p className="text-[11px] text-slate-500 mt-0.5 leading-tight">
-                        Fixed Bills + Variable Essentials + Fun Money
+                        Fixed + Essentials + Pot Commitments + Fun Money
                       </p>
                     </div>
                   </div>
@@ -1787,10 +1816,10 @@ export default function FinancePoolsPage() {
                         {fmt(remainingLivingReserve)}
                       </span>
                       <span className="text-xs text-slate-500 ml-1 font-semibold">
-                        left of {fmt(monthlyLivingTarget)}
+                        left of {fmt(monthlyLivingTarget)} spendable
                       </span>
                     </div>
-                    <span className="text-xs font-bold tabular-nums text-sky-700">
+                    <span className="text-xs font-bold tabular-nums text-purple-700">
                       {fmt(totalSpentSoFar)} spent
                     </span>
                   </div>
@@ -1801,10 +1830,13 @@ export default function FinancePoolsPage() {
                       style={{ width: `${pctRemaining}%` }}
                     />
                   </div>
+                  <p className="text-[10px] text-slate-400 mt-1">
+                    Of {fmt(monthlyTotalIncome)} total income ({fmt(monthlyGoalSavingsTarget)} locked into pots)
+                  </p>
                 </div>
 
-                {/* Breakdown */}
-                <div className="text-xs space-y-1.5 border-t border-slate-200/60 pt-3 mt-3.5">
+                {/* 4-Step Waterfall Breakdown */}
+                <div className="text-xs space-y-2 border-t border-purple-100 pt-3 mt-3">
                   <div className="flex justify-between items-center">
                     <span className="text-slate-500 font-semibold">1. Fixed Bills:</span>
                     <span className="font-bold text-slate-800">
@@ -1825,8 +1857,16 @@ export default function FinancePoolsPage() {
                       )}
                     </span>
                   </div>
+                  <div className="flex justify-between items-center bg-purple-50/70 -mx-1.5 px-1.5 py-1 rounded-lg border border-purple-100">
+                    <span className="text-purple-900 font-bold flex items-center gap-1">
+                      3. Pot Savings:
+                    </span>
+                    <span className="font-extrabold text-purple-700">
+                      {fmt(monthlyGoalSavingsTarget)} to pots 🔒 ({fmt(monthlyGoalSavingsTarget / 4.33)}/wk)
+                    </span>
+                  </div>
                   <div className="flex justify-between items-center">
-                    <span className="text-slate-500 font-semibold">3. Fun Money Allowance:</span>
+                    <span className="text-slate-500 font-semibold">4. Fun Money:</span>
                     <span className="font-extrabold text-[#FF2EB8]">
                       {fmt(remainingFun)} left ({fmt(effectiveWeeklyFun)}/wk)
                     </span>
@@ -1835,9 +1875,9 @@ export default function FinancePoolsPage() {
               </div>
 
               {/* Footer info */}
-              <div className="pt-3 mt-3 border-t border-slate-200/60 flex items-center justify-between text-[11px] text-slate-500">
-                <span className="font-medium">Operational Living Reserve</span>
-                <span className="font-bold text-sky-700">Auto-funded from salary</span>
+              <div className="pt-3 mt-3 border-t border-purple-100 flex items-center justify-between text-[11px] text-slate-500">
+                <span className="font-medium text-purple-700">Non-deletable system pot</span>
+                <span className="font-bold text-emerald-700">✓ 100% of {fmt(monthlyTotalIncome)} Income Allocated</span>
               </div>
             </div>
           );

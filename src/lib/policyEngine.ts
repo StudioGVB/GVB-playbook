@@ -988,8 +988,9 @@ export function computeRequiredGoalSavingsMonthly(
     if ((g as any)?.is_stash || (g.name || '').toLowerCase().includes('stash')) continue;
     if ((g as any)?.is_emergency === true || (g.name || '').toLowerCase().includes('emergency')) continue;
     const plan = schedule.getGoalPlanForMonth(g.id, now);
-    if (plan && !plan.isFutureStart) {
-      scheduledMonthlyTotal += plan.monthlyAmount;
+    if (plan && !plan.isFutureStart && plan.weeklyPace > 0) {
+      const monthlyPace = Math.min(plan.remainingToSaveBase, plan.weeklyPace * 4.33);
+      scheduledMonthlyTotal += monthlyPace;
     }
   }
   if (scheduledMonthlyTotal > 0) {
