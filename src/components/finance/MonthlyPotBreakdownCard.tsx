@@ -14,13 +14,8 @@ import {
 } from 'recharts';
 import {
   BarChart3,
-  PiggyBank,
   Sparkles,
-  Calendar,
-  ArrowRight,
-  CheckCircle2,
-  Flag,
-  Play,
+  Scale,
 } from 'lucide-react';
 import {
   addMonths,
@@ -65,6 +60,8 @@ interface MonthPotContribution {
   goal: FinanceGoal;
   color: string;
   amount: number;
+  evenAmount: number;
+  isBoosted: boolean;
   activeDays: number;
   weeklyPaceInMonth: number;
   projectedFundedAfterMonth: number;
@@ -118,6 +115,7 @@ export default function MonthlyPotBreakdownCard({
   baseCurrency,
   monthlyPotCapacity = 0,
 }: Props) {
+  const [pacingMode, setPacingMode] = useState<'dynamic' | 'even'>('dynamic');
   const [focusedGoalId, setFocusedGoalId] = useState<string | null>(null);
   const [selectedMonthKey, setSelectedMonthKey] = useState<string | null>(null);
 
@@ -217,7 +215,7 @@ export default function MonthlyPotBreakdownCard({
       });
     });
 
-    // Sort active goals by deadline (soonest first) so the bottom of the stack is the most urgent pots
+    // Sort active goals by deadline (soonest first) so urgent short-term goals get priority first
     metas.sort((a, b) => a.effectiveDeadline.getTime() - b.effectiveDeadline.getTime());
 
     // Cap horizon at 12 months forward
@@ -231,12 +229,111 @@ export default function MonthlyPotBreakdownCard({
       cursor = addMonths(cursor, 1);
     }
 
+    // Available calendar days in each month (for current month, remaining days from today)
+    const monthAvailableDays = months.map((mDate, mIdx) => {
+      const mStart = startOfMonth(mDate);
+      const mEnd = endOfMonth(mDate);
+      const winStart = mIdx === 0 && today > mStart ? today : mStart;
+      return Math.max(1, differenceInCalendarDays(mEnd, winStart) + 1);
+    });
+
+    // Precompute active days w_{g,m} and even linear amount for each goal in each month
+    const activeDaysMatrix = new Map<string, number[]>();
+    const evenAllocMatrix = new Map<string, number[]>();
+    const dynamicAllocMatrix = new Map<string, number[]>();
+
+    for (const meta of metas) {
+      const daysPerMonth: number[] = [];
+      const evenPerMonth: number[] = [];
+
+      months.forEach((mDate, mIdx) => {
+        const mStart = startOfMonth(mDate);
+        const mEnd = endOfMonth(mDate);
+        const windowStart = meta.effectiveStart > mStart ? meta.effectiveStart : mStart;
+        const windowEnd = meta.effectiveDeadline < mEnd ? meta.effectiveDeadline : mEnd;
+
+        if (windowEnd >= windowStart) {
+          const activeDays = differenceInCalendarDays(windowEnd, windowStart) + 1;
+          daysPerMonth[mIdx] = activeDays;
+          evenPerMonth[mIdx] = (meta.remainingToSaveBase * activeDays) / meta.totalActiveDays;
+        } else {
+          daysPerMonth[mIdx] = 0;
+          evenPerMonth[mIdx] = 0;
+        }
+      });
+
+      activeDaysMatrix.set(meta.goal.id, daysPerMonth);
+      evenAllocMatrix.set(meta.goal.id, evenPerMonth);
+    }
+
+    // Compute Dynamic Smart Pacing via urgency-ordered water-filling:
+    // Early-deadline goals claim capacity first; longer-deadline goals (e.g. Italy, Ski trip, Visa)
+    // stay lighter during crowded winter/spring months and automatically ramp up in months where earlier goals have finished.
+    const monthCommittedLoad = new Array(months.length).fill(0);
+
+    for (const meta of metas) {
+      const daysPerMonth = activeDaysMatrix.get(meta.goal.id)!;
+      const evenPerMonth = evenAllocMatrix.get(meta.goal.id)!;
+      const activeMonthIndices = daysPerMonth
+        .map((d, idx) => (d > 0 ? idx : -1))
+        .filter(idx => idx !== -1);
+
+      if (activeMonthIndices.length <= 1) {
+        dynamicAllocMatrix.set(meta.goal.id, [...evenPerMonth]);
+        activeMonthIndices.forEach(idx => {
+          monthCommittedLoad[idx] += evenPerMonth[idx];
+        });
+        continue;
+      }
+
+      // Keep 20% baseline linear contribution in every active month so the goal always makes steady progress,
+      // and water-fill the remaining 80% into the months that have the lowest competing goal load.
+      const BASELINE_RATIO = 0.2;
+      const baselinePerMonth = evenPerMonth.map(amt => amt * BASELINE_RATIO);
+      const flexRemaining = meta.remainingToSaveBase * (1 - BASELINE_RATIO);
+
+      // Existing daily load u_m in each active month
+      const dailyLoad = months.map((_, mIdx) => {
+        return (monthCommittedLoad[mIdx] + baselinePerMonth[mIdx]) / monthAvailableDays[mIdx];
+      });
+
+      let low = Math.min(...activeMonthIndices.map(mIdx => dailyLoad[mIdx]));
+      let high =
+        Math.max(...activeMonthIndices.map(mIdx => dailyLoad[mIdx])) +
+        flexRemaining / Math.min(...activeMonthIndices.map(mIdx => Math.max(1, daysPerMonth[mIdx])));
+
+      for (let iter = 0; iter < 45; iter++) {
+        const mid = (low + high) / 2;
+        let allocated = 0;
+        for (const mIdx of activeMonthIndices) {
+          if (mid > dailyLoad[mIdx]) {
+            allocated += daysPerMonth[mIdx] * (mid - dailyLoad[mIdx]);
+          }
+        }
+        if (allocated < flexRemaining) {
+          low = mid;
+        } else {
+          high = mid;
+        }
+      }
+
+      const waterLevel = (low + high) / 2;
+      const dynPerMonth = months.map((_, mIdx) => {
+        if (daysPerMonth[mIdx] <= 0) return 0;
+        const flexAdd = daysPerMonth[mIdx] * Math.max(0, waterLevel - dailyLoad[mIdx]);
+        return baselinePerMonth[mIdx] + flexAdd;
+      });
+
+      dynamicAllocMatrix.set(meta.goal.id, dynPerMonth);
+      activeMonthIndices.forEach(mIdx => {
+        monthCommittedLoad[mIdx] += dynPerMonth[mIdx];
+      });
+    }
+
     const cumulativeByGoal = new Map<string, number>();
     metas.forEach(m => cumulativeByGoal.set(m.goal.id, m.effectiveFundedBase));
 
     const series: MonthSeriesPoint[] = months.map((mDate, mIdx) => {
-      const mStart = startOfMonth(mDate);
-      const mEnd = endOfMonth(mDate);
       const mKey = format(mDate, 'yyyy-MM');
 
       const point: MonthSeriesPoint = {
@@ -252,39 +349,37 @@ export default function MonthlyPotBreakdownCard({
       };
 
       for (const meta of metas) {
-        const windowStart = meta.effectiveStart > mStart ? meta.effectiveStart : mStart;
-        const windowEnd = meta.effectiveDeadline < mEnd ? meta.effectiveDeadline : mEnd;
+        const activeDays = activeDaysMatrix.get(meta.goal.id)![mIdx];
+        const evenAmt = evenAllocMatrix.get(meta.goal.id)![mIdx];
+        const dynAmt = dynamicAllocMatrix.get(meta.goal.id)![mIdx];
+        const chosenAmt = pacingMode === 'dynamic' ? dynAmt : evenAmt;
 
-        let amount = 0;
-        if (windowEnd >= windowStart) {
-          const activeDays = differenceInCalendarDays(windowEnd, windowStart) + 1;
-          amount = (meta.remainingToSaveBase * activeDays) / meta.totalActiveDays;
+        if (activeDays > 0 && chosenAmt > 0.01) {
+          const roundedAmt = Math.round(chosenAmt * 100) / 100;
+          const roundedEven = Math.round(evenAmt * 100) / 100;
+          const prevFunded = cumulativeByGoal.get(meta.goal.id) || 0;
+          const projectedAfter = Math.min(meta.targetBase, prevFunded + roundedAmt);
+          cumulativeByGoal.set(meta.goal.id, projectedAfter);
 
-          if (amount > 0.01) {
-            const roundedAmt = Math.round(amount * 100) / 100;
-            const prevFunded = cumulativeByGoal.get(meta.goal.id) || 0;
-            const projectedAfter = Math.min(meta.targetBase, prevFunded + roundedAmt);
-            cumulativeByGoal.set(meta.goal.id, projectedAfter);
+          const startsThisMonth = Boolean(meta.rawStart && isSameMonth(meta.rawStart, mDate));
+          const endsThisMonth = Boolean(meta.rawDeadline && isSameMonth(meta.rawDeadline, mDate));
+          const isBoosted = pacingMode === 'dynamic' && roundedAmt > roundedEven * 1.12;
 
-            const startsThisMonth = Boolean(meta.rawStart && isSameMonth(meta.rawStart, mDate));
-            const endsThisMonth = Boolean(meta.rawDeadline && isSameMonth(meta.rawDeadline, mDate));
-
-            point[meta.goal.id] = roundedAmt;
-            point.total += roundedAmt;
-            point.contributions.push({
-              goal: meta.goal,
-              color: meta.color,
-              amount: roundedAmt,
-              activeDays,
-              weeklyPaceInMonth: roundedAmt / Math.max(1, activeDays / 7),
-              projectedFundedAfterMonth: projectedAfter,
-              targetBase: meta.targetBase,
-              startsThisMonth,
-              endsThisMonth,
-            });
-          } else {
-            point[meta.goal.id] = 0;
-          }
+          point[meta.goal.id] = roundedAmt;
+          point.total += roundedAmt;
+          point.contributions.push({
+            goal: meta.goal,
+            color: meta.color,
+            amount: roundedAmt,
+            evenAmount: roundedEven,
+            isBoosted,
+            activeDays,
+            weeklyPaceInMonth: roundedAmt / Math.max(1, activeDays / 7),
+            projectedFundedAfterMonth: projectedAfter,
+            targetBase: meta.targetBase,
+            startsThisMonth,
+            endsThisMonth,
+          });
         } else {
           point[meta.goal.id] = 0;
         }
@@ -301,7 +396,7 @@ export default function MonthlyPotBreakdownCard({
     }
 
     return { activeGoalMetas: metas, chartData: series };
-  }, [goals, convertToBase, spentByGoalTotal]);
+  }, [goals, convertToBase, spentByGoalTotal, pacingMode]);
 
   // Default selected month to Next Month (e.g. Dec) if available, otherwise Current Month
   const activeSelectedMonth = useMemo(() => {
@@ -329,7 +424,7 @@ export default function MonthlyPotBreakdownCard({
     const monthTotal = items.reduce((s, c) => s + c.amount, 0);
 
     return (
-      <div className="bg-white/95 backdrop-blur-md border-2 border-slate-200 rounded-2xl p-3.5 shadow-xl min-w-[250px] max-w-[320px] font-body">
+      <div className="bg-white/95 backdrop-blur-md border-2 border-slate-200 rounded-2xl p-3.5 shadow-xl min-w-[260px] max-w-[340px] font-body">
         <div className="flex items-center justify-between gap-3 pb-2 mb-2 border-b border-slate-100">
           <div>
             <p className="text-xs font-display font-black text-slate-900">
@@ -363,6 +458,14 @@ export default function MonthlyPotBreakdownCard({
                   <span className="font-semibold text-slate-800 truncate">
                     {item.goal.name}
                   </span>
+                  {item.isBoosted && (
+                    <span
+                      className="text-[9px] font-bold px-1.5 py-0 rounded bg-amber-50 text-amber-800 border border-amber-200 shrink-0"
+                      title="Ramped up this month because earlier pots finished"
+                    >
+                      ⚡ Ramped up
+                    </span>
+                  )}
                   {item.startsThisMonth && (
                     <span className="text-[9px] font-bold px-1.5 py-0 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 shrink-0">
                       Starts
@@ -388,7 +491,7 @@ export default function MonthlyPotBreakdownCard({
   return (
     <Card className="bg-white rounded-3xl border-2 border-[#FF7AD1]/40 shadow-[6px_6px_0px_0px_rgba(255,46,184,0.1)] overflow-hidden">
       <CardHeader className="bg-gradient-to-r from-[#FFF5FA] via-white to-[#F0F9FF] border-b border-[#FF7AD1]/20 p-6 pb-5">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2 mb-1">
               <span className="bg-[#FF2EB8] text-white p-1.5 rounded-xl">
@@ -402,57 +505,55 @@ export default function MonthlyPotBreakdownCard({
               Monthly Pot Contributions Breakdown
             </CardTitle>
             <p className="text-xs text-slate-500 mt-1">
-              See how much you’ll be putting towards your pots each month as active goals finish and new ones start. Click any bar to inspect that month, or click a pot below to isolate it.
+              {pacingMode === 'dynamic'
+                ? 'Dynamic Smart Pace: prioritizes soonest due dates first, then automatically puts more towards later goals (like Italy or Ski trip) once earlier pots finish.'
+                : 'Even Linear Pace: spreads each pot evenly by day count between its start date and due date.'}
             </p>
           </div>
 
-          {focusedGoalId && (
-            <button
-              type="button"
-              onClick={() => setFocusedGoalId(null)}
-              className="self-start md:self-center text-xs font-display font-bold px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer"
-            >
-              Show All Pots ✕
-            </button>
-          )}
+          <div className="flex items-center gap-2 flex-wrap self-start lg:self-center">
+            {focusedGoalId && (
+              <button
+                type="button"
+                onClick={() => setFocusedGoalId(null)}
+                className="text-xs font-display font-bold px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer"
+              >
+                Show All Pots ✕
+              </button>
+            )}
+
+            {/* Pacing Mode Switcher */}
+            <div className="flex items-center bg-slate-100/90 p-1 rounded-xl border border-slate-200/80">
+              <button
+                type="button"
+                onClick={() => setPacingMode('dynamic')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-display font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                  pacingMode === 'dynamic'
+                    ? 'bg-[#FF2EB8] text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+                title="Automatically shifts more contribution into months where fewer competing pots are active"
+              >
+                <Sparkles className="w-3.5 h-3.5" /> Dynamic Smart Pace
+              </button>
+              <button
+                type="button"
+                onClick={() => setPacingMode('even')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-display font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                  pacingMode === 'even'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+                title="Flat daily rate per pot from start date to due date"
+              >
+                <Scale className="w-3.5 h-3.5" /> Even Linear Pace
+              </button>
+            </div>
+          </div>
         </div>
       </CardHeader>
 
       <CardContent className="p-6 space-y-6">
-        {/* Month Total Quick Pills Strip */}
-        <div className="flex items-center gap-2.5 overflow-x-auto pb-1 touch-scroll">
-          {chartData.map(m => {
-            const isSelected = activeSelectedMonth?.monthKey === m.monthKey;
-            return (
-              <button
-                key={m.monthKey}
-                type="button"
-                onClick={() => setSelectedMonthKey(m.monthKey)}
-                className={`shrink-0 rounded-2xl border-2 px-3.5 py-2.5 text-left transition-all cursor-pointer ${
-                  isSelected
-                    ? 'bg-[#FFF5FA] border-[#FF2EB8] shadow-xs'
-                    : 'bg-slate-50/70 border-slate-200/80 hover:border-slate-300 hover:bg-white'
-                }`}
-              >
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[11px] font-display font-bold text-slate-600 uppercase tracking-wider">
-                    {format(m.monthDate, 'MMM yyyy')}
-                  </span>
-                  {m.isCurrentMonth && (
-                    <span className="w-1.5 h-1.5 rounded-full bg-[#FF2EB8]" title="Current Month" />
-                  )}
-                </div>
-                <div className="text-base font-display font-black text-slate-900 tabular-nums mt-0.5">
-                  {fmt(m.total)}
-                </div>
-                <div className="text-[10px] text-slate-500 font-medium">
-                  {m.contributions.length} {m.contributions.length === 1 ? 'pot' : 'pots'} active
-                </div>
-              </button>
-            );
-          })}
-        </div>
-
         {/* Stacked Bar Chart */}
         {activeGoalMetas.length === 0 ? (
           <div className="rounded-2xl border-2 border-dashed border-slate-200 p-8 text-center text-sm text-slate-500">
@@ -546,7 +647,7 @@ export default function MonthlyPotBreakdownCard({
                 Active Pots in Chart (Click to Isolate)
               </span>
               <span className="text-[11px] text-slate-400">
-                Sorted by due date
+                Click any bar above to view that month’s breakdown
               </span>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -650,6 +751,15 @@ export default function MonthlyPotBreakdownCard({
                               <span className="text-xs font-bold text-slate-900 truncate">
                                 {c.goal.name}
                               </span>
+                              {c.isBoosted && (
+                                <Badge
+                                  variant="outline"
+                                  className="text-[9px] px-1.5 py-0 border-amber-200 text-amber-800 bg-amber-50 font-bold"
+                                  title="Ramped up this month because earlier pots finished"
+                                >
+                                  ⚡ Ramped up
+                                </Badge>
+                              )}
                               {c.startsThisMonth && (
                                 <Badge
                                   variant="outline"
