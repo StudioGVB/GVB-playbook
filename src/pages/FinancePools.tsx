@@ -1725,7 +1725,126 @@ export default function FinancePoolsPage() {
           );
         })()}
 
+        {/* Current Monthly Living & Spending Pot */}
+        {(() => {
+          const totalSpentSoFar = fixedPaidSoFar + variableSpentSoFar;
+          const remainingEssentials = Math.max(0, essentialVariable - variableSpentSoFar);
+          const remainingFun = Math.max(0, remainingLivingReserve - remainingFixedBills - remainingEssentials);
+          const pctRemaining = monthlyLivingTarget > 0
+            ? Math.min(100, Math.max(0, (remainingLivingReserve / monthlyLivingTarget) * 100))
+            : 0;
 
+          const isLow = pctRemaining <= 15 && remainingLivingReserve > 0;
+          const isExhausted = remainingLivingReserve <= 0.01;
+
+          let cardBorder = 'border-sky-300 bg-sky-50/60 shadow-[4px_4px_0px_0px_rgba(14,165,233,0.12)]';
+          let iconBg = 'bg-sky-500 text-white';
+          let barBg = 'bg-sky-500';
+          let badgeClass = 'bg-sky-100 text-sky-800 border-sky-300';
+
+          if (isExhausted) {
+            cardBorder = 'border-rose-300 bg-rose-50/60 shadow-[4px_4px_0px_0px_rgba(244,63,94,0.12)]';
+            iconBg = 'bg-rose-500 text-white';
+            barBg = 'bg-rose-500';
+            badgeClass = 'bg-rose-100 text-rose-800 border-rose-300';
+          } else if (isLow) {
+            cardBorder = 'border-amber-300 bg-amber-50/60 shadow-[4px_4px_0px_0px_rgba(245,158,11,0.12)]';
+            iconBg = 'bg-amber-500 text-white';
+            barBg = 'bg-amber-500';
+            badgeClass = 'bg-amber-100 text-amber-800 border-amber-300';
+          }
+
+          return (
+            <div
+              className={`rounded-2xl border-2 p-5 transition-all hover:scale-[1.01] flex flex-col justify-between ${cardBorder}`}
+            >
+              <div>
+                {/* Header */}
+                <div className="flex items-start justify-between gap-2 mb-3">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-10 h-10 rounded-xl ${iconBg} flex items-center justify-center flex-shrink-0 shadow-xs`}>
+                      <Wallet className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <h3 className="text-sm font-bold text-slate-900">{targetMonthLabel} Living Budget</h3>
+                        <Badge variant="outline" className="text-[9px] px-1.5 py-0 text-sky-800 border-sky-300 bg-sky-100/70 font-bold">
+                          Monthly Spending
+                        </Badge>
+                      </div>
+                      <p className="text-[11px] text-slate-500 mt-0.5 leading-tight">
+                        Fixed Bills + Variable Essentials + Fun Money
+                      </p>
+                    </div>
+                  </div>
+                  <Badge className={`${badgeClass} border font-display font-bold text-[10px] px-2 py-0.5 rounded-full shrink-0`}>
+                    {pctRemaining.toFixed(0)}% remaining
+                  </Badge>
+                </div>
+
+                {/* Balance & Progress */}
+                <div className="mt-2">
+                  <div className="flex items-baseline justify-between flex-wrap gap-1 mb-1.5">
+                    <div>
+                      <span className="text-2xl font-display font-black text-slate-900 tracking-tight">
+                        {fmt(remainingLivingReserve)}
+                      </span>
+                      <span className="text-xs text-slate-500 ml-1 font-semibold">
+                        left of {fmt(monthlyLivingTarget)}
+                      </span>
+                    </div>
+                    <span className="text-xs font-bold tabular-nums text-sky-700">
+                      {fmt(totalSpentSoFar)} spent
+                    </span>
+                  </div>
+
+                  <div className="w-full bg-slate-200/70 rounded-full h-2.5 overflow-hidden">
+                    <div
+                      className={`h-full transition-all rounded-full ${barBg}`}
+                      style={{ width: `${pctRemaining}%` }}
+                    />
+                  </div>
+                </div>
+
+                {/* Breakdown */}
+                <div className="text-xs space-y-1.5 border-t border-slate-200/60 pt-3 mt-3.5">
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-500 font-semibold">1. Fixed Bills:</span>
+                    <span className="font-bold text-slate-800">
+                      {remainingFixedBills <= 0.01 ? (
+                        <span className="text-emerald-700">£0.00 left ({fmt(fixedPaidSoFar)} paid ✓)</span>
+                      ) : (
+                        `${fmt(remainingFixedBills)} left (${fmt(fixedPaidSoFar)} paid)`
+                      )}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-500 font-semibold">2. Variable Essentials:</span>
+                    <span className="font-bold text-slate-800">
+                      {remainingEssentials <= 0.01 ? (
+                        <span className="text-emerald-700">£0.00 left ({fmt(variableSpentSoFar)} spent)</span>
+                      ) : (
+                        `${fmt(remainingEssentials)} left (${fmt(variableSpentSoFar)} spent)`
+                      )}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-500 font-semibold">3. Fun Money Allowance:</span>
+                    <span className="font-extrabold text-[#FF2EB8]">
+                      {fmt(remainingFun)} left ({fmt(effectiveWeeklyFun)}/wk)
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Footer info */}
+              <div className="pt-3 mt-3 border-t border-slate-200/60 flex items-center justify-between text-[11px] text-slate-500">
+                <span className="font-medium">Operational Living Reserve</span>
+                <span className="font-bold text-sky-700">Auto-funded from salary</span>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Goal Pool Cards */}
         {sortedNonEmergencyGoals.map(goal => {
