@@ -35,6 +35,7 @@ import FeasibilityAlert from '@/components/finance/FeasibilityAlert';
 import FeasibilityBreakdownDialog from '@/components/finance/FeasibilityBreakdownDialog';
 import PurchaseTimingEvaluator from '@/components/finance/PurchaseTimingEvaluator';
 import { useWeeklyBoosts } from '@/hooks/useWeeklyBoosts';
+import { usePotPacingMode, computeMonthlyPotSchedule } from '@/lib/potPacingEngine';
 import { useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 
@@ -388,6 +389,18 @@ export default function FinancePoolsPage() {
     runReconcile();
   }, [allDataReady, finance.loading, finance.hasLoadedOnce, finance.goals, goalDirectSpent, goalTripSpent]);
 
+  const [pacingMode] = usePotPacingMode();
+
+  const potSchedule = useMemo(() => {
+    return computeMonthlyPotSchedule({
+      goals: finance.goals,
+      transactions: finance.transactions,
+      categories: finance.categories,
+      convertToBase: finance.convertToBase,
+      pacingMode,
+    });
+  }, [finance.goals, finance.transactions, finance.categories, finance.convertToBase, pacingMode]);
+
   // Paycheck Detection (evaluated first so monthly pools anchor accurately to paid cycles)
   const detectedPaycheck = useMemo(
     () => detectPaycheck(finance.transactions, finance.categories),
@@ -406,7 +419,7 @@ export default function FinancePoolsPage() {
       finance.goals, finance.convertToBase, fixedMonthlyTotal, undefined, wtMap, trips, fixedMonthlyTotalAll,
       poolRefDate,
     );
-  }, [assumptions, finance.accounts, finance.transactions, finance.categories, finance.goals, finance.convertToBase, fixedMonthlyTotal, fixedMonthlyTotalAll, wtMap, trips, detectedPaycheck]);
+  }, [assumptions, finance.accounts, finance.transactions, finance.categories, finance.goals, finance.convertToBase, fixedMonthlyTotal, fixedMonthlyTotalAll, wtMap, trips, detectedPaycheck, pacingMode]);
 
   const totalCash = snapshot?.totalLiquidCash ?? 0;
   const weeksUntilIncome = snapshot?.weeksUntilIncome ?? 0;
@@ -866,7 +879,7 @@ export default function FinancePoolsPage() {
       finance.convertToBase,
       finance.transactions
     );
-  }, [paycheckTx, emergencyFloor, currentEmergencyFunded, finance.goals, fixedMonthlyTotal, essentialVariable, finance.convertToBase, finance.transactions]);
+  }, [paycheckTx, emergencyFloor, currentEmergencyFunded, finance.goals, fixedMonthlyTotal, essentialVariable, finance.convertToBase, finance.transactions, pacingMode]);
 
   const handleExecutePaycheckAllocation = async () => {
     if (!paycheckTx || !waterfallBreakdown || paycheckAllocated) return;
@@ -1971,8 +1984,11 @@ export default function FinancePoolsPage() {
                     const assignedVal = finance.convertToBase(effectiveFundedNative, goal.currency);
                     const remainingToSave = Math.max(0, targetVal - assignedVal);
 
+                    const scheduledPlan = potSchedule.getGoalPlanForMonth(goal.id);
                     let weeklyRequired = 0;
-                    if (isFutureStart) {
+                    if (scheduledPlan) {
+                      weeklyRequired = scheduledPlan.weeklyPace;
+                    } else if (isFutureStart) {
                       const st = new Date(goal.start_date!);
                       const daysBetween = Math.max(1, Math.ceil((dl.getTime() - st.getTime()) / (1000 * 60 * 60 * 24)));
                       const weeksBetween = daysBetween / 7;
@@ -1981,7 +1997,9 @@ export default function FinancePoolsPage() {
                       const weeksRemaining = daysRemainingClamped / 7;
                       weeklyRequired = remainingToSave / weeksRemaining;
                     }
-                    const monthlyRequired = Math.min(remainingToSave, weeklyRequired * 4.33);
+                    const monthlyRequired = scheduledPlan
+                      ? scheduledPlan.monthlyAmount
+                      : Math.min(remainingToSave, weeklyRequired * 4.33);
                     
                     return (
                       <>
@@ -2001,6 +2019,11 @@ export default function FinancePoolsPage() {
                           <span className="text-slate-500 font-semibold">Monthly Pace:</span>
                           <span className="font-extrabold text-[#FF2EB8]">
                             {formatCurrency(monthlyRequired, baseCurrency)}/mo
+                            {scheduledPlan && pacingMode === 'dynamic' && scheduledPlan.isLighterThisMonth && (
+                              <span className="text-[10px] font-semibold text-slate-500 ml-1" title="Lighter right now under Dynamic Smart Pace while urgent goals finish first">
+                                (ramps up later)
+                              </span>
+                            )}
                           </span>
                         </div>
                         <div className="flex justify-between">

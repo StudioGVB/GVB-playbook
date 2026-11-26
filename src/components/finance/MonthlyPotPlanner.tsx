@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { Slider } from '@/components/ui/slider';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { formatCurrency, baseAmt } from '@/lib/financeUtils';
+import { usePotPacingMode, computeMonthlyPotSchedule } from '@/lib/potPacingEngine';
 import type { FinanceGoal, FinanceCategory, FinanceTransaction } from '@/hooks/useFinanceData';
 import type { FinanceAssumptions } from '@/hooks/useFinanceAssumptions';
 
@@ -116,8 +117,18 @@ export default function MonthlyPotPlanner({
     return map;
   }, [transactions, convertToBase]);
 
+  const [pacingMode] = usePotPacingMode();
+
   // Goal-driven recommendations
   const recommendations = useMemo(() => {
+    const potSchedule = computeMonthlyPotSchedule({
+      goals,
+      transactions,
+      categories,
+      convertToBase,
+      pacingMode,
+      referenceDate: targetDate,
+    });
     const list: { goal: FinanceGoal; remaining: number; isFull: boolean; monthlyTarget: number; recommendedPct: number }[] = [];
     let sumTargets = 0;
 
@@ -132,7 +143,10 @@ export default function MonthlyPotPlanner({
 
       let monthlyTarget = 0;
       if (!isFull) {
-        if (g.deadline) {
+        const scheduledPlan = potSchedule.getGoalPlanForMonth(g.id, targetDate);
+        if (scheduledPlan && g.deadline) {
+          monthlyTarget = Math.min(remaining, scheduledPlan.monthlyAmount);
+        } else if (g.deadline) {
           const daysLeft = Math.max(1, Math.ceil((new Date(g.deadline).getTime() - targetDate.getTime()) / (1000 * 60 * 60 * 24)));
           const weeksLeft = Math.max(1, daysLeft / 7);
           monthlyTarget = Math.min(remaining, (remaining / weeksLeft) * 4.33);
@@ -152,7 +166,7 @@ export default function MonthlyPotPlanner({
       const pct = sumTargets > 0 ? (item.monthlyTarget / sumTargets) * 100 : (100 / Math.max(1, allocatablePots.length));
       return { ...item, recommendedPct: pct };
     });
-  }, [allocatablePots, convertToBase, targetDate, potPoolTotal, spentByGoalBase]);
+  }, [allocatablePots, goals, transactions, categories, convertToBase, targetDate, potPoolTotal, spentByGoalBase, pacingMode]);
 
   // Pct state for the interactive sliders
   const [pcts, setPcts] = useState<Record<string, number>>({});

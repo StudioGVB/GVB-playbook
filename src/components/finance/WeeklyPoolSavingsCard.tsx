@@ -5,6 +5,7 @@ import { Sparkles, CheckCircle2, Layers } from 'lucide-react';
 import { formatCurrency } from '@/lib/financeUtils';
 import type { useFinanceData } from '@/hooks/useFinanceData';
 import { format, differenceInCalendarDays } from 'date-fns';
+import { usePotPacingMode, computeMonthlyPotSchedule } from '@/lib/potPacingEngine';
 
 import type { PolicySnapshot } from '@/lib/policyEngine';
 
@@ -16,27 +17,26 @@ interface Props {
 }
 
 export default function WeeklyPoolSavingsCard({ finance, spendablePool = 0, funMoney = 0, snapshot }: Props) {
+  const [pacingMode] = usePotPacingMode();
   const baseCurrency = finance.settings?.base_currency || 'AUD';
   const fmt = (n: number) => formatCurrency(n, baseCurrency);
 
   // Calculate required weekly contribution for each active pool
   const poolBreakdown = useMemo(() => {
-    const spentByGoalBase = new Map<string, number>();
-    for (const tx of finance.transactions || []) {
-      const goalId = (tx as any)?.goal_id;
-      const amt = Number(tx?.amount) || 0;
-      if (!goalId || amt >= 0 || tx?.is_transfer) continue;
-      if ((tx as any).transfer_status === 'confirmed' || (tx as any).transfer_status === 'auto_confirmed') continue;
-      const baseVal = Math.abs(finance.convertToBase(amt, tx?.currency || 'GBP'));
-      spentByGoalBase.set(goalId, (spentByGoalBase.get(goalId) || 0) + baseVal);
-    }
+    const potSchedule = computeMonthlyPotSchedule({
+      goals: finance.goals,
+      transactions: finance.transactions,
+      categories: finance.categories,
+      convertToBase: finance.convertToBase,
+      pacingMode,
+    });
 
     return finance.goals.map((goal) => {
       const targetNative = goal.target_amount || 0;
       const assignedNative = goal.assigned_amount || 0;
       const targetBase = finance.convertToBase(targetNative, goal.currency);
       const assignedBase = finance.convertToBase(assignedNative, goal.currency);
-      const spentBase = spentByGoalBase.get(goal.id) || 0;
+      const spentBase = potSchedule.spentByGoalTotal.get(goal.id) || 0;
       const effectiveFundedBase = goal.refill_when_spent ? assignedBase : (assignedBase + spentBase);
       const remainingBase = Math.max(0, targetBase - effectiveFundedBase);
 
@@ -49,6 +49,7 @@ export default function WeeklyPoolSavingsCard({ finance, spendablePool = 0, funM
       const now = new Date();
       const isFutureStart = !!goal.start_date && new Date(goal.start_date) > now;
       const isStash = (goal as any).is_stash || goal.name.toLowerCase().includes('stash');
+      const scheduledPlan = potSchedule.getGoalPlanForMonth(goal.id, now);
 
       if (remainingBase <= 0.01) {
         status = 'completed';
@@ -58,7 +59,9 @@ export default function WeeklyPoolSavingsCard({ finance, spendablePool = 0, funM
       } else if (isFutureStart) {
         status = 'upcoming';
         weeklyRequiredBase = 0;
-        if (goal.deadline) {
+        if (scheduledPlan) {
+          futureWeeklyPace = scheduledPlan.weeklyPace;
+        } else if (goal.deadline) {
           const dl = new Date(goal.deadline);
           const st = new Date(goal.start_date!);
           const totalDays = Math.max(1, differenceInCalendarDays(dl, st));
@@ -77,7 +80,7 @@ export default function WeeklyPoolSavingsCard({ finance, spendablePool = 0, funM
           weeksRemaining = 1;
         } else {
           weeksRemaining = Math.max(1, daysRemaining / 7);
-          weeklyRequiredBase = remainingBase / weeksRemaining;
+          weeklyRequiredBase = scheduledPlan ? scheduledPlan.weeklyPace : (remainingBase / weeksRemaining);
           // Only flag urgent if overdue or if required pace exceeds weekly cashflow capacity
           const weeklyCapacity = snapshot?.baseWeeklyFun ?? 150;
           status = (weeklyRequiredBase > weeklyCapacity * 1.5) ? 'urgent' : 'on_track';
@@ -102,7 +105,7 @@ export default function WeeklyPoolSavingsCard({ finance, spendablePool = 0, funM
         isStash,
       };
     });
-  }, [finance.goals, finance.convertToBase]);
+  }, [finance.goals, finance.transactions, finance.categories, finance.convertToBase, pacingMode, snapshot]);
 
   const sortedPoolBreakdown = useMemo(() => {
     return [...poolBreakdown].sort((a, b) => {

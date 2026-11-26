@@ -207,11 +207,20 @@ export function calculatePaycheckWaterfall(
 
   // Step 3: Goal Pool Monthly Contributions
   const now = new Date();
+  const pacingMode = getPotPacingMode();
+  const potSchedule = computeMonthlyPotSchedule({
+    goals,
+    transactions: transactions || [],
+    convertToBase,
+    pacingMode,
+    referenceDate: now,
+  });
   const goalAllocations: { goalId: string; goalName: string; monthlyTarget: number; allocatedAmount: number }[] = [];
   let totalGoalAllocations = 0;
 
   for (const g of goals) {
     if ((g as any).is_stash || g.name.toLowerCase().includes('stash')) continue; // Exclude savings stash from step 3 goal targets
+    if ((g as any).is_emergency || g.name.toLowerCase().includes('emergency')) continue;
     if (g.start_date && new Date(g.start_date) > now) continue; // Exclude goals starting in the future
     const targetBase = convertToBase(g.target_amount || 0, g.currency);
     const assignedBase = convertToBase(g.assigned_amount || 0, g.currency);
@@ -223,8 +232,11 @@ export function calculatePaycheckWaterfall(
     // Rule: Pot reached target amount -> skip allocation even if deadline is upcoming (unless refill_when_spent is enabled)
     if (remainingNeeded <= 0.01) continue;
 
+    const scheduledPlan = potSchedule.getGoalPlanForMonth(g.id, now);
     let monthlyTarget = 0;
-    if (g.deadline) {
+    if (scheduledPlan && g.deadline) {
+      monthlyTarget = Math.min(remainingNeeded, scheduledPlan.monthlyAmount);
+    } else if (g.deadline) {
       const daysLeft = Math.max(1, Math.ceil((new Date(g.deadline).getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
       const weeksLeft = Math.max(1, daysLeft / 7);
       monthlyTarget = Math.min(remainingNeeded, (remainingNeeded / weeksLeft) * 4.33);
