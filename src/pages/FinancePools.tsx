@@ -67,9 +67,22 @@ function getPoolIcon(name: string): LucideIcon {
 }
 
 const POOL_COLORS = [
-  '#4558ff', '#da60ff', '#24af58', '#ffb92c', '#ef4444',
-  '#06b6d4', '#84cc16', '#f97316', '#8b5cf6', '#ec4899',
-  '#ffaded', '#6b7280',
+  // Pinks & Roses
+  '#ffaded', '#fbcfe8', '#f472b6', '#ec4899', '#db2777', '#be185d',
+  // Purples, Lilacs & Violets
+  '#f3e8ff', '#e9d5ff', '#c084fc', '#a855f7', '#da60ff', '#8b5cf6', '#7c3aed', '#6366f1',
+  // Blues, Sky & Navy
+  '#e0f2fe', '#bae6fd', '#38bdf8', '#0ea5e9', '#4558ff', '#2563eb', '#1d4ed8', '#1e3a8a',
+  // Teals, Aquas & Cyans
+  '#ccfbf1', '#5eead4', '#06b6d4', '#0891b2', '#0d9488', '#115e59',
+  // Greens, Mints & Sages
+  '#dcfce7', '#86efac', '#24af58', '#10b981', '#059669', '#15803d', '#84cc16', '#65a30d',
+  // Yellows, Ambers & Oranges
+  '#fef08a', '#facc15', '#eab308', '#ffb92c', '#f97316', '#ea580c', '#c2410c',
+  // Corals, Warm Reds & Burgundy
+  '#fda4af', '#fb7185', '#f87171', '#ef4444', '#dc2626', '#991b1b',
+  // Neutrals, Warm Sand, Terracotta & Slate
+  '#ffedd5', '#fed7aa', '#d4d4d8', '#a1a1aa', '#6b7280', '#475569', '#1e293b',
 ];
 import { formatCurrency } from '@/lib/financeUtils';
 import { useFinanceData, type FinanceGoal } from '@/hooks/useFinanceData';
@@ -1781,20 +1794,44 @@ export default function FinancePoolsPage() {
                           <GoalIcon className="w-5 h-5 text-white" />
                         </button>
                       </PopoverTrigger>
-                      <PopoverContent className="w-auto p-3" align="start">
-                        <div className="grid grid-cols-6 gap-1.5">
-                          {POOL_COLORS.map(c => (
-                            <button
-                              key={c}
-                              className="w-7 h-7 rounded-md transition-all hover:scale-110"
-                              style={{
-                                backgroundColor: c,
-                                outline: c === iconColor ? '2px solid hsl(var(--foreground))' : 'none',
-                                outlineOffset: 2,
-                              }}
-                              onClick={() => finance.updateGoal(goal.id, { color: c } as any)}
-                            />
-                          ))}
+                      <PopoverContent className="w-[280px] p-3" align="start">
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between pb-1.5 border-b border-slate-100">
+                            <span className="text-xs font-semibold text-slate-700">Choose Color</span>
+                            <label className="relative cursor-pointer inline-flex items-center gap-1.5 text-[11px] font-medium text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200/80 px-2 py-0.5 rounded-md border border-slate-200 transition-colors">
+                              <Palette className="w-3 h-3 text-slate-500" />
+                              <span>Custom</span>
+                              <input
+                                type="color"
+                                value={iconColor.startsWith('#') && iconColor.length === 7 ? iconColor : '#4558ff'}
+                                onChange={e => finance.updateGoal(goal.id, { color: e.target.value } as any)}
+                                className="sr-only"
+                              />
+                              <span
+                                className="w-3 h-3 rounded-full border border-black/15 inline-block"
+                                style={{ backgroundColor: iconColor }}
+                              />
+                            </label>
+                          </div>
+                          <div className="grid grid-cols-7 gap-1.5 max-h-[180px] overflow-y-auto p-1 bg-slate-50/60 rounded-lg border border-slate-100">
+                            {POOL_COLORS.map(c => {
+                              const isSelected = c.toLowerCase() === iconColor.toLowerCase();
+                              return (
+                                <button
+                                  key={c}
+                                  type="button"
+                                  className="w-7 h-7 rounded-md transition-all hover:scale-110 shadow-2xs border border-black/10 flex items-center justify-center shrink-0"
+                                  style={{
+                                    backgroundColor: c,
+                                    outline: isSelected ? '2px solid hsl(var(--foreground))' : 'none',
+                                    outlineOffset: 2,
+                                  }}
+                                  onClick={() => finance.updateGoal(goal.id, { color: c } as any)}
+                                  title={c}
+                                />
+                              );
+                            })}
+                          </div>
                         </div>
                       </PopoverContent>
                     </Popover>
@@ -2462,20 +2499,44 @@ export default function FinancePoolsPage() {
             )}
 
             <div className="space-y-2">
-              <Label>Color</Label>
-              <div className="flex flex-wrap gap-1.5">
-                {POOL_COLORS.map(c => (
-                  <button
-                    key={c}
-                    className="w-7 h-7 rounded-md transition-all hover:scale-110"
-                    style={{
-                      backgroundColor: c,
-                      outline: c === newColor ? '2px solid hsl(var(--foreground))' : 'none',
-                      outlineOffset: 2,
-                    }}
-                    onClick={() => setNewColor(c)}
-                  />
-                ))}
+              <div className="flex items-center justify-between">
+                <Label>Color</Label>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-mono text-slate-500 uppercase">{newColor}</span>
+                  <label className="relative cursor-pointer inline-flex items-center gap-1.5 text-[11px] font-medium text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200/80 px-2 py-0.5 rounded-md border border-slate-200 transition-colors shadow-2xs">
+                    <Palette className="w-3 h-3 text-slate-500" />
+                    <span>Custom</span>
+                    <input
+                      type="color"
+                      value={newColor.startsWith('#') && newColor.length === 7 ? newColor : '#4558ff'}
+                      onChange={e => setNewColor(e.target.value)}
+                      className="sr-only"
+                    />
+                    <span
+                      className="w-3.5 h-3.5 rounded-full border border-black/15 shadow-2xs inline-block ml-0.5"
+                      style={{ backgroundColor: newColor }}
+                    />
+                  </label>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-1.5 p-2 bg-slate-50/70 rounded-xl border border-slate-200/70 max-h-[140px] overflow-y-auto">
+                {POOL_COLORS.map(c => {
+                  const isSelected = c.toLowerCase() === newColor.toLowerCase();
+                  return (
+                    <button
+                      key={c}
+                      type="button"
+                      className="w-7 h-7 rounded-lg transition-all hover:scale-110 shadow-2xs border border-black/10 relative flex items-center justify-center shrink-0"
+                      style={{
+                        backgroundColor: c,
+                        outline: isSelected ? '2px solid hsl(var(--foreground))' : 'none',
+                        outlineOffset: 2,
+                      }}
+                      onClick={() => setNewColor(c)}
+                      title={c}
+                    />
+                  );
+                })}
               </div>
             </div>
             <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50/70 p-3 gap-3">
@@ -2575,20 +2636,44 @@ export default function FinancePoolsPage() {
               </div>
             </div>
             <div className="space-y-2">
-              <Label>Color</Label>
-              <div className="flex flex-wrap gap-1.5">
-                {POOL_COLORS.map(c => (
-                  <button
-                    key={c}
-                    className="w-7 h-7 rounded-md transition-all hover:scale-110"
-                    style={{
-                      backgroundColor: c,
-                      outline: c === editColor ? '2px solid hsl(var(--foreground))' : 'none',
-                      outlineOffset: 2,
-                    }}
-                    onClick={() => setEditColor(c)}
-                  />
-                ))}
+              <div className="flex items-center justify-between">
+                <Label>Color</Label>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-mono text-slate-500 uppercase">{editColor}</span>
+                  <label className="relative cursor-pointer inline-flex items-center gap-1.5 text-[11px] font-medium text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200/80 px-2 py-0.5 rounded-md border border-slate-200 transition-colors shadow-2xs">
+                    <Palette className="w-3 h-3 text-slate-500" />
+                    <span>Custom</span>
+                    <input
+                      type="color"
+                      value={editColor.startsWith('#') && editColor.length === 7 ? editColor : '#4558ff'}
+                      onChange={e => setEditColor(e.target.value)}
+                      className="sr-only"
+                    />
+                    <span
+                      className="w-3.5 h-3.5 rounded-full border border-black/15 shadow-2xs inline-block ml-0.5"
+                      style={{ backgroundColor: editColor }}
+                    />
+                  </label>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-1.5 p-2 bg-slate-50/70 rounded-xl border border-slate-200/70 max-h-[140px] overflow-y-auto">
+                {POOL_COLORS.map(c => {
+                  const isSelected = c.toLowerCase() === editColor.toLowerCase();
+                  return (
+                    <button
+                      key={c}
+                      type="button"
+                      className="w-7 h-7 rounded-lg transition-all hover:scale-110 shadow-2xs border border-black/10 relative flex items-center justify-center shrink-0"
+                      style={{
+                        backgroundColor: c,
+                        outline: isSelected ? '2px solid hsl(var(--foreground))' : 'none',
+                        outlineOffset: 2,
+                      }}
+                      onClick={() => setEditColor(c)}
+                      title={c}
+                    />
+                  );
+                })}
               </div>
             </div>
             {!isEditingProtected && (
