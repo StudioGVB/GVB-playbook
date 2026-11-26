@@ -1,13 +1,10 @@
-import { useState, useMemo } from 'react';
+import { useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Sparkles, ArrowRight, ShieldCheck, Clock, Calendar, CheckCircle2, AlertTriangle, Layers, Wallet, Lock } from 'lucide-react';
+import { Sparkles, CheckCircle2, Layers } from 'lucide-react';
 import { formatCurrency } from '@/lib/financeUtils';
-import type { useFinanceData, FinanceGoal } from '@/hooks/useFinanceData';
-import { toast } from 'sonner';
-import { sendLocalNotification } from '@/lib/notifications';
-import { format, differenceInCalendarDays, differenceInCalendarWeeks } from 'date-fns';
+import type { useFinanceData } from '@/hooks/useFinanceData';
+import { format, differenceInCalendarDays } from 'date-fns';
 
 import type { PolicySnapshot } from '@/lib/policyEngine';
 
@@ -19,11 +16,6 @@ interface Props {
 }
 
 export default function WeeklyPoolSavingsCard({ finance, spendablePool = 0, funMoney = 0, snapshot }: Props) {
-  const [transferring, setTransferring] = useState(false);
-  const [lastTransferDate, setLastTransferDate] = useState<string | null>(() => {
-    return localStorage.getItem('gvb_last_weekly_pool_transfer');
-  });
-
   const baseCurrency = finance.settings?.base_currency || 'AUD';
   const fmt = (n: number) => formatCurrency(n, baseCurrency);
 
@@ -150,60 +142,6 @@ export default function WeeklyPoolSavingsCard({ finance, spendablePool = 0, funM
     : Math.max(0, (funMoney > 0 ? funMoney / 4.33 : (spendablePool > 0 ? spendablePool / 4.33 : 0)) - totalWeeklyRequired);
   const activePoolsCount = poolBreakdown.filter(p => p.remainingBase > 0.01).length;
 
-  // Execute 1-Click Weekly Transfer into Pools
-  const handleAutoTransferWeeklySavings = async () => {
-    if (totalWeeklyRequired <= 0) {
-      toast.info('All your active pools are already fully funded!');
-      return;
-    }
-
-    setTransferring(true);
-    try {
-      const updates: Promise<void>[] = [];
-
-      for (const item of poolBreakdown) {
-        if (item.weeklyRequiredBase <= 0.01 || item.remainingBase <= 0.01) continue;
-
-        // Convert base weekly required amount to goal native currency
-        const oneInBase = finance.convertToBase(1, item.goal.currency);
-        const nativeAdd = oneInBase === 0 ? item.weeklyRequiredBase : item.weeklyRequiredBase / oneInBase;
-        
-        const targetNative = item.goal.target_amount || Infinity;
-        const currentAssigned = item.goal.assigned_amount || 0;
-        const remainingNeededNative = Math.max(0, targetNative - currentAssigned);
-
-        if (remainingNeededNative <= 0.01) continue;
-
-        const cappedNativeAdd = Math.min(nativeAdd, remainingNeededNative);
-        const newNativeAssigned = Math.min(targetNative, currentAssigned + cappedNativeAdd);
-
-        updates.push(
-          finance.updateGoal(item.goal.id, { assigned_amount: newNativeAssigned } as any)
-        );
-      }
-
-      await Promise.all(updates);
-
-      const nowIso = new Date().toISOString();
-      localStorage.setItem('gvb_last_weekly_pool_transfer', nowIso);
-      setLastTransferDate(nowIso);
-
-      toast.success(
-        `Successfully transferred ${fmt(totalWeeklyRequired)} across ${activePoolsCount} pools! Spendable cash updated.`
-      );
-
-      sendLocalNotification('⚡ Pool Savings Locked!', {
-        body: `${fmt(totalWeeklyRequired)} successfully allocated across ${activePoolsCount} savings pools. Your true safe-to-spend cash has been updated.`,
-        icon: '/favicon.png',
-        url: '/finance/pools',
-      });
-    } catch (err: any) {
-      toast.error('Failed to complete weekly transfer: ' + (err?.message || 'Unknown error'));
-    } finally {
-      setTransferring(false);
-    }
-  };
-
   return (
     <Card className="bg-white rounded-3xl border-2 border-[#FF7AD1]/40 shadow-[6px_6px_0px_0px_rgba(255,46,184,0.12)] overflow-hidden">
       <CardHeader className="bg-gradient-to-r from-[#FFF5FA] via-white to-[#F0FDF4] border-b border-[#FF7AD1]/20 p-6 pb-5">
@@ -225,20 +163,14 @@ export default function WeeklyPoolSavingsCard({ finance, spendablePool = 0, funM
             </p>
           </div>
 
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-            <Button
-              onClick={handleAutoTransferWeeklySavings}
-              disabled={transferring || totalWeeklyRequired <= 0}
-              className="bg-[#FF2EB8] hover:bg-[#e5299f] text-white font-display font-extrabold rounded-2xl px-5 py-5 text-sm shadow-lg shadow-[#FF2EB8]/25 transition-all"
+          <div className="flex items-center gap-2">
+            <Badge
+              variant="outline"
+              className="border-emerald-300 bg-emerald-50 text-emerald-800 text-xs font-bold px-3 py-1.5 rounded-full flex items-center gap-1.5 shadow-xs"
             >
-              {transferring ? (
-                'Transferring Funds...'
-              ) : (
-                <>
-                  ⚡ Lock {fmt(totalWeeklyRequired)}/wk into Pools Now
-                </>
-              )}
-            </Button>
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+              Auto-Calculated in Budget
+            </Badge>
           </div>
         </div>
       </CardHeader>
@@ -274,28 +206,19 @@ export default function WeeklyPoolSavingsCard({ finance, spendablePool = 0, funM
             </span>
           </div>
 
-          {/* Last Transfer Status */}
-          <div className="bg-slate-50 rounded-2xl p-4 border-2 border-slate-200 flex flex-col justify-between">
-            <span className="text-xs font-display font-bold text-slate-600 uppercase tracking-wider block mb-1">
-              Transfer Status
+          {/* Budget Integration Status */}
+          <div className="bg-[#F0FDF4] rounded-2xl p-4 border-2 border-emerald-200/80 flex flex-col justify-between">
+            <span className="text-xs font-display font-bold text-emerald-800 uppercase tracking-wider block mb-1">
+              Budget Integration
             </span>
             <div>
-              {lastTransferDate ? (
-                <div className="flex items-center gap-1.5 text-emerald-700 font-bold text-sm">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <span>
-                    Saved {format(new Date(lastTransferDate), 'MMM d, h:mm a')}
-                  </span>
-                </div>
-              ) : (
-                <div className="text-amber-700 font-bold text-xs flex items-center gap-1">
-                  <Clock className="w-3.5 h-3.5 text-amber-600" />
-                  <span>No auto-transfers recorded yet</span>
-                </div>
-              )}
+              <div className="flex items-center gap-1.5 text-emerald-800 font-bold text-sm">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>Auto-Paced from Income</span>
+              </div>
             </div>
-            <span className="text-[10px] text-slate-400 mt-2 block">
-              Clicking "Lock into Pools" updates pool balances instantly.
+            <span className="text-[11px] text-emerald-700/80 font-medium block mt-1">
+              Deducted automatically from monthly income before weekly fun money.
             </span>
           </div>
         </div>
