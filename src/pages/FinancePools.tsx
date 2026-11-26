@@ -506,23 +506,28 @@ export default function FinancePoolsPage() {
     return totalPaceMonthly;
   }, [snapshot, finance.goals, finance.convertToBase]);
 
+  const essentialCatIds = useMemo(() => new Set(
+    finance.categories.filter(c => c.is_essential && c.type === 'variable').map(c => c.id)
+  ), [finance.categories]);
+
   const effectiveWeeklyFun = snapshot?.weeklyFunBudget ?? snapshot?.baseWeeklyFun ?? 0;
-  const monthlyFunAllowance = (snapshot?.split?.funAmount && snapshot.split.funAmount > 0)
-    ? snapshot.split.funAmount
-    : effectiveWeeklyFun * 4.33;
   const monthlyTotalIncome = (snapshot?.split?.monthlyIncome && snapshot.split.monthlyIncome > 0)
     ? snapshot.split.monthlyIncome
-    : (effectiveFixedMonthly + essentialVariable + monthlyGoalSavingsTarget + monthlyFunAllowance);
-  const monthlyLivingTarget = effectiveFixedMonthly + essentialVariable + monthlyFunAllowance;
+    : (effectiveFixedMonthly + essentialVariable + monthlyGoalSavingsTarget + (snapshot?.split?.funAmount || (effectiveWeeklyFun * 4.33)));
 
-  // Track living expenses already paid so far this month (Fixed Bills / Rent, Essentials, Discretionary)
+  // Fun money for the whole month = whatever is left over after Fixed, Essentials, and Pot commitments
+  const monthlyFunBudget = Math.max(0, monthlyTotalIncome - effectiveFixedMonthly - essentialVariable - monthlyGoalSavingsTarget);
+  const monthlyLivingTarget = effectiveFixedMonthly + essentialVariable + monthlyFunBudget;
+
+  // Track living expenses already paid so far this month (Fixed Bills / Rent, Essentials, Discretionary/Fun)
   // When bills like rent are paid on the 1st, they are paid OUT OF this month's living reserve.
   // Ring-fencing must only reserve the REMAINING unpaid bills so emergency cash is never drained by paid rent.
-  const { fixedPaidSoFar, variableSpentSoFar } = useMemo(() => {
+  const { fixedPaidSoFar, essentialSpentSoFar, funSpentSoFar } = useMemo(() => {
     const curStart = startOfMonth(new Date());
     const curEnd = endOfMonth(new Date());
     let fixedPaid = 0;
-    let variableSpent = 0;
+    let essentialSpent = 0;
+    let funSpent = 0;
 
     for (const tx of finance.transactions) {
       if (tx.amount >= 0 || tx.is_transfer || tx.is_reimbursable) continue;
@@ -555,18 +560,22 @@ export default function FinancePoolsPage() {
 
       if (isFixed) {
         fixedPaid += amt;
+      } else if (essentialCatIds.has(tx.category_id || '') || cat?.is_essential) {
+        essentialSpent += amt;
       } else {
-        variableSpent += amt;
+        funSpent += amt;
       }
     }
 
-    return { fixedPaidSoFar: fixedPaid, variableSpentSoFar: variableSpent };
-  }, [finance.transactions, finance.categories, fixedExpenses, finance.convertToBase]);
+    return { fixedPaidSoFar: fixedPaid, essentialSpentSoFar: essentialSpent, funSpentSoFar: funSpent };
+  }, [finance.transactions, finance.categories, fixedExpenses, finance.convertToBase, essentialCatIds]);
 
   const remainingFixedBills = Math.max(0, effectiveFixedMonthly - fixedPaidSoFar);
-  const remainingVariableLiving = Math.max(0, (essentialVariable + monthlyFunAllowance) - variableSpentSoFar);
-  const remainingLivingReserve = remainingFixedBills + remainingVariableLiving;
+  const remainingEssentials = Math.max(0, essentialVariable - essentialSpentSoFar);
+  const remainingFun = Math.max(0, monthlyFunBudget - funSpentSoFar);
+  const remainingLivingReserve = remainingFixedBills + remainingEssentials + remainingFun;
   const livingReserveToProtect = isCurrentMonth ? remainingLivingReserve : monthlyLivingTarget;
+  const totalSpentSoFar = fixedPaidSoFar + essentialSpentSoFar + funSpentSoFar;
 
   const nonEmergencyGoalTotalEarly = useMemo(() => {
     return finance.goals
@@ -1753,9 +1762,6 @@ export default function FinancePoolsPage() {
 
         {/* Current Monthly Living & Spending Pot (System Auto-Calculated Pot) */}
         {(() => {
-          const totalSpentSoFar = fixedPaidSoFar + variableSpentSoFar;
-          const remainingEssentials = Math.max(0, essentialVariable - variableSpentSoFar);
-          const remainingFun = Math.max(0, remainingLivingReserve - remainingFixedBills - remainingEssentials);
           const pctRemaining = monthlyLivingTarget > 0
             ? Math.min(100, Math.max(0, (remainingLivingReserve / monthlyLivingTarget) * 100))
             : 0;
@@ -1841,9 +1847,9 @@ export default function FinancePoolsPage() {
                     <span className="text-slate-500 font-semibold">1. Fixed Bills:</span>
                     <span className="font-bold text-slate-800">
                       {remainingFixedBills <= 0.01 ? (
-                        <span className="text-emerald-700">£0.00 left ({fmt(fixedPaidSoFar)} paid ✓)</span>
+                        <span className="text-emerald-700">£0.00 left of {fmt(effectiveFixedMonthly)} ({fmt(fixedPaidSoFar)} paid ✓)</span>
                       ) : (
-                        `${fmt(remainingFixedBills)} left (${fmt(fixedPaidSoFar)} paid)`
+                        `${fmt(remainingFixedBills)} left of ${fmt(effectiveFixedMonthly)} (${fmt(fixedPaidSoFar)} paid)`
                       )}
                     </span>
                   </div>
@@ -1851,9 +1857,9 @@ export default function FinancePoolsPage() {
                     <span className="text-slate-500 font-semibold">2. Variable Essentials:</span>
                     <span className="font-bold text-slate-800">
                       {remainingEssentials <= 0.01 ? (
-                        <span className="text-emerald-700">£0.00 left ({fmt(variableSpentSoFar)} spent)</span>
+                        <span className="text-amber-700">£0.00 left of {fmt(essentialVariable)} ({fmt(essentialSpentSoFar)} spent)</span>
                       ) : (
-                        `${fmt(remainingEssentials)} left (${fmt(variableSpentSoFar)} spent)`
+                        `${fmt(remainingEssentials)} left of ${fmt(essentialVariable)} (${fmt(essentialSpentSoFar)} spent)`
                       )}
                     </span>
                   </div>
@@ -1868,7 +1874,11 @@ export default function FinancePoolsPage() {
                   <div className="flex justify-between items-center">
                     <span className="text-slate-500 font-semibold">4. Fun Money:</span>
                     <span className="font-extrabold text-[#FF2EB8]">
-                      {fmt(remainingFun)} left ({fmt(effectiveWeeklyFun)}/wk)
+                      {remainingFun <= 0.01 ? (
+                        <span className="text-amber-700">£0.00 left of {fmt(monthlyFunBudget)} ({fmt(funSpentSoFar)} spent)</span>
+                      ) : (
+                        `${fmt(remainingFun)} left of ${fmt(monthlyFunBudget)} (${fmt(monthlyFunBudget / 4.33)}/wk)`
+                      )}
                     </span>
                   </div>
                 </div>
