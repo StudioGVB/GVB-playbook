@@ -1097,20 +1097,21 @@ export function computeRequiredGoalSavingsMonthly(
   monthlyIncome: number = 0,
   transactions: FinanceTransaction[] = [],
 ): number {
+  const monthStartAnchor = startOfMonth(now);
   const schedule = computeMonthlyPotSchedule({
     goals: goals || [],
     transactions: transactions || [],
     convertToBase: convertToBase || ((amt: number) => amt),
-    referenceDate: now,
+    referenceDate: monthStartAnchor,
   });
   let scheduledMonthlyTotal = 0;
   for (const g of (goals || [])) {
-    if ((g as any)?.is_stash || (g.name || '').toLowerCase().includes('stash')) continue;
-    if ((g as any)?.is_emergency === true || (g.name || '').toLowerCase().includes('emergency')) continue;
-    const plan = schedule.getGoalPlanForMonth(g.id, now);
+    const lower = (g.name || '').trim().toLowerCase();
+    if ((g as any)?.is_stash || lower.includes('stash')) continue;
+    if ((g as any)?.is_emergency === true || lower.includes('emergency')) continue;
+    if (lower === 'savings' || lower === 'core savings') continue;
+    const plan = schedule.getGoalPlanForMonth(g.id, monthStartAnchor);
     if (plan && !plan.isFutureStart && plan.monthlyAmount > 0) {
-      // Use plan.monthlyAmount (scheduled for the remaining days of the active month, NOT weeklyPace * 4.33)
-      // so removing a future start_date mid-month never backtracks and deducts a full 30-day share out of the current month.
       const monthlyPace = Math.min(plan.remainingToSaveBase, plan.monthlyAmount);
       scheduledMonthlyTotal += monthlyPace;
     }
@@ -1119,7 +1120,7 @@ export function computeRequiredGoalSavingsMonthly(
     return scheduledMonthlyTotal;
   }
 
-  const anchorNow = startOfWeek(now, { weekStartsOn: 1 });
+  const anchorNow = monthStartAnchor;
   const spentByGoalBase = new Map<string, number>();
   for (const tx of (transactions || [])) {
     const goalId = (tx as any)?.goal_id;
@@ -1130,10 +1131,13 @@ export function computeRequiredGoalSavingsMonthly(
   }
 
   let poolSavingsMonthly = 0;
+  const daysInThisMonth = Math.max(1, differenceInCalendarDays(endOfMonth(now), monthStartAnchor) + 1);
   for (const g of (goals || [])) {
-    if ((g as any)?.is_stash || (g.name || '').toLowerCase().includes('stash')) continue;
-    if ((g as any)?.is_emergency === true || (g.name || '').toLowerCase().includes('emergency')) continue;
-    if (g.start_date && new Date(g.start_date) > anchorNow) continue;
+    const lower = (g.name || '').trim().toLowerCase();
+    if ((g as any)?.is_stash || lower.includes('stash')) continue;
+    if ((g as any)?.is_emergency === true || lower.includes('emergency')) continue;
+    if (lower === 'savings' || lower === 'core savings') continue;
+    if (g.start_date && new Date(g.start_date) > endOfMonth(now)) continue;
     const targetBase = convertToBase ? convertToBase(g.target_amount || 0, g.currency) : (g.target_amount || 0);
     const assignedBase = convertToBase ? convertToBase(g.assigned_amount || 0, g.currency) : (g.assigned_amount || 0);
     const spentBase = spentByGoalBase.get(g.id) || 0;
@@ -1147,10 +1151,7 @@ export function computeRequiredGoalSavingsMonthly(
     if (g.deadline) {
       const dl = new Date(g.deadline);
       const daysLeft = Math.max(1, Math.ceil((dl.getTime() - anchorNow.getTime()) / (1000 * 60 * 60 * 24)));
-      const mEnd = endOfMonth(now);
-      const activeDaysLeftThisMonth = Math.max(1, differenceInCalendarDays(dl < mEnd ? dl : mEnd, now) + 1);
-      // Only charge for the days actually remaining in this calendar month
-      const monthlyTarget = Math.min(remainingBase, (remainingBase / daysLeft) * activeDaysLeftThisMonth);
+      const monthlyTarget = Math.min(remainingBase, (remainingBase / daysLeft) * daysInThisMonth);
       poolSavingsMonthly += monthlyTarget;
     } else if (g.percent_allocation && g.percent_allocation > 0 && monthlyIncome > 0) {
       poolSavingsMonthly += Math.min(remainingBase, (g.percent_allocation / 100) * monthlyIncome);

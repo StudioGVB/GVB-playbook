@@ -180,11 +180,11 @@ export function FinanceDashboard() {
       const catNameLower = String(cat?.name || '').toLowerCase();
       const desc = `${tx.merchant || ''} ${tx.description || ''} ${catNameLower}`.toLowerCase();
 
-      if (/\b(bills?|fixed|subscriptions?|utilities|rent|housing|phone|mobile|internet|wifi|broadband|meds|medication|medical|pharmacy|healthcare|health|clinic|prescription)\b/i.test(catNameLower)) {
+      if (/\b(bills?|fixed|subscriptions?|utilities|rent|housing|phone|mobile|internet|wifi|broadband|meds|medication|medical|clinic|prescription)\b/i.test(catNameLower)) {
         return true;
       }
 
-      if (/\b(apple\.com\/bill|itunes|icloud|spotify|netflix|disney\+|amazon prime|prime video|audible|google one|chatgpt|openai|claude|anthropic|canva|adobe|figma|notion|patreon|substack|whoop|strava|puregym|the gym|jd gyms|vodafone|voxi|giffgaff|lyca|lycamobile|lebara|smarty|id mobile|tesco mobile|virgin media|hyperoptic|octopus|british gas|united utilities|council tax|prescription|pharmacy|chemist|well pharmacy|broadway|signature|elvanse|amfexa|adhd|titration|psychiatry|mypace|harley)\b/i.test(desc)) {
+      if (/\b(apple\.com\/bill|itunes|icloud|spotify|netflix|disney\+|amazon prime|prime video|audible|google one|chatgpt|openai|claude|anthropic|canva|adobe|figma|notion|patreon|substack|whoop|strava|puregym|the gym|jd gyms|vodafone|voxi|giffgaff|lyca|lycamobile|lebara|smarty|id mobile|tesco mobile|virgin media|hyperoptic|octopus|british gas|united utilities|council tax|broadway|signature|elvanse|amfexa|adhd|titration|psychiatry|mypace|harley)\b/i.test(desc)) {
         return true;
       }
 
@@ -193,16 +193,22 @@ export function FinanceDashboard() {
         return true;
       }
 
+      const stopWords = new Set(['flat', 'plan', 'bill', 'bills', 'incl', 'the', 'and', 'for', 'monthly']);
+
       // Match against configured fixed expenses (e.g. UK Flat £720, subscriptions, etc.)
       for (const fe of fixedExpenses) {
         const feAmt = finance.convertToBase(fe.amount, fe.currency);
         const amountClose = Math.abs(amt - feAmt) <= Math.max(2, feAmt * 0.05);
         const feName = fe.name.toLowerCase();
-        const feTokens = feName.split(/\s+/).filter(w => w.length >= 3);
-        const nameMatches = feTokens.some(w => desc.includes(w));
+        if (feName.includes('amazon')) {
+          if (/\b(amazon|amzn|prime)\b/i.test(desc) && (/\bprime\b/i.test(desc) || Math.abs(amt - feAmt) <= 2.5)) return true;
+          continue;
+        }
+        const feTokens = feName.split(/\s+/).filter(w => w.length >= 3 && !stopWords.has(w));
+        const nameMatches = feTokens.length > 0 && feTokens.some(w => desc.includes(w));
         if (nameMatches && amt <= Math.max(feAmt * 3.5, feAmt + 150)) return true;
 
-        if (feAmt >= 200 && amountClose) {
+        if (feAmt >= 200 && amountClose && /\b(rent|rental|landlord|tenancy|evans|accommodation)\b/i.test(desc)) {
           if (fe.due_day) {
             const d = parseUkDate(tx.posted_at);
             const day = getDate(d);

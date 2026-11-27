@@ -856,7 +856,7 @@ export default function FinanceMonthly() {
       const singleCycleAmt = finance.convertToBase(exp.amount, exp.currency);
       const proratedMonthlyAmt = singleCycleAmt * (FREQ_TO_MONTHLY[exp.frequency] ?? 1);
       const expLower = exp.name.toLowerCase();
-      const expWords = expLower.split(/\s+/).filter(w => w.length >= 3 && !['flat', 'plan', 'bill', 'bills', 'incl'].includes(w));
+      const expWords = expLower.split(/\s+/).filter(w => w.length >= 3 && !['flat', 'plan', 'bill', 'bills', 'incl', 'the', 'and', 'for', 'monthly'].includes(w));
 
       const matchedTxs = [...(explicitMatchesByExpId.get(exp.id) || [])];
       for (const tx of paidFixedTxns) {
@@ -864,16 +864,15 @@ export default function FinanceMonthly() {
         const txLower = tx.name.toLowerCase();
         const isBusinessMatch = expLower.includes('business') && /\b(google|cloud|workspace|openai|chatgpt|claude|anthropic|canva|figma|vercel|supabase)\b/i.test(txLower);
         const is11LabsMatch = (expLower.includes('11labs') || expLower.includes('elevenlabs')) && /\b(11labs|elevenlabs)\b/i.test(txLower);
-        const isPhoneMatch = expLower.includes('phone') && /\b(lyca|lycamobile|vodafone|voxi|ee|o2|three|giffgaff|lebara|smarty)\b/i.test(txLower);
-        const isMedsMatch = expLower.includes('meds') && /\b(boots|pharmacy|chemist|prescription|elvanse|amfexa|adhd|clinic|mypace)\b/i.test(txLower);
-        const isRentMatch = (expLower.includes('rent') || expLower.includes('flat')) && tx.amount >= 100 && /\b(rent|rental|landlord|evans|tenancy)\b/i.test(txLower);
+        const isPhoneMatch = expLower.includes('phone') && (/\b(lyca|lycamobile|vodafone|voxi|ee|o2|three|giffgaff|lebara|smarty|id mobile|tesco mobile)\b/i.test(txLower) || (/\b(phone|mobile)\b/i.test(txLower) && /\b(bill|plan|top up|topup|sim)\b/i.test(txLower)));
+        const isMedsMatch = expLower.includes('meds') && /\b(elvanse|amfexa|adhd|mypace|harley|broadway|signature|titration)\b/i.test(txLower);
+        const isRentMatch = (expLower.includes('rent') || expLower.includes('flat')) && tx.amount >= 100 && /\b(rent|rental|landlord|evans|tenancy|accommodation)\b/i.test(txLower);
         const isAmazonMatch = expLower.includes('amazon')
-          ? (/\bprime\b/i.test(txLower) || Math.abs(tx.amount - singleCycleAmt) <= 2.5)
+          ? (/\b(amazon|amzn|prime)\b/i.test(txLower) && (/\bprime\b/i.test(txLower) || Math.abs(tx.amount - singleCycleAmt) <= 2.5))
           : false;
-        const isWordMatch = !expLower.includes('amazon') && expWords.some(w => txLower.includes(w));
-        const isAmtMatch = !expLower.includes('amazon') && Math.abs(tx.amount - singleCycleAmt) <= Math.max(2, singleCycleAmt * 0.08);
+        const isWordMatch = !expLower.includes('amazon') && expWords.length > 0 && expWords.some(w => txLower.includes(w));
 
-        if (isBusinessMatch || is11LabsMatch || isPhoneMatch || isMedsMatch || isRentMatch || isAmazonMatch || isWordMatch || isAmtMatch) {
+        if (isBusinessMatch || is11LabsMatch || isPhoneMatch || isMedsMatch || isRentMatch || isAmazonMatch || isWordMatch) {
           usedTxIds.add(tx.id);
           matchedTxs.push(tx);
         }

@@ -27,6 +27,7 @@ export default function WeeklyPoolSavingsCard({ finance, spendablePool = 0, funM
       transactions: finance.transactions,
       categories: finance.categories,
       convertToBase: finance.convertToBase,
+      referenceDate: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
     });
 
     const eligibleGoals = finance.goals.filter((g) => {

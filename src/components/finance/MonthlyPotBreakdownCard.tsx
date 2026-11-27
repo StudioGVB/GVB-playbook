@@ -60,6 +60,7 @@ export default function MonthlyPotBreakdownCard({
       transactions,
       categories,
       convertToBase,
+      referenceDate: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
     });
 
     const withLabels = schedule.months.map(m => ({

@@ -399,6 +399,7 @@ export default function FinancePoolsPage() {
       transactions: finance.transactions,
       categories: finance.categories,
       convertToBase: finance.convertToBase,
+      referenceDate: startOfMonth(new Date()),
     });
   }, [finance.goals, finance.transactions, finance.categories, finance.convertToBase]);
 

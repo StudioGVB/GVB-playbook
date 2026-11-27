@@ -1186,11 +1186,20 @@ export default function FinanceBudget() {
                   7 days × <strong className="text-slate-800">{fmt(snapshot.weekAllowancePlan.weeklyTotalSpendCap / 7)}/day</strong> from {snapshot.weekAllowancePlan.segments[0]?.shortMonthLabel} spend cap
                 </p>
               )}
-              {snapshot.weekAllowancePlan.weeklyExtraIncomeBoost > 0.01 && (
-                <p className="text-emerald-700 font-semibold">
-                  +{fmt(snapshot.weekAllowancePlan.weeklyExtraIncomeBoost)} extra income boost ({snapshot.weekAllowancePlan.activeExtraIncomeItems.map(item => `${item.streamName} +${fmt(item.dailyBoostAmount)}/d`).join(', ')})
-                </p>
-              )}
+              {snapshot.weekAllowancePlan.weeklyExtraIncomeBoost > 0.01 && (() => {
+                const byStream = new Map<string, number>();
+                for (const item of snapshot.weekAllowancePlan.activeExtraIncomeItems) {
+                  byStream.set(item.streamName, (byStream.get(item.streamName) || 0) + item.dailyBoostAmount);
+                }
+                const streamSummary = Array.from(byStream.entries())
+                  .map(([name, dailySum]) => `${name} +${fmt(dailySum)}/d`)
+                  .join(', ');
+                return (
+                  <p className="text-emerald-700 font-semibold">
+                    +{fmt(snapshot.weekAllowancePlan.weeklyExtraIncomeBoost)}/wk extra income ({streamSummary})
+                  </p>
+                );
+              })()}
             </div>
           )}
         </div>

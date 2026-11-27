@@ -274,7 +274,10 @@ export function computeMonthDailyAllowancePlan(params: {
       if (info.rawDate >= mStart && info.rawDate <= mEnd) {
         const dayOfMonth = Math.max(1, Math.min(daysInMonth, getDate(info.rawDate)));
         const remainingDaysInMonth = Math.max(1, daysInMonth - dayOfMonth + 1);
-        const dailyBoostAmount = info.amount / remainingDaysInMonth;
+        // To prevent late-month deposits (e.g. a weekly Venture Advisory deposit on Nov 25 with 5 days left)
+        // from cramming 6x their normal daily rate into Week 4 and snowballing on top of earlier weeks' deposits,
+        // divide by daysInMonth so each extra deposit contributes its true monthly daily rate from the day it lands.
+        const dailyBoostAmount = info.amount / daysInMonth;
         extraIncomeItems.push({
           txId: tx.id,
           name: tx.merchant || tx.description || info.streamName,
@@ -321,17 +324,16 @@ export function computeMonthDailyAllowancePlan(params: {
   );
 
   // 4. Savings Pots for Month M
-  // Use the monthly pot schedule anchored to the 1st of the active/target month so the full monthly
-  // pot commitment is known, while respecting the current-month unspent guard ifstart dates were edited mid-month.
-  const today = new Date();
-  const isCurrentCalMonth = isSameMonth(mStart, today);
-  const scheduleRefDate = isCurrentCalMonth ? today : mStart;
+  // CRITICAL: Always anchor the monthly pot schedule to `mStart` (the 1st of Month M) so that
+  // Month M's full 30/31-day pot savings requirement is deducted from Month M's £2,400 Gamma salary!
+  // Never pass `today` (e.g. Nov 27 = 4 days left), which would only deduct 4 days of pot savings
+  // and dump the other ~£700 of pot money into Fun Money!
   const potSchedule = computeMonthlyPotSchedule({
     goals,
     transactions: dedupedTxs,
     categories,
     convertToBase,
-    referenceDate: scheduleRefDate,
+    referenceDate: mStart,
   });
 
   let scheduledPotSavings = 0;
