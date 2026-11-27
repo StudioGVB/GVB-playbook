@@ -156,7 +156,7 @@ export default function WeeklyAllowanceHero({ finance, assumptions, fixedExpense
                     <>
                       <BreakdownRow label="Monthly Income" value={fmt(snapshot.split.monthlyIncome)} />
                       <BreakdownRow label={`Fixed Bills (${snapshot.split.mandatoryPercent.toFixed(0)}%)`} value={fmt(snapshot.split.mandatoryAmount)} prefix="−" muted />
-                      <BreakdownRow label={`Base Savings (${snapshot.split.baseSavingsPercent.toFixed(0)}%)`} value={fmt(snapshot.split.baseSavingsAmount)} prefix="−" muted />
+                      <BreakdownRow label="Emergency Fund (10% Gamma)" value={fmt(snapshot.split.baseSavingsAmount)} prefix="−" muted />
                       {snapshot.split.goalSavingsAmount > 0 && (
                         <BreakdownRow label={`Goal Savings (${snapshot.split.goalSavingsPercent.toFixed(0)}%)`} value={fmt(snapshot.split.goalSavingsAmount)} prefix="−" muted />
                       )}

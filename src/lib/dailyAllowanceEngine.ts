@@ -412,14 +412,16 @@ export function computeMonthDailyAllowancePlan(params: {
     }
   }
 
-  const incomeAfterFixedAndEssentials = Math.max(
+  // 4b. Emergency Fund: 10% of Gamma Salary goes directly into Emergency Fund each month
+  const emergencyFromGammaMonthly = Math.round(gammaMonthlyIncome * 0.10 * 100) / 100;
+  const incomeAfterFixedEssentialsAndEmergency = Math.max(
     0,
-    gammaMonthlyIncome - fixedBillsMonthly - variableEssentialsMonthly,
+    gammaMonthlyIncome - fixedBillsMonthly - variableEssentialsMonthly - emergencyFromGammaMonthly,
   );
-  const potSavingsMonthly = Math.min(scheduledPotSavings, incomeAfterFixedAndEssentials);
+  const potSavingsMonthly = Math.min(scheduledPotSavings, incomeAfterFixedEssentialsAndEmergency);
 
-  // 5. Fun Money = Gamma - Fixed Bills - Variable Essentials - Pot Savings
-  const baseFunMonthly = Math.max(0, incomeAfterFixedAndEssentials - potSavingsMonthly);
+  // 5. Fun Money = Gamma - Fixed Bills - Variable Essentials - 10% Emergency Fund - Pot Savings
+  const baseFunMonthly = Math.max(0, incomeAfterFixedEssentialsAndEmergency - potSavingsMonthly);
 
   // 6. Monthly Base Spend Cap on Card = Variable Essentials + Base Fun Money
   const baseMonthlySpendCap = variableEssentialsMonthly + baseFunMonthly;

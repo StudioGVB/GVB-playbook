@@ -1747,7 +1747,7 @@ export default function FinanceBudget() {
                 <>
                   <WaterfallRow label="Monthly Income" value={fmt(snapshot.split.monthlyIncome)} />
                   <WaterfallRow label={`Fixed Bills (${snapshot.split.mandatoryPercent.toFixed(0)}%)`} value={fmt(snapshot.split.mandatoryAmount)} prefix="−" muted />
-                  <WaterfallRow label={`Base Savings (${snapshot.split.baseSavingsPercent.toFixed(0)}%)`} value={fmt(snapshot.split.baseSavingsAmount)} prefix="−" muted />
+                  <WaterfallRow label="Emergency Fund (10% Gamma)" value={fmt(snapshot.split.baseSavingsAmount)} prefix="−" muted />
                   {snapshot.split.goalSavingsAmount > 0 && (
                     <WaterfallRow label={`Goal Savings (${snapshot.split.goalSavingsPercent.toFixed(0)}%)`} value={fmt(snapshot.split.goalSavingsAmount)} prefix="−" muted />
                   )}

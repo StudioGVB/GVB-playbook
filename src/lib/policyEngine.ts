@@ -1232,25 +1232,33 @@ export function computeMoneySplit(
 
   const incomeAfterEssentials = Math.max(0, effectiveIncome - monthlyMandatory - essentialVariable);
 
-  // 4. Goal Pool Savings: POTS ARE FILLED FIRST!
-  // Active goal pools with deadlines or percentages take precedence so savings targets are 100% funded.
+  // 4. Emergency Fund (10% of Gamma Salary)
+  const actualIncomeInfo = computeActualSpendingIncome(transactions, categories, referenceDate);
+  const gammaMonthlyForEmergency = actualIncomeInfo.gamma > 0
+    ? actualIncomeInfo.gamma
+    : ((assumptions.expected_monthly_income && assumptions.expected_monthly_income > 0)
+        ? assumptions.expected_monthly_income
+        : effectiveIncome);
+  const baseSavingsAmount = Math.min(
+    incomeAfterEssentials,
+    Math.round(gammaMonthlyForEmergency * 0.10 * 100) / 100,
+  );
+  const baseSavingsPercent = effectiveIncome > 0 ? (baseSavingsAmount / effectiveIncome) * 100 : 10;
+  const incomeAfterEmergency = Math.max(0, incomeAfterEssentials - baseSavingsAmount);
+
+  // 5. Goal Pool Savings: Active goal pools with deadlines or percentages
   const poolSavingsMonthly = computeRequiredGoalSavingsMonthly(goals, convertToBase, referenceDate, effectiveIncome, transactions);
-  const goalSavingsAmount = Math.min(poolSavingsMonthly, incomeAfterEssentials);
+  const goalSavingsAmount = Math.min(poolSavingsMonthly, incomeAfterEmergency);
   const goalSavingsPercent = effectiveIncome > 0 ? (goalSavingsAmount / effectiveIncome) * 100 : 0;
 
-  // 5. Fun Money = WHAT IS LEFT OVER after the pots have been filled!
-  // Pure dynamic residual: whatever remains after fixed bills, essentials, and pots is fun money.
+  // 6. Fun Money = WHAT IS LEFT OVER after Fixed Bills, Essentials, 10% Emergency Fund, and Goal Pots
   const mStart = startOfMonth(referenceDate);
   const mEnd = endOfMonth(referenceDate);
   const daysInMonth = Math.max(1, differenceInCalendarDays(mEnd, mStart) + 1);
-  const incomeAfterPots = Math.max(0, incomeAfterEssentials - goalSavingsAmount);
+  const incomeAfterPots = Math.max(0, incomeAfterEmergency - goalSavingsAmount);
   const weeklyFunAmount = (incomeAfterPots / daysInMonth) * 7;
   const funAmount = incomeAfterPots;
   const funPercent = effectiveIncome > 0 ? (funAmount / effectiveIncome) * 100 : 0;
-
-  // 6. Base savings: residual after pots and fun money (0 by default since fun takes remaining surplus)
-  const baseSavingsAmount = 0;
-  const baseSavingsPercent = 0;
 
   return {
     mandatoryPercent,

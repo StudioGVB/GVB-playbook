@@ -118,7 +118,7 @@ export const isSystemSavingsGoal = (g?: { name?: string; is_stash?: boolean; is_
 
 export const isProtectedSystemGoal = (g?: { name?: string; is_stash?: boolean; is_emergency?: boolean } | null) => {
   if (!g) return false;
-  return isSystemStashGoal(g) || isSystemSavingsGoal(g) || (g as any).is_emergency === true || /emergency/i.test(g.name || '');
+  return isSystemStashGoal(g) || (g as any).is_emergency === true || /emergency/i.test(g.name || '');
 };
 
 interface CapOverflowInfo {
@@ -307,56 +307,39 @@ export default function FinancePoolsPage() {
         } as any);
       }
 
-      // 2. Savings Pot (Fixed Pot)
-      const savingsGoals = finance.goals.filter(isSystemSavingsGoal);
-      if (savingsGoals.length > 1) {
-        const primary = savingsGoals[0];
-        const duplicates = savingsGoals.slice(1);
-        const extraAssigned = duplicates.reduce((sum, d) => sum + (d.assigned_amount || 0), 0);
-        await finance.updateGoal(primary.id, {
-          name: 'Savings',
-          assigned_amount: (primary.assigned_amount || 0) + extraAssigned,
-          percent_allocation: primary.percent_allocation || 10,
-        } as any);
-        for (const dup of duplicates) {
-          await finance.deleteGoal(dup.id);
-        }
-      } else if (savingsGoals.length === 1) {
-        const s = savingsGoals[0];
-        if (s.name !== 'Savings' || !(s.percent_allocation > 0)) {
-          await finance.updateGoal(s.id, {
-            name: 'Savings',
-            percent_allocation: s.percent_allocation || 10,
-          } as any);
-        }
-      } else {
-        await finance.addGoal({
-          name: 'Savings',
-          description: 'Permanent fixed pot for 10% income savings',
-          target_amount: 5000,
-          assigned_amount: 0,
-          currency: baseCurrency,
-          priority: 3,
-          safety_mode: 'balanced',
-          color: '#6366f1',
-          percent_allocation: 10,
-        } as any);
-      }
-
-      // 3. Emergency Fund (Fixed Pot)
+      // 2. Emergency Fund (Fixed Pot - receives 10% of Gamma Salary)
       const emergencyGoals = finance.goals.filter(g => (g as any).is_emergency === true || g.name.toLowerCase().includes('emergency'));
-      if (emergencyGoals.length === 0) {
+      let primaryEmergencyGoal = emergencyGoals[0] || null;
+      if (!primaryEmergencyGoal) {
         await finance.addGoal({
           name: 'Emergency Fund',
-          description: 'Permanent safety reserve floor cushion',
+          description: 'Permanent safety reserve & 10% Gamma savings cushion',
           target_amount: 1000,
           assigned_amount: 0,
           currency: baseCurrency,
           priority: 1,
           safety_mode: 'balanced',
           color: '#ef4444',
-          percent_allocation: 0,
+          percent_allocation: 10,
         } as any);
+      } else if (primaryEmergencyGoal.percent_allocation !== 10) {
+        await finance.updateGoal(primaryEmergencyGoal.id, {
+          percent_allocation: 10,
+        } as any);
+      }
+
+      // 3. Migrate and remove any separate general "Savings" / "Core Savings" system pot into Emergency Fund
+      const savingsGoals = finance.goals.filter(isSystemSavingsGoal);
+      if (savingsGoals.length > 0 && primaryEmergencyGoal) {
+        const savingsAssignedToRollOver = savingsGoals.reduce((sum, s) => sum + (s.assigned_amount || 0), 0);
+        if (savingsAssignedToRollOver > 0) {
+          await finance.updateGoal(primaryEmergencyGoal.id, {
+            assigned_amount: (primaryEmergencyGoal.assigned_amount || 0) + savingsAssignedToRollOver,
+          } as any);
+        }
+        for (const s of savingsGoals) {
+          await finance.deleteGoal(s.id);
+        }
       }
     };
 
@@ -634,18 +617,21 @@ export default function FinancePoolsPage() {
         }
       }
 
+      const emergencyDedicated = Math.round(gammaIncome * 0.10 * 100) / 100;
+
       const maxForPots = isThisCurrentCalMonth
         ? Math.max(
             0,
             gammaIncome -
               Math.max(fixedDedicated, fixedPaid) -
               Math.max(essentialDedicated, essentialSpent) -
+              emergencyDedicated -
               funSpent
           )
-        : Math.max(0, gammaIncome - fixedDedicated - essentialDedicated);
+        : Math.max(0, gammaIncome - fixedDedicated - essentialDedicated - emergencyDedicated);
 
       const potSavingsDedicated = Math.min(rawGoalSavings, maxForPots);
-      const funDedicated = Math.max(0, gammaIncome - fixedDedicated - essentialDedicated - potSavingsDedicated) + extraIncome;
+      const funDedicated = Math.max(0, gammaIncome - fixedDedicated - essentialDedicated - emergencyDedicated - potSavingsDedicated) + extraIncome;
       const cardSpendCap = essentialDedicated + funDedicated;
       const dailyCardCap = daysCount > 0 ? cardSpendCap / daysCount : 0;
       const livingTarget = fixedDedicated + cardSpendCap;
@@ -679,6 +665,7 @@ export default function FinancePoolsPage() {
         essentialDedicated,
         essentialSpent,
         remEssentials,
+        emergencyDedicated,
         potSavingsDedicated,
         funDedicated,
         funSpent,
@@ -883,36 +870,33 @@ export default function FinancePoolsPage() {
   const livingPoolReserved = Math.min(unassignedCash, livingReserveToProtect);
   const cashAfterLivingReserve = Math.max(0, unassignedCash - livingPoolReserved);
 
-  // Cash for emergency includes explicitly assigned emergency funds + remaining cash after Living Pool reserve
+  // Cash for emergency includes explicitly assigned emergency funds + all remaining safety-net cash after Living Pool reserve
   const cashForEmergency = Math.max(emergencyGoalAssigned, cashAfterLivingReserve);
-  const currentEmergencyFunded = Math.min(emergencyFloor, cashForEmergency);
+  const currentEmergencyFunded = cashForEmergency;
   const emergencyShortfallAmt = Math.max(0, emergencyFloor - currentEmergencyFunded);
   const isEmergencyFull = emergencyShortfallAmt <= 0.01;
 
-  // Core Savings pot is 100% dynamic: all real cash in your bank accounts after reserving
-  // Specific Goal Pots, this month's Living Budget, and your Emergency Floor.
-  const extraSavingsCash = Math.max(0, unassignedCash - livingPoolReserved - currentEmergencyFunded);
+  const extraSavingsCash = 0;
   const livingPoolCash = livingPoolReserved;
   const unallocatedSurplusCash = 0;
 
   const otherGoalSegments = useMemo(() => {
     return finance.goals
-      .filter(g => !(g as any).is_emergency && !g.name.toLowerCase().includes('emergency'))
+      .filter(g => !(g as any).is_emergency && !g.name.toLowerCase().includes('emergency') && !isSystemSavingsGoal(g))
       .map(g => {
         const baseAmtVal = finance.convertToBase(g.assigned_amount || 0, g.currency);
-        const totalAmtVal = isSystemSavingsGoal(g) ? extraSavingsCash : baseAmtVal;
         return {
           label: g.name,
-          amount: totalAmtVal,
+          amount: baseAmtVal,
           color: g.color || '#4558ff',
         };
       })
       .filter(seg => seg.amount > 0.01);
-  }, [finance.goals, finance.convertToBase, extraSavingsCash]);
+  }, [finance.goals, finance.convertToBase]);
 
   const sortedNonEmergencyGoals = useMemo(() => {
     const nonEmergency = finance.goals.filter(
-      g => !(g as any).is_emergency && !g.name.toLowerCase().includes('emergency')
+      g => !(g as any).is_emergency && !g.name.toLowerCase().includes('emergency') && !isSystemSavingsGoal(g)
     );
     return [...nonEmergency].sort((a, b) => {
       const aAssigned = a.assigned_amount || 0;
@@ -940,16 +924,11 @@ export default function FinancePoolsPage() {
         return aHit ? 1 : -1;
       }
 
-      // 2. Fixed system pots (Savings Stash, Savings) stay visible at top of active pools
+      // 2. Fixed system pots (Savings Stash) stay visible at top of active pools
       const aIsStash = isSystemStashGoal(a);
       const bIsStash = isSystemStashGoal(b);
       if (aIsStash && !bIsStash) return -1;
       if (!aIsStash && bIsStash) return 1;
-
-      const aIsSavings = isSystemSavingsGoal(a);
-      const bIsSavings = isSystemSavingsGoal(b);
-      if (aIsSavings && !bIsSavings) return -1;
-      if (!aIsSavings && bIsSavings) return 1;
 
       // 3. Soonest due date first
       const aHasDeadline = !!a.deadline;
@@ -982,24 +961,23 @@ export default function FinancePoolsPage() {
 
     // Emergency Reserve pool option
     const emId = emergencyGoal ? emergencyGoal.id : EMERGENCY_VIRTUAL;
-    const emAvailable = emergencyGoal ? emergencyGoalAssigned : currentEmergencyFunded;
+    const emAvailable = emergencyGoal ? Math.max(emergencyGoalAssigned, currentEmergencyFunded) : currentEmergencyFunded;
     opts.push({
       id: emId,
-      label: 'Emergency Reserve',
+      label: 'Emergency Reserve (10% Gamma)',
       available: emAvailable,
       cap: emergencyFloor,
     });
 
     finance.goals.forEach(g => {
-      if ((g as any).is_emergency || g.name.toLowerCase().includes('emergency')) return;
+      if ((g as any).is_emergency || g.name.toLowerCase().includes('emergency') || isSystemSavingsGoal(g)) return;
       const isStash = isSystemStashGoal(g);
-      const isSavings = isSystemSavingsGoal(g);
-      const extraLabel = isStash ? ' (Fixed Stash)' : isSavings ? ' (Dynamic Savings)' : '';
+      const extraLabel = isStash ? ' (Fixed Stash)' : '';
       const baseAvailable = finance.convertToBase(g.assigned_amount || 0, g.currency);
       opts.push({
         id: g.id,
         label: `${g.name}${extraLabel}`,
-        available: isSavings ? extraSavingsCash : baseAvailable,
+        available: baseAvailable,
         cap: finance.convertToBase(g.target_amount, g.currency),
       });
     });
@@ -1876,7 +1854,16 @@ export default function FinancePoolsPage() {
 
               {/* Lower Section: Level Status & Actions */}
               <div>
-                <p className="text-[11px] text-slate-500 mt-4 pt-3 border-t border-slate-200/60 font-medium">
+                <div className="mt-3 pt-2.5 border-t border-slate-200/60 flex items-center justify-between text-xs">
+                  <span className="text-slate-600 font-semibold flex items-center gap-1">
+                    <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                    Monthly Allocation (10% of Gamma):
+                  </span>
+                  <span className="font-extrabold text-emerald-700">
+                    +{fmt(primaryLivingSummary.emergencyDedicated)}/mo ({fmt((primaryLivingSummary.emergencyDedicated / Math.max(1, primaryLivingSummary.daysInMonth)) * 7)}/wk)
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-500 mt-2 pt-2 border-t border-slate-200/60 font-medium">
                   {monthsCovered.toFixed(1)}mo covered • ({fmt(actualMonthlySurvival)} survival + 20% safety margin)
                 </p>
 
@@ -2034,7 +2021,7 @@ export default function FinancePoolsPage() {
                           ? `Funded from Gamma Paycheck · Ready for 1 ${potSummary.shortMonthName}`
                           : activeLivingPotSummaries.length > 1
                           ? 'Finishing up current month · Leftover sweeps to Stash on the 1st'
-                          : 'Fixed + Essentials + Pot Commitments + Fun Money'}
+                          : 'Fixed + Essentials + Emergency (10% Gamma) + Pots + Fun Money'}
                       </p>
                     </div>
                   </div>
@@ -2068,11 +2055,11 @@ export default function FinancePoolsPage() {
                     />
                   </div>
                   <p className="text-[10px] text-slate-400 mt-1">
-                    Of {fmt(potSummary.totalIncome)} total income ({fmt(potSummary.potSavingsDedicated)} moved to savings pots{potSummary.sweptToStash > 0.01 ? ` · ${fmt(potSummary.sweptToStash)} swept to Stash` : ''})
+                    Of {fmt(potSummary.totalIncome)} total income ({fmt(potSummary.emergencyDedicated)} to Emergency Fund · {fmt(potSummary.potSavingsDedicated)} moved to savings pots{potSummary.sweptToStash > 0.01 ? ` · ${fmt(potSummary.sweptToStash)} swept to Stash` : ''})
                   </p>
                 </div>
 
-                {/* 4-Step Dynamic Waterfall Breakdown + Monthly Card Spend Cap */}
+                {/* 5-Step Dynamic Waterfall Breakdown + Monthly Card Spend Cap */}
                 <div className="text-xs space-y-2 border-t border-purple-100 pt-3 mt-3">
                   <div className="flex justify-between items-center gap-2">
                     <span className="text-slate-500 font-semibold">1. Fixed Bills Dedicated:</span>
@@ -2098,10 +2085,16 @@ export default function FinancePoolsPage() {
                       )}
                     </span>
                   </div>
+                  <div className="flex justify-between items-center gap-2 bg-emerald-50/70 -mx-1.5 px-1.5 py-1 rounded-lg border border-emerald-200/80">
+                    <span className="text-emerald-900 font-bold">3. Emergency Fund (10% of Gamma):</span>
+                    <span className="font-extrabold text-emerald-700 text-right">
+                      +{fmt(potSummary.emergencyDedicated)} saved ✓ ({fmt((potSummary.emergencyDedicated / potSummary.daysInMonth) * 7)}/wk)
+                    </span>
+                  </div>
                   <div className="bg-purple-50/70 -mx-1.5 px-1.5 py-1.5 rounded-lg border border-purple-100 space-y-1">
                     <div className="flex justify-between items-center gap-2">
                       <span className="text-purple-900 font-bold flex items-center gap-1">
-                        3. Savings Pots Transferred:
+                        4. Savings Pots Transferred:
                       </span>
                       <span className="font-extrabold text-purple-700 text-right">
                         {fmt(potSummary.potSavingsDedicated)} moved to pots ✓ ({fmt((potSummary.potSavingsDedicated / potSummary.daysInMonth) * 7)}/wk)
@@ -2121,7 +2114,7 @@ export default function FinancePoolsPage() {
                     )}
                   </div>
                   <div className="flex justify-between items-center gap-2">
-                    <span className="text-slate-500 font-semibold">4. Base Fun Money Dedicated:</span>
+                    <span className="text-slate-500 font-semibold">5. Base Fun Money Dedicated:</span>
                     <span className="font-extrabold text-[#FF2EB8] text-right">
                       {potSummary.remFun <= 0.01 && potSummary.funSpent > 0 ? (
                         <span className="text-amber-700">£0.00 left of {fmt(potSummary.funDedicated)} ({fmt(potSummary.funSpent)} spent)</span>
@@ -2134,7 +2127,7 @@ export default function FinancePoolsPage() {
                   </div>
                   <div className="flex justify-between items-center gap-2 pt-1.5 border-t border-slate-200/70 text-[11px]">
                     <span className="text-slate-700 font-bold">
-                      {potSummary.shortMonthName} Card Spend Cap (2 + 4):
+                      {potSummary.shortMonthName} Card Spend Cap (2 + 5):
                     </span>
                     <span className="font-display font-black text-slate-900 tabular-nums text-right">
                       {fmt(potSummary.cardSpendCap)} ({fmt(potSummary.dailyCardCap)}/day × {potSummary.daysInMonth}d)

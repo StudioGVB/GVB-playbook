@@ -209,9 +209,11 @@ export function calculatePaycheckWaterfall(
   const totalLivingCostReserve = Math.min(remaining, fixedMonthlyTotal + essentialVariableMonthly);
   remaining -= totalLivingCostReserve;
 
-  // Emergency shortfall is tracked for display, but never steals from [z] Savings Pots or [a] Fun Money
+  // Step 3: Emergency Fund receives 10% of Gamma Salary
   const emergencyShortfall = Math.max(0, emergencyFloor - currentEmergencyFunded);
-  const emergencyTopUp = 0;
+  const tenPercentGamma = Math.round(paycheckAmount * 0.10 * 100) / 100;
+  const emergencyTopUp = Math.min(remaining, tenPercentGamma);
+  remaining -= emergencyTopUp;
 
   // Always anchor to the 1st of the target month so the full 30/31-day monthly pot schedule is funded
   const monthStart = new Date(referenceDate.getFullYear(), referenceDate.getMonth(), 1, 0, 0, 0, 0);
