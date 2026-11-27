@@ -1077,13 +1077,13 @@ export default function FinancePoolsPage() {
       emergencyFloor,
       currentEmergencyFunded,
       finance.goals,
-      fixedMonthlyTotal,
+      effectiveFixedMonthly,
       essentialVariable,
       finance.convertToBase,
       finance.transactions,
       targetMonthDate
     );
-  }, [paycheckTx, emergencyFloor, currentEmergencyFunded, finance.goals, fixedMonthlyTotal, essentialVariable, finance.convertToBase, finance.transactions, targetMonthDate]);
+  }, [paycheckTx, emergencyFloor, currentEmergencyFunded, finance.goals, effectiveFixedMonthly, essentialVariable, finance.convertToBase, finance.transactions, targetMonthDate]);
 
   const handleExecutePaycheckAllocation = async () => {
     if (!paycheckTx || !waterfallBreakdown || paycheckAllocated) return;
@@ -1183,7 +1183,11 @@ export default function FinancePoolsPage() {
 
   const handleRevertPaycheckAllocation = async () => {
     if (!paycheckTx || isReverting) return;
-    const meta = getPaycheckAllocationMeta(paycheckTx.id);
+    const meta = getPaycheckAllocationMeta(paycheckTx.id) || (
+      (paycheckTx.raw as any)?.paycheck_allocation_breakdown
+        ? { allocatedAt: Number((paycheckTx.raw as any)?.allocated_at) || Date.now(), breakdown: (paycheckTx.raw as any).paycheck_allocation_breakdown }
+        : null
+    );
     if (!meta) {
       toast.error('Allocation record expired or not found');
       return;
@@ -1220,8 +1224,16 @@ export default function FinancePoolsPage() {
         }
       }
 
-      // 3. Unmark paycheck processed
+      // 3. Unmark paycheck processed both locally and in Supabase
       unmarkPaycheckProcessed(paycheckTx.id);
+      await finance.updateTransaction(paycheckTx.id, {
+        raw: {
+          ...((paycheckTx.raw as any) || {}),
+          paycheck_allocated: false,
+          allocated_at: null,
+          paycheck_allocation_breakdown: null,
+        }
+      });
       setPaycheckAllocated(false);
       setRevertSecondsLeft(0);
 

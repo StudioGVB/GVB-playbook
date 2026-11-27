@@ -362,7 +362,7 @@ export default function FinanceBudget() {
     const thisWeekKey = format(todayWeekStart, 'yyyy-MM-dd');
     const prevWeekStart = startOfWeek(subDays(todayWeekStart, 1), { weekStartsOn: 1 });
     const prevWeekKey = format(prevWeekStart, 'yyyy-MM-dd');
-    const SETTLE_VERSION = 17;
+    const SETTLE_VERSION = 18;
 
     const prevWeekSpend = computeWeekVariableSpend(dedupedTransactions, finance.categories, prevWeekStart, trips);
     const prevEssentialSpent = prevWeekSpend.essentialSpent;
@@ -394,10 +394,13 @@ export default function FinanceBudget() {
       : 0;
     const meta: CoverMeta = parseCoverMeta(stashGoal?.description);
     const closedPrev = meta.closed_weeks?.[prevWeekKey];
+    const isCurrentVersionSettled =
+      meta.last_settled_week === prevWeekKey &&
+      meta.settled_version === SETTLE_VERSION;
 
-    // If last week was already settled, lock to its original totalBudget!
+    // If last week was already settled under the current SETTLE_VERSION, lock to its original totalBudget!
     // Never recompute last week's budget dynamically from live cash or today's debt.
-    const totalBudget = closedPrev
+    const totalBudget = (closedPrev && isCurrentVersionSettled)
       ? closedPrev.totalBudget
       : (isPrevTravelWeek
           ? travelWeekAllowance
@@ -405,8 +408,8 @@ export default function FinanceBudget() {
     const totalSpent = Math.round((prevEssentialSpent + prevFunSpent) * 100) / 100;
     const netDifference = Math.round((totalBudget - totalSpent) * 100) / 100;
 
-    // If last week was already settled:
-    if (closedPrev && meta.last_settled_week === prevWeekKey) {
+    // If last week was already settled under the current SETTLE_VERSION:
+    if (closedPrev && isCurrentVersionSettled) {
       const spendingDiff = Math.round((totalSpent - closedPrev.totalSpent) * 100) / 100;
       if (Math.abs(spendingDiff) <= 0.02) {
         // Spending is identical: no transactions were changed/recategorized.
@@ -460,9 +463,6 @@ export default function FinanceBudget() {
     }
 
     const localKey = `stash_settled_v${SETTLE_VERSION}_${prevWeekKey}`;
-    const isCurrentVersionSettled =
-      meta.last_settled_week === prevWeekKey &&
-      meta.settled_version === SETTLE_VERSION;
 
     const deltaMatches =
       isCurrentVersionSettled &&

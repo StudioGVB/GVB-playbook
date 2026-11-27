@@ -357,8 +357,11 @@ export default function FinanceMonthly() {
   const netProfit = incomeTotal - totalSpent;
   const savingsRate = incomeTotal > 0 ? (netProfit / incomeTotal) * 100 : 0;
 
-  // Pool savings monthly target
+  // Pool savings monthly target (strictly aligned with monthAllowancePlan & Living Budget Pot)
   const poolSavingsMonthly = useMemo(() => {
+    if (monthAllowancePlan && monthAllowancePlan.potSavingsMonthly > 0) {
+      return monthAllowancePlan.potSavingsMonthly;
+    }
     const directGoalSavings = computeRequiredGoalSavingsMonthly(
       finance.goals,
       finance.convertToBase,
@@ -369,7 +372,7 @@ export default function FinanceMonthly() {
     return (snapshot?.split.goalSavingsAmount && snapshot.split.goalSavingsAmount > 0)
       ? snapshot.split.goalSavingsAmount
       : directGoalSavings;
-  }, [finance.goals, finance.convertToBase, selectedMonth, incomeTotal, expectedIncomeVal, finance.transactions, snapshot]);
+  }, [monthAllowancePlan, finance.goals, finance.convertToBase, selectedMonth, incomeTotal, expectedIncomeVal, finance.transactions, snapshot]);
 
   // Savings Stash: shock absorber pool that absorbs weekly/monthly overspend
   const stashGoal = useMemo(() => {

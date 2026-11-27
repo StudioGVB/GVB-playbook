@@ -34,56 +34,69 @@ export function detectPaycheck(
 ): DetectedPaycheck | null {
   const catMap = new Map(categories.map(c => [c.id, c]));
 
-  // Only detect paychecks that actually landed within the last 7 days
-  const windowStart = new Date(refDate.getTime() - 7 * 24 * 60 * 60 * 1000);
+  // Detect Gamma paychecks from the 18th of the current month (e.g. early pre-Christmas Dec 22 payday or Nov 27/30 payday)
+  // or within the last 14 days so the pre-allocated Next Month Living Budget pot stays active through month-end.
+  const fourteenDaysAgo = new Date(refDate.getTime() - 14 * 24 * 60 * 60 * 1000);
+  const eighteenthOfThisMonth = new Date(refDate.getFullYear(), refDate.getMonth(), 18, 0, 0, 0, 0);
+  const windowStart = fourteenDaysAgo < eighteenthOfThisMonth ? fourteenDaysAgo : eighteenthOfThisMonth;
   windowStart.setHours(0, 0, 0, 0);
   const windowEnd = new Date(refDate.getTime() + 2 * 24 * 60 * 60 * 1000);
 
   const candidates = transactions.filter(tx => {
     const amt = baseAmt(tx);
-    if (amt < 500) return false;
-    if (tx.is_reimbursable || tx.is_refund) return false;
+    if (amt < 1000) return false;
+    if (tx.is_reimbursable || tx.is_refund || tx.is_transfer) return false;
 
     const d = parseUkDate(tx.posted_at);
     if (d < windowStart || d > windowEnd) return false;
 
     const rawText = `${tx.merchant || ''} ${tx.description || ''}`.toLowerCase();
     const cat = catMap.get(tx.category_id || '');
+    const catNameLower = (cat?.name || '').toLowerCase();
     const isIncomeCat = cat?.type === 'income';
 
-    const isSalaryKeyword =
-      rawText.includes('gamma') ||
-      rawText.includes('batchbase') ||
-      rawText.includes('venture advisory') ||
-      rawText.includes('payroll') ||
-      rawText.includes('salary');
+    // Never treat weekly Venture Advisory or irregular side income as the monthly Gamma paycheck
+    if (
+      rawText.includes('venture') ||
+      rawText.includes('advisory') ||
+      rawText.includes('eleven') ||
+      rawText.includes('11labs') ||
+      rawText.includes('back pocket') ||
+      rawText.includes('bpg') ||
+      rawText.includes('etsy')
+    ) {
+      return false;
+    }
 
-    if (isSalaryKeyword && amt >= 500) return true;
-    if (isIncomeCat && !tx.is_transfer && amt >= 800) return true;
-    // Large incoming salary-sized deposit >= £1,500
-    if (!tx.is_transfer && amt >= 1500) return true;
+    const isGammaOrSalary =
+      rawText.includes('gamma') ||
+      rawText.includes('payroll') ||
+      rawText.includes('salary') ||
+      catNameLower.includes('gamma') ||
+      catNameLower.includes('salary');
+
+    if (isGammaOrSalary && amt >= 1000) return true;
+    if (isIncomeCat && amt >= 1500) return true;
+    if (amt >= 1500) return true;
 
     return false;
   });
 
   if (candidates.length === 0) return null;
 
-  // Return the largest candidate transaction as the primary paycheck
-  candidates.sort((a, b) => baseAmt(b) - baseAmt(a));
+  // Return the most recent (or largest) candidate transaction as the primary paycheck
+  candidates.sort((a, b) => parseUkDate(b.posted_at).getTime() - parseUkDate(a.posted_at).getTime() || baseAmt(b) - baseAmt(a));
   const primaryTx = candidates[0];
 
-  const txDate = new Date(primaryTx.posted_at);
+  const txDate = parseUkDate(primaryTx.posted_at);
   const dayOfMonth = txDate.getDate();
 
-  // If paid on/after 24th (or within last 7 days of month), it funds the NEXT calendar month
+  // If paid on/after the 18th of Month M-1 (e.g. Nov 30th for December), it funds Month M (the next calendar month)
   let targetYear = txDate.getFullYear();
   let targetMonthIndex = txDate.getMonth();
   let isNextMonthPaycheck = false;
 
-  const daysInMonth = new Date(targetYear, targetMonthIndex + 1, 0).getDate();
-  const daysLeftInMonth = daysInMonth - dayOfMonth;
-
-  if (dayOfMonth >= 24 || daysLeftInMonth <= 7) {
+  if (dayOfMonth >= 18) {
     targetMonthIndex += 1;
     if (targetMonthIndex > 11) {
       targetMonthIndex = 0;
@@ -91,6 +104,11 @@ export function detectPaycheck(
     }
     isNextMonthPaycheck = true;
   }
+
+  // Only treat as "next month pre-funded" while we are still in the payday month (before the 1st of targetMonth)
+  const isStillBeforeTargetMonth =
+    refDate.getFullYear() < targetYear ||
+    (refDate.getFullYear() === targetYear && refDate.getMonth() < targetMonthIndex);
 
   const targetDate = new Date(targetYear, targetMonthIndex, 1);
   const targetMonthName = targetDate.toLocaleString('en-US', { month: 'long', year: 'numeric' });
@@ -103,7 +121,7 @@ export function detectPaycheck(
   return {
     transaction: primaryTx,
     targetMonthName,
-    isNextMonthPaycheck,
+    isNextMonthPaycheck: isNextMonthPaycheck && isStillBeforeTargetMonth,
     payPeriodLabel,
   };
 }
@@ -168,11 +186,11 @@ export function getPaycheckAllocationMeta(txId: string): { allocatedAt: number; 
 }
 
 /**
- * Calculates the strict 4-step monthly waterfall allocation for a paycheck:
- * 1. Reserved Fixed Bills + Essential Living (Monthly)
- * 2. Emergency Reserve Top-up (up to 100% target floor)
- * 3. Goal Pools (Monthly Targets)
- * 4. Fun Money Leftover (Discretionary)
+ * Calculates the strict 4-step monthly waterfall allocation for a Gamma paycheck:
+ * 1. [x] Fixed Bills (Monthly)
+ * 2. [y] Variable Essentials (Monthly)
+ * 3. [z] Active Savings Pots (Scheduled Monthly Targets for the Target Month)
+ * 4. [a] Base Fun Money Leftover (Discretionary)
  */
 export function calculatePaycheckWaterfall(
   paycheckAmount: number,
@@ -187,63 +205,42 @@ export function calculatePaycheckWaterfall(
 ): PaycheckWaterfallBreakdown {
   let remaining = paycheckAmount;
 
-  // Step 1: Living Cost Reserve (Monthly Fixed Bills + Monthly Essential Variable)
+  // Step 1 & 2: Living Cost Reserve ([x] Fixed Bills + [y] Variable Essentials)
   const totalLivingCostReserve = Math.min(remaining, fixedMonthlyTotal + essentialVariableMonthly);
   remaining -= totalLivingCostReserve;
 
-  // Step 2: Emergency Reserve Top-up (up to 100% target floor)
+  // Emergency shortfall is tracked for display, but never steals from [z] Savings Pots or [a] Fun Money
   const emergencyShortfall = Math.max(0, emergencyFloor - currentEmergencyFunded);
-  const emergencyTopUp = Math.min(remaining, emergencyShortfall);
-  remaining -= emergencyTopUp;
+  const emergencyTopUp = 0;
 
-  // Compute linked spend per goal in base currency
-  const spentByGoalBase = new Map<string, number>();
-  for (const tx of transactions || []) {
-    const goalId = (tx as any)?.goal_id;
-    const amt = Number(tx?.amount) || 0;
-    if (!goalId || amt >= 0 || tx?.is_transfer) continue;
-    const baseVal = Math.abs(convertToBase(amt, tx?.currency || 'GBP'));
-    spentByGoalBase.set(goalId, (spentByGoalBase.get(goalId) || 0) + baseVal);
-  }
+  // Always anchor to the 1st of the target month so the full 30/31-day monthly pot schedule is funded
+  const monthStart = new Date(referenceDate.getFullYear(), referenceDate.getMonth(), 1, 0, 0, 0, 0);
 
-  // Step 3: Goal Pool Monthly Contributions
-  const now = referenceDate;
+  // Step 3: [z] Savings Pots Monthly Contributions
   const potSchedule = computeMonthlyPotSchedule({
     goals,
     transactions: transactions || [],
     convertToBase,
-    referenceDate: now,
+    referenceDate: monthStart,
   });
   const goalAllocations: { goalId: string; goalName: string; monthlyTarget: number; allocatedAmount: number }[] = [];
   let totalGoalAllocations = 0;
 
   for (const g of goals) {
-    if ((g as any).is_stash || g.name.toLowerCase().includes('stash')) continue; // Exclude savings stash from step 3 goal targets
-    if ((g as any).is_emergency || g.name.toLowerCase().includes('emergency')) continue; // Already topped up in Step 2
-    if (g.start_date && new Date(g.start_date) > now) continue; // Exclude goals starting in the future
-    const targetBase = convertToBase(g.target_amount || 0, g.currency);
-    const assignedBase = convertToBase(g.assigned_amount || 0, g.currency);
-    const spentBase = spentByGoalBase.get(g.id) || 0;
-    const refillWhenSpent = Boolean((g as any).refill_when_spent);
-    const effectiveFundedBase = refillWhenSpent ? assignedBase : (assignedBase + spentBase);
-    const remainingNeeded = Math.max(0, targetBase - effectiveFundedBase);
-
-    // Rule: Pot reached target amount -> skip allocation even if deadline is upcoming (unless refill_when_spent is enabled)
-    if (remainingNeeded <= 0.01) continue;
-
-    const scheduledPlan = potSchedule.getGoalPlanForMonth(g.id, now);
-    let monthlyTarget = 0;
-    if (scheduledPlan && g.deadline) {
-      monthlyTarget = Math.min(remainingNeeded, scheduledPlan.monthlyAmount);
-    } else if (g.deadline) {
-      const daysLeft = Math.max(1, Math.ceil((new Date(g.deadline).getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
-      const weeksLeft = Math.max(1, daysLeft / 7);
-      monthlyTarget = Math.min(remainingNeeded, (remainingNeeded / weeksLeft) * 4.33);
-    } else if (g.percent_allocation && g.percent_allocation > 0) {
-      monthlyTarget = Math.min(remainingNeeded, (g.percent_allocation / 100) * paycheckAmount);
-    } else {
-      monthlyTarget = Math.min(remainingNeeded, 100);
+    const lower = (g.name || '').trim().toLowerCase();
+    // Exclude system pots (Savings Stash, Emergency Reserve, and dynamic Core Savings)
+    if ((g as any).is_stash || (g as any).is_emergency) continue;
+    if (lower.includes('stash') || lower.includes('emergency') || lower === 'savings' || lower === 'core savings') {
+      continue;
     }
+
+    const scheduledPlan = potSchedule.getGoalPlanForMonth(g.id, monthStart);
+    if (!scheduledPlan || scheduledPlan.isFutureStart || scheduledPlan.remainingToSaveBase <= 0.01) {
+      continue;
+    }
+
+    const monthlyTarget = Math.min(scheduledPlan.remainingToSaveBase, scheduledPlan.monthlyAmount);
+    if (monthlyTarget <= 0.01) continue;
 
     const allocatedAmount = Math.min(remaining, monthlyTarget);
     remaining -= allocatedAmount;
@@ -257,7 +254,7 @@ export function calculatePaycheckWaterfall(
     });
   }
 
-  // Step 4: Discretionary Fun Money Leftover
+  // Step 4: [a] Base Fun Money Leftover
   const funMoneyLeftover = Math.max(0, remaining);
 
   return {
