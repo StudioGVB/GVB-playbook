@@ -32,8 +32,7 @@ export default function WeeklyPoolSavingsCard({ finance, spendablePool = 0, funM
 
     const eligibleGoals = finance.goals.filter((g) => {
       const lower = (g.name || '').trim().toLowerCase();
-      if ((g as any).is_emergency || (g as any).is_stash) return false;
-      if (lower.includes('emergency') || lower.includes('stash') || lower === 'savings' || lower === 'core savings') return false;
+      if ((g as any).is_stash || lower.includes('stash')) return false;
       return true;
     });
 

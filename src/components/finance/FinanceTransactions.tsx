@@ -1171,8 +1171,7 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                     fullDesc.includes('batchbase') ||
                     fullDesc.includes('batch base') ||
                     fullDesc.includes('venture') ||
-                    fullDesc.includes('advisory') ||
-                    (fullDesc.includes('gabriella') && !tx.transfer_group_id)
+                    fullDesc.includes('advisory')
                   );
                   const ventureCategory = categories.find(c => c.name.trim().toLowerCase() === 'income' && c.type === 'income');
                   const displayCat = cat || (isVentureIncome ? ventureCategory : null);

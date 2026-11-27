@@ -503,7 +503,6 @@ export default function FinanceYearly() {
     const active = goals.filter(g => {
       const name = (g.name || '').toLowerCase();
       if ((g as any).is_stash || name.includes('stash')) return false;
-      if ((g as any).is_emergency || name.includes('emergency')) return false;
       const target = finance.convertToBase(g.target_amount || 0, g.currency);
       const assigned = finance.convertToBase(g.assigned_amount || 0, g.currency);
       return target > 0 && assigned < target;
@@ -546,13 +545,13 @@ export default function FinanceYearly() {
   // Selected Month Spotlight (for deep-dive inspection)
   const activeSpotlightMonth = useMemo(() => {
     if (selectedMonthKey) {
-      const found = stackedChartData.find(s => s.monthKey === selectedMonthKey);
+      const found = displayedSeries.find(s => s.monthKey === selectedMonthKey);
       if (found) return found;
     }
     // Default to next month if available, else current month
-    const nextMonth = stackedChartData.find(s => s.isFuture);
-    return nextMonth || stackedChartData.find(s => s.isCurrent) || stackedChartData[0] || null;
-  }, [selectedMonthKey, stackedChartData]);
+    const nextMonth = displayedSeries.find(s => s.isFuture);
+    return nextMonth || displayedSeries.find(s => s.isCurrent) || displayedSeries[0] || null;
+  }, [selectedMonthKey, displayedSeries]);
 
   // Predictability Score (0-100%)
   const predictabilityScore = useMemo(() => {
@@ -1059,21 +1058,28 @@ export default function FinanceYearly() {
                   </span>
                 </div>
                 <div className="h-3 rounded-full bg-slate-200 overflow-hidden flex">
-                  <div
-                    className="h-full bg-slate-600 transition-all"
-                    style={{ width: `${Math.min(100, (activeSpotlightMonth.fixed / (activeSpotlightMonth.income || 1)) * 100)}%` }}
-                    title={`Fixed Bills: ${fmt(activeSpotlightMonth.fixed)}`}
-                  />
-                  <div
-                    className="h-full bg-amber-500 transition-all"
-                    style={{ width: `${Math.min(100, (activeSpotlightMonth.variable / (activeSpotlightMonth.income || 1)) * 100)}%` }}
-                    title={`Variable Living: ${fmt(activeSpotlightMonth.variable)}`}
-                  />
-                  <div
-                    className="h-full bg-blue-500 transition-all"
-                    style={{ width: `${Math.min(100, (activeSpotlightMonth.totalPots / (activeSpotlightMonth.income || 1)) * 100)}%` }}
-                    title={`Saving Pots Total: ${fmt(activeSpotlightMonth.totalPots)}`}
-                  />
+                  {(() => {
+                    const maxDenominator = Math.max(activeSpotlightMonth.income || 0, activeSpotlightMonth.totalAllocated || 0, 1);
+                    return (
+                      <>
+                        <div
+                          className="h-full bg-slate-600 transition-all"
+                          style={{ width: `${(activeSpotlightMonth.fixed / maxDenominator) * 100}%` }}
+                          title={`Fixed Bills: ${fmt(activeSpotlightMonth.fixed)}`}
+                        />
+                        <div
+                          className="h-full bg-amber-500 transition-all"
+                          style={{ width: `${(activeSpotlightMonth.variable / maxDenominator) * 100}%` }}
+                          title={`Variable Living: ${fmt(activeSpotlightMonth.variable)}`}
+                        />
+                        <div
+                          className="h-full bg-blue-500 transition-all"
+                          style={{ width: `${(activeSpotlightMonth.totalPots / maxDenominator) * 100}%` }}
+                          title={`Saving Pots Total: ${fmt(activeSpotlightMonth.totalPots)}`}
+                        />
+                      </>
+                    );
+                  })()}
                 </div>
                 <div className="flex items-center gap-4 text-[11px] text-slate-500 pt-1 flex-wrap">
                   <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-slate-600" /> Fixed Bills: <strong>{fmt(activeSpotlightMonth.fixed)}</strong></span>

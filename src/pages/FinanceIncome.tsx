@@ -51,7 +51,6 @@ function isInternalTransfer(tx: any): boolean {
   // Batchbase / Venture Advisory or Gabriella external paycheck is earned income, never an internal transfer
   if (text.includes('batchbase') || text.includes('batch base')) return false;
   if (text.includes('venture') || text.includes('advisory')) return false;
-  if (text.includes('gabriella') && tx.amount > 0 && !tx.transfer_group_id) return false;
 
   if (tx.is_transfer) return true;
   if (tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') return true;
@@ -201,11 +200,6 @@ export default function FinanceIncome() {
       Math.abs(numAmt - 72.8) < 0.5 ||
       Math.abs(numAmt - 140) < 1.0
     );
-    if (hay.includes('gabriella') && !hay.includes('batchbase')) {
-      // Unsorted personal deposits go to the generic Income bucket until tagged
-      const incomeBucket = BUCKETS.find(b => b.label.trim().toLowerCase() === 'income');
-      if (incomeBucket) return incomeBucket.key;
-    }
     if (hay.includes('batchbase')) {
       const ventureBucket = BUCKETS.find(b => b.key.includes('venture') || b.key.includes('batchbase') || b.label.toLowerCase().includes('venture'));
       if (ventureBucket) return ventureBucket.key;

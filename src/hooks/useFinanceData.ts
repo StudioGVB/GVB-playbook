@@ -600,18 +600,14 @@ export function useFinanceDataState() {
             }
 
             const isBatchbase = fullDesc.includes('batchbase') || fullDesc.includes('batch base') || tags.includes('batchbase') || tags.includes('batch');
-            const isGabriella = fullDesc.includes('gabriella') || fullDesc.includes('gabriella blyth');
             const isVentureText = fullDesc.includes('venture') || fullDesc.includes('advisory');
 
-            // Incoming money from Gabriella Blyth without a matched outgoing transfer leg is personal income, never an internal transfer
-            // Only explicit Batchbase/Venture text is VA. Ambiguous "Gabriella" deposits go to the generic Income bucket until sorted.
+            // Explicit Batchbase/Venture text is VA income
             const isVentureIncome = numAmt > 0 && (isBatchbase || isVentureText);
-            const isGabriellaSingleDeposit = isGabriella && numAmt > 0 && !t.transfer_group_id && !matchedExcludedCounterpart;
 
-            if (isVentureIncome || isGabriellaSingleDeposit) {
+            if (isVentureIncome) {
               // Only auto-assign when uncategorised — never override a category you've set
-              const genericIncome = (catRes.data || []).find((c: any) => c.type === 'income' && c.name.trim().toLowerCase() === 'income');
-              const autoCat = isVentureIncome ? ventureCat : genericIncome;
+              const autoCat = ventureCat;
               const targetCatId = !t.category_id && autoCat ? autoCat.id : t.category_id;
               const hasTransferFlag = t.is_transfer || t.transfer_status || t.transfer_side;
 

@@ -27,14 +27,9 @@ export const FALLBACK_POT_COLORS = [
 
 export const isProtectedSystemPot = (g?: Partial<FinanceGoal> | null) => {
   if (!g) return true;
-  if ((g as any).is_emergency || (g as any).is_stash) return true;
+  if ((g as any).is_stash) return true;
   const lower = (g.name || '').trim().toLowerCase();
-  return (
-    lower.includes('emergency') ||
-    lower.includes('stash') ||
-    lower === 'savings' ||
-    lower === 'core savings'
-  );
+  return lower.includes('stash');
 };
 
 /**

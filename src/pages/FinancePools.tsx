@@ -342,10 +342,26 @@ export default function FinancePoolsPage() {
           percent_allocation: 10,
         } as any);
       }
+
+      // 3. Emergency Fund (Fixed Pot)
+      const emergencyGoals = finance.goals.filter(g => (g as any).is_emergency === true || g.name.toLowerCase().includes('emergency'));
+      if (emergencyGoals.length === 0) {
+        await finance.addGoal({
+          name: 'Emergency Fund',
+          description: 'Permanent safety reserve floor cushion',
+          target_amount: emergencyFloor || 1000,
+          assigned_amount: 0,
+          currency: baseCurrency,
+          priority: 1,
+          safety_mode: 'balanced',
+          color: '#ef4444',
+          percent_allocation: 0,
+        } as any);
+      }
     };
 
     runInitSystemPots();
-  }, [finance.goals, finance.loading, finance.hasLoadedOnce, baseCurrency]);
+  }, [finance.goals, finance.loading, finance.hasLoadedOnce, baseCurrency, emergencyFloor]);
 
   // Auto-reconcile spending pools (e.g. Office Set Up) where expenses were assigned (e.g. £28 + £90 = £118)
   // against a funded target (e.g. £150), but assigned_amount was wiped to 0

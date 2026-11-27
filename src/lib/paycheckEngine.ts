@@ -191,9 +191,10 @@ export function calculatePaycheckWaterfall(
   const totalLivingCostReserve = Math.min(remaining, fixedMonthlyTotal + essentialVariableMonthly);
   remaining -= totalLivingCostReserve;
 
-  // Step 2: Emergency Reserve (tracked via goals; no forced deduction before active pots)
+  // Step 2: Emergency Reserve Top-up (up to 100% target floor)
   const emergencyShortfall = Math.max(0, emergencyFloor - currentEmergencyFunded);
-  const emergencyTopUp = 0;
+  const emergencyTopUp = Math.min(remaining, emergencyShortfall);
+  remaining -= emergencyTopUp;
 
   // Compute linked spend per goal in base currency
   const spentByGoalBase = new Map<string, number>();
@@ -218,9 +219,7 @@ export function calculatePaycheckWaterfall(
 
   for (const g of goals) {
     if ((g as any).is_stash || g.name.toLowerCase().includes('stash')) continue; // Exclude savings stash from step 3 goal targets
-    if ((g as any).is_emergency || g.name.toLowerCase().includes('emergency')) continue;
-    const trimmedLower = (g.name || '').trim().toLowerCase();
-    if (trimmedLower === 'savings' || trimmedLower === 'core savings') continue;
+    if ((g as any).is_emergency || g.name.toLowerCase().includes('emergency')) continue; // Already topped up in Step 2
     if (g.start_date && new Date(g.start_date) > now) continue; // Exclude goals starting in the future
     const targetBase = convertToBase(g.target_amount || 0, g.currency);
     const assignedBase = convertToBase(g.assigned_amount || 0, g.currency);

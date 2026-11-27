@@ -196,7 +196,7 @@ export function calculateStreamIncomeEstimates(
     if (tx.amount <= 0 || tx.is_reimbursable) continue;
 
     const text = `${tx.merchant || ''} ${tx.description || ''} ${(tx.raw as any)?.message || ''}`.toLowerCase();
-    const isDepositFromIncome = text.includes('gamma') || text.includes('batchbase') || text.includes('venture') || text.includes('advisory') || (text.includes('gabriella') && !tx.transfer_group_id);
+    const isDepositFromIncome = text.includes('gamma') || text.includes('batchbase') || text.includes('venture') || text.includes('advisory');
 
     // Skip internal transfers between own bank accounts
     if (!isDepositFromIncome && (tx.is_transfer || tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed')) {
@@ -354,12 +354,8 @@ export function evaluatePoolFeasibility(params: {
     if (g.id === evaluatingGoalId) continue;
     const gLower = (g.name || '').trim().toLowerCase();
     if (
-      (g as any).is_emergency ||
       (g as any).is_stash ||
-      gLower.includes('stash') ||
-      gLower.includes('emergency') ||
-      gLower === 'savings' ||
-      gLower === 'core savings'
+      gLower.includes('stash')
     ) {
       continue;
     }
