@@ -353,7 +353,15 @@ export function evaluatePoolFeasibility(params: {
 
   for (const g of existingGoals) {
     if (g.id === evaluatingGoalId) continue;
-    if ((g as any).is_emergency || (g as any).is_stash || g.name.toLowerCase().includes('stash') || g.name.toLowerCase().includes('emergency')) {
+    const gLower = (g.name || '').trim().toLowerCase();
+    if (
+      (g as any).is_emergency ||
+      (g as any).is_stash ||
+      gLower.includes('stash') ||
+      gLower.includes('emergency') ||
+      gLower === 'savings' ||
+      gLower === 'core savings'
+    ) {
       continue;
     }
 

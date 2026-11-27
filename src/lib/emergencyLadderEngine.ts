@@ -52,6 +52,7 @@ export function computeEmergencyLadder(params: {
   goals: FinanceGoal[];
   convertToBase: (amount: number, currency?: string) => number;
   monthlyLivingReserve?: number;
+  transactions?: Array<{ goal_id?: string | null; amount: number; currency?: string; is_transfer?: boolean }>;
   now?: Date;
 }): EmergencyLadderState {
   const {
@@ -62,6 +63,7 @@ export function computeEmergencyLadder(params: {
     goals = [],
     convertToBase,
     monthlyLivingReserve = 0,
+    transactions = [],
     now = new Date(),
   } = params;
 
@@ -74,20 +76,34 @@ export function computeEmergencyLadder(params: {
   const nextMonthFloor = nextMonth ? costPerMonth * nextMonth : null;
   const additionalCostForNextMonth = costPerMonth;
 
+  const spentByGoalBase = new Map<string, number>();
+  for (const tx of transactions) {
+    if (!tx?.goal_id || tx.amount >= 0 || tx.is_transfer) continue;
+    const bVal = Math.abs(convertToBase(tx.amount, tx.currency || 'GBP'));
+    spentByGoalBase.set(tx.goal_id, (spentByGoalBase.get(tx.goal_id) || 0) + bVal);
+  }
+
   // Total allocated to all non-emergency goals
   let totalGoalAssigned = 0;
   const activeCompetingPots: CompetingPot[] = [];
   const recentlyCompletedPots: Array<{ name: string; completedAt?: string }> = [];
 
   for (const g of goals) {
-    const isEmergency = (g as any).is_emergency || g.name.toLowerCase().includes('emergency');
-    if (isEmergency) continue;
+    const lowerName = (g.name || '').trim().toLowerCase();
+    const isEmergency = (g as any).is_emergency || lowerName.includes('emergency');
+    const isCoreSavings = lowerName === 'savings' || lowerName === 'core savings';
+    const isStash = (g as any).is_stash || lowerName.includes('stash');
+    if (isEmergency || isCoreSavings) continue;
 
     const baseTarget = convertToBase(g.target_amount || 0, g.currency);
     const baseAssigned = convertToBase(g.assigned_amount || 0, g.currency);
     totalGoalAssigned += baseAssigned;
 
-    const remaining = Math.max(0, baseTarget - baseAssigned);
+    if (isStash) continue;
+
+    const spentBase = spentByGoalBase.get(g.id) || 0;
+    const effectiveFunded = g.refill_when_spent ? baseAssigned : (baseAssigned + spentBase);
+    const remaining = Math.max(0, baseTarget - effectiveFunded);
     const isCompleted = baseTarget > 0 && remaining <= 0.01;
 
     let daysRemaining: number | null = null;
@@ -106,7 +122,6 @@ export function computeEmergencyLadder(params: {
       }
     }
 
-    const lowerName = g.name.toLowerCase();
     const isHolidayOrTrip = lowerName.includes('xmas') ||
       lowerName.includes('christmas') ||
       lowerName.includes('euro') ||
@@ -119,7 +134,7 @@ export function computeEmergencyLadder(params: {
         id: g.id,
         name: g.name,
         targetAmount: baseTarget,
-        assignedAmount: baseAssigned,
+        assignedAmount: effectiveFunded,
         remainingAmount: remaining,
         deadline: g.deadline || null,
         daysRemaining,

@@ -493,7 +493,9 @@ export default function FinancePoolsPage() {
     return 0;
   }, [potSchedule, snapshot]);
 
-  const weeksInMonth = useMemo(() => computeWeeksInMonth(targetMonthDate), [targetMonthDate]);
+  const daysInTargetMonth = useMemo(() => {
+    return Math.max(1, differenceInCalendarDays(endOfMonth(targetMonthDate), startOfMonth(targetMonthDate)) + 1);
+  }, [targetMonthDate]);
 
   const essentialCatIds = useMemo(() => new Set(
     finance.categories.filter(c => c.is_essential && c.type === 'variable').map(c => c.id)
@@ -502,7 +504,7 @@ export default function FinancePoolsPage() {
   const effectiveWeeklyFun = snapshot?.weeklyFunBudget ?? snapshot?.baseWeeklyFun ?? 0;
   const monthlyTotalIncome = (snapshot?.split?.monthlyIncome && snapshot.split.monthlyIncome > 0)
     ? snapshot.split.monthlyIncome
-    : (effectiveFixedMonthly + essentialVariable + rawMonthlyGoalSavingsTarget + (snapshot?.split?.funAmount || (effectiveWeeklyFun * weeksInMonth)));
+    : (effectiveFixedMonthly + essentialVariable + rawMonthlyGoalSavingsTarget + (snapshot?.split?.funAmount || (effectiveWeeklyFun * (daysInTargetMonth / 7))));
 
   // Track living expenses already paid so far this month (Fixed Bills / Rent, Essentials, Discretionary/Fun)
   // When bills like rent are paid on the 1st, they are paid OUT OF this month's living reserve.
@@ -606,8 +608,9 @@ export default function FinancePoolsPage() {
       goals: finance.goals,
       convertToBase: finance.convertToBase,
       monthlyLivingReserve: livingReserveToProtect,
+      transactions: finance.transactions,
     });
-  }, [bufferMonths, targetMonthsVal, actualMonthlySurvival, totalCash, finance.goals, finance.convertToBase, livingReserveToProtect]);
+  }, [bufferMonths, targetMonthsVal, actualMonthlySurvival, totalCash, finance.goals, finance.convertToBase, livingReserveToProtect, finance.transactions]);
 
   const handleLevelUpEmergencyMonth = async () => {
     if (!updateAssumptions) return;
@@ -915,9 +918,10 @@ export default function FinancePoolsPage() {
       fixedMonthlyTotal,
       essentialVariable,
       finance.convertToBase,
-      finance.transactions
+      finance.transactions,
+      targetMonthDate
     );
-  }, [paycheckTx, emergencyFloor, currentEmergencyFunded, finance.goals, fixedMonthlyTotal, essentialVariable, finance.convertToBase, finance.transactions]);
+  }, [paycheckTx, emergencyFloor, currentEmergencyFunded, finance.goals, fixedMonthlyTotal, essentialVariable, finance.convertToBase, finance.transactions, targetMonthDate]);
 
   const handleExecutePaycheckAllocation = async () => {
     if (!paycheckTx || !waterfallBreakdown || paycheckAllocated) return;
@@ -930,7 +934,6 @@ export default function FinancePoolsPage() {
           const nativeTopUp = oneInBase === 0 ? waterfallBreakdown.emergencyTopUp : waterfallBreakdown.emergencyTopUp / oneInBase;
           await finance.updateGoal(emergencyGoal.id, {
             assigned_amount: (emergencyGoal.assigned_amount || 0) + nativeTopUp,
-            is_emergency: true,
           } as any);
         } else {
           await finance.addGoal({
@@ -941,7 +944,6 @@ export default function FinancePoolsPage() {
             safety_mode: 'balanced',
             assigned_amount: waterfallBreakdown.emergencyTopUp,
             color: '#ef6b6b',
-            is_emergency: true,
           } as any);
         }
       }
@@ -1298,7 +1300,6 @@ export default function FinancePoolsPage() {
           safety_mode: 'balanced',
           assigned_amount: val,
           color: '#ef6b6b',
-          is_emergency: true,
         } as any)
       );
     } else if (!isVirtualPool(moveTo) && !isDestCoreSavings) {
@@ -1345,7 +1346,6 @@ export default function FinancePoolsPage() {
           safety_mode: 'balanced',
           assigned_amount: 0,
           color: '#ef6b6b',
-          is_emergency: true,
         } as any);
       }
 
@@ -1871,7 +1871,7 @@ export default function FinancePoolsPage() {
                       3. Pot Savings:
                     </span>
                     <span className="font-extrabold text-purple-700">
-                      {fmt(monthlyGoalSavingsTarget)} to pots 🔒 ({fmt(monthlyGoalSavingsTarget / weeksInMonth)}/wk)
+                      {fmt(monthlyGoalSavingsTarget)} to pots 🔒 ({fmt((monthlyGoalSavingsTarget / daysInTargetMonth) * 7)}/wk)
                     </span>
                   </div>
                   <div className="flex justify-between items-center">
@@ -1880,7 +1880,7 @@ export default function FinancePoolsPage() {
                       {remainingFun <= 0.01 ? (
                         <span className="text-amber-700">£0.00 left of {fmt(monthlyFunBudget)} ({fmt(funSpentSoFar)} spent)</span>
                       ) : (
-                        `${fmt(remainingFun)} left of ${fmt(monthlyFunBudget)} (${fmt(monthlyFunBudget / weeksInMonth)}/wk)`
+                        `${fmt(remainingFun)} left of ${fmt(monthlyFunBudget)} (${fmt((monthlyFunBudget / daysInTargetMonth) * 7)}/wk)`
                       )}
                     </span>
                   </div>

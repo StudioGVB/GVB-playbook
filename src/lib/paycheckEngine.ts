@@ -182,7 +182,8 @@ export function calculatePaycheckWaterfall(
   fixedMonthlyTotal: number,
   essentialVariableMonthly: number,
   convertToBase: (amt: number, cur: string) => number,
-  transactions: any[] = []
+  transactions: any[] = [],
+  referenceDate: Date = new Date()
 ): PaycheckWaterfallBreakdown {
   let remaining = paycheckAmount;
 
@@ -204,7 +205,7 @@ export function calculatePaycheckWaterfall(
   }
 
   // Step 3: Goal Pool Monthly Contributions
-  const now = new Date();
+  const now = referenceDate;
   const potSchedule = computeMonthlyPotSchedule({
     goals,
     transactions: transactions || [],
@@ -217,6 +218,8 @@ export function calculatePaycheckWaterfall(
   for (const g of goals) {
     if ((g as any).is_stash || g.name.toLowerCase().includes('stash')) continue; // Exclude savings stash from step 3 goal targets
     if ((g as any).is_emergency || g.name.toLowerCase().includes('emergency')) continue;
+    const trimmedLower = (g.name || '').trim().toLowerCase();
+    if (trimmedLower === 'savings' || trimmedLower === 'core savings') continue;
     if (g.start_date && new Date(g.start_date) > now) continue; // Exclude goals starting in the future
     const targetBase = convertToBase(g.target_amount || 0, g.currency);
     const assignedBase = convertToBase(g.assigned_amount || 0, g.currency);

@@ -17,7 +17,7 @@ interface Props {
 }
 
 export default function WeeklyPoolSavingsCard({ finance, spendablePool = 0, funMoney = 0, snapshot }: Props) {
-  const baseCurrency = finance.settings?.base_currency || 'AUD';
+  const baseCurrency = finance.settings?.base_currency || 'GBP';
   const fmt = (n: number) => formatCurrency(n, baseCurrency);
 
   // Calculate required weekly contribution for each active pool
@@ -29,7 +29,14 @@ export default function WeeklyPoolSavingsCard({ finance, spendablePool = 0, funM
       convertToBase: finance.convertToBase,
     });
 
-    return finance.goals.map((goal) => {
+    const eligibleGoals = finance.goals.filter((g) => {
+      const lower = (g.name || '').trim().toLowerCase();
+      if ((g as any).is_emergency || (g as any).is_stash) return false;
+      if (lower.includes('emergency') || lower.includes('stash') || lower === 'savings' || lower === 'core savings') return false;
+      return true;
+    });
+
+    return eligibleGoals.map((goal) => {
       const targetNative = goal.target_amount || 0;
       const assignedNative = goal.assigned_amount || 0;
       const targetBase = finance.convertToBase(targetNative, goal.currency);
@@ -39,6 +46,7 @@ export default function WeeklyPoolSavingsCard({ finance, spendablePool = 0, funM
       const remainingBase = Math.max(0, targetBase - effectiveFundedBase);
 
       let weeklyRequiredBase = 0;
+      let monthlyRequiredBase = 0;
       let futureWeeklyPace = 0;
       let daysRemaining: number | null = null;
       let weeksRemaining: number | null = null;
@@ -74,11 +82,15 @@ export default function WeeklyPoolSavingsCard({ finance, spendablePool = 0, funM
 
         if (daysRemaining <= 0) {
           weeklyRequiredBase = remainingBase;
+          monthlyRequiredBase = remainingBase;
           status = 'urgent';
           weeksRemaining = 1;
         } else {
           weeksRemaining = Math.max(1, daysRemaining / 7);
           weeklyRequiredBase = scheduledPlan ? scheduledPlan.weeklyPace : (remainingBase / weeksRemaining);
+          monthlyRequiredBase = scheduledPlan
+            ? Math.min(remainingBase, scheduledPlan.monthlyAmount)
+            : Math.min(remainingBase, weeklyRequiredBase * 4.33);
           // Only flag urgent if overdue or if required pace exceeds weekly cashflow capacity
           const weeklyCapacity = snapshot?.baseWeeklyFun ?? 150;
           status = (weeklyRequiredBase > weeklyCapacity * 1.5) ? 'urgent' : 'on_track';
@@ -86,6 +98,7 @@ export default function WeeklyPoolSavingsCard({ finance, spendablePool = 0, funM
       } else if (goal.percent_allocation && goal.percent_allocation > 0) {
         // Fallback proportional target
         weeklyRequiredBase = (goal.percent_allocation / 100) * 100;
+        monthlyRequiredBase = Math.min(remainingBase, weeklyRequiredBase * 4.33);
         status = 'on_track';
       }
 
@@ -95,6 +108,7 @@ export default function WeeklyPoolSavingsCard({ finance, spendablePool = 0, funM
         assignedBase,
         remainingBase,
         weeklyRequiredBase,
+        monthlyRequiredBase,
         futureWeeklyPace,
         daysRemaining,
         weeksRemaining,
@@ -135,7 +149,7 @@ export default function WeeklyPoolSavingsCard({ finance, spendablePool = 0, funM
 
   // Aggregate weekly totals
   const totalWeeklyRequired = poolBreakdown.reduce((sum, item) => sum + item.weeklyRequiredBase, 0);
-  const totalMonthlyRequired = totalWeeklyRequired * 4.33;
+  const totalMonthlyRequired = poolBreakdown.reduce((sum, item) => sum + item.monthlyRequiredBase, 0);
 
   // True Safe-to-Spend (Unified safe-to-spend allowance from live cashflow model)
   const trueWeeklySafeToSpend = snapshot
