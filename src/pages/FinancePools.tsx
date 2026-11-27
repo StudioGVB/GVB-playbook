@@ -349,7 +349,7 @@ export default function FinancePoolsPage() {
         await finance.addGoal({
           name: 'Emergency Fund',
           description: 'Permanent safety reserve floor cushion',
-          target_amount: emergencyFloor || 1000,
+          target_amount: 1000,
           assigned_amount: 0,
           currency: baseCurrency,
           priority: 1,
@@ -361,7 +361,7 @@ export default function FinancePoolsPage() {
     };
 
     runInitSystemPots();
-  }, [finance.goals, finance.loading, finance.hasLoadedOnce, baseCurrency, emergencyFloor]);
+  }, [finance.goals, finance.loading, finance.hasLoadedOnce, baseCurrency]);
 
   // Auto-reconcile spending pools (e.g. Office Set Up) where expenses were assigned (e.g. £28 + £90 = £118)
   // against a funded target (e.g. £150), but assigned_amount was wiped to 0
