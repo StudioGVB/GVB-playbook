@@ -408,26 +408,78 @@ export default function FinanceBudget() {
     const travelWeekAllowance = isPrevTravelWeek
       ? (prevWeekSnapshot.split?.weeklyFunAmount ?? prevWeekSnapshot.weeklyFunBudget ?? 0)
       : 0;
-    const totalBudget = isPrevTravelWeek
-      ? travelWeekAllowance
-      : (prevWeekSnapshot.weeklyEssentialBudget + prevWeekSnapshot.weeklyFunBudget);
-    const totalSpent = prevEssentialSpent + prevFunSpent;
+    const meta: CoverMeta = parseCoverMeta(stashGoal?.description);
+    const closedPrev = meta.closed_weeks?.[prevWeekKey];
+
+    // If last week was already settled, lock to its original totalBudget!
+    // Never recompute last week's budget dynamically from live cash or today's debt.
+    const totalBudget = closedPrev
+      ? closedPrev.totalBudget
+      : (isPrevTravelWeek
+          ? travelWeekAllowance
+          : (prevWeekSnapshot.weeklyEssentialBudget + prevWeekSnapshot.weeklyFunBudget));
+    const totalSpent = Math.round((prevEssentialSpent + prevFunSpent) * 100) / 100;
     const netDifference = Math.round((totalBudget - totalSpent) * 100) / 100;
 
-    const meta: CoverMeta = parseCoverMeta(stashGoal?.description);
-    const localKey = `stash_settled_v${SETTLE_VERSION}_${prevWeekKey}`;
+    // If last week was already settled:
+    if (closedPrev && meta.last_settled_week === prevWeekKey) {
+      const spendingDiff = Math.round((totalSpent - closedPrev.totalSpent) * 100) / 100;
+      if (Math.abs(spendingDiff) <= 0.02) {
+        // Spending is identical: no transactions were changed/recategorized.
+        // Return immediately with ZERO mutations — prevents refresh jumps!
+        settleRef.current = `${prevWeekKey}_stable`;
+        return;
+      }
 
-    // If the previous week has already been settled, never re-run auto-settle on passive page loads or refreshes!
-    if (meta.last_settled_week === prevWeekKey || localStorage.getItem(localKey) === 'true') {
-      settleRef.current = `${prevWeekKey}_already_settled`;
+      // Gabriella recategorized or changed transactions from last week!
+      // Adjust Stash by the net difference change and update closed_weeks.
+      const netDelta = Math.round((netDifference - closedPrev.netDifference) * 100) / 100;
+      const settleKey = `${prevWeekKey}_re_${totalSpent.toFixed(2)}`;
+      if (settleRef.current === settleKey) return;
+
+      const doReSettle = async () => {
+        settleRef.current = settleKey;
+        const currentStashBal = stashGoal?.assigned_amount || 0;
+        const nextStashAmount = Math.max(0, Math.round((currentStashBal + netDelta) * 100) / 100);
+
+        const newMeta: CoverMeta = {
+          ...meta,
+          last_settled_stash_delta: netDifference >= 0 ? netDifference : 0,
+          closed_weeks: {
+            ...(meta.closed_weeks || {}),
+            [prevWeekKey]: {
+              ...closedPrev,
+              essentialSpent: Math.round(prevEssentialSpent * 100) / 100,
+              funSpent: Math.round(prevFunSpent * 100) / 100,
+              totalSpent,
+              netDifference,
+            },
+          },
+        };
+
+        if (stashGoal) {
+          await finance.updateGoal(stashGoal.id, {
+            assigned_amount: nextStashAmount,
+            is_stash: true,
+            description: JSON.stringify(newMeta),
+          } as any);
+        }
+
+        toast.info(
+          `Updated last week's settlement: ${netDelta >= 0 ? '+' : ''}${fmt(netDelta)} to Savings Stash from recategorized transactions`,
+          { duration: 6000 }
+        );
+      };
+
+      doReSettle();
       return;
     }
 
+    const localKey = `stash_settled_v${SETTLE_VERSION}_${prevWeekKey}`;
     const isCurrentVersionSettled =
       meta.last_settled_week === prevWeekKey &&
       meta.settled_version === SETTLE_VERSION;
 
-    const closedPrev = meta.closed_weeks?.[prevWeekKey];
     const deltaMatches =
       isCurrentVersionSettled &&
       assumptions.last_debt_week === thisWeekKey &&

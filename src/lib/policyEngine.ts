@@ -1,7 +1,7 @@
 import { FinanceTransaction, FinanceCategory, FinanceAccount, FinanceGoal } from '@/hooks/useFinanceData';
 import { FinanceAssumptions } from '@/hooks/useFinanceAssumptions';
 import type { FinanceTrip } from '@/hooks/useFinanceTrips';
-import { startOfWeek, endOfWeek, subWeeks, addWeeks, differenceInCalendarDays, format, startOfMonth, endOfMonth } from 'date-fns';
+import { startOfWeek, endOfWeek, subWeeks, addWeeks, differenceInCalendarDays, format, startOfMonth, endOfMonth, startOfDay, addDays } from 'date-fns';
 import type { WeekType } from '@/hooks/useWeekTypes';
 import { isExcludedSpendDate, weekOverlapsExclusion, baseAmt, parseUkDate } from './financeUtils';
 import { calcTakeHome } from './ukTakeHome';
@@ -321,21 +321,30 @@ export function computeActualSpendingIncome(
       if (item.kind === 'venture') {
         venture += amt;
       }
-      // Only include extra side-income payments that have landed on or before the week being viewed,
-      // and divide each payment by the number of weeks left in the month from the week it landed.
-      if (item.date <= refWeekEnd) {
-        const txWeekStart = startOfWeek(item.date, { weekStartsOn: 1 });
-        const weeksSpread = Math.max(
-          1,
-          Math.round((lastWeekStartOfMonth.getTime() - txWeekStart.getTime()) / (7 * DAY)) + 1
-        );
-        const perWeek = amt / weeksSpread;
+      // Pacing other income (including Venture Advisory, BPG, ElevenLabs, Etsy, etc.) across remaining days in the month:
+      const txDay = startOfDay(item.date);
+      const txMonthEnd = endOfMonth(txDay);
+      const daysRemainingInMonth = Math.max(1, differenceInCalendarDays(txMonthEnd, txDay) + 1);
+      const dailyBonus = amt / daysRemainingInMonth;
+
+      // In the week being viewed (Monday–Sunday), how many days fall within [txDay, txMonthEnd]?
+      const weekMonday = startOfWeek(now, { weekStartsOn: 1 });
+      let daysCoveredThisWeek = 0;
+      for (let d = 0; d < 7; d++) {
+        const curDay = addDays(weekMonday, d);
+        if (curDay >= txDay && curDay <= txMonthEnd) {
+          daysCoveredThisWeek++;
+        }
+      }
+
+      if (daysCoveredThisWeek > 0) {
+        const perWeek = dailyBonus * daysCoveredThisWeek;
         otherWeeklyBonus += perWeek;
         otherItems.push({
           name: item.streamName || item.tx.merchant || item.tx.description || 'Extra income',
           amount: amt,
           date: item.date,
-          weeksSpread,
+          weeksSpread: Math.max(1, Math.ceil(daysRemainingInMonth / 7)),
           perWeek,
         });
       }
@@ -352,7 +361,7 @@ export function computeActualSpendingIncome(
 
   // Baseline monthly income for the waterfall (Fixed Bills -> Variable Essentials -> Saving Goals -> Base Fun)
   // is strictly Gamma Salary. Other income streams get added to weeks left in month (divided equally by left weeks in month).
-  const total = gamma > 0 ? gamma : (venture > 0 ? venture : 0);
+  const total = (gamma > 0 ? gamma : 0) + (venture > 0 ? venture : 0);
 
   const streams: IncomeStreamBreakdownItem[] = Array.from(streamMap.entries())
     .map(([name, data]) => ({ name, amount: data.amount, count: data.count }))
@@ -595,12 +604,13 @@ export function computePolicySnapshot(
   // Spending income is anchored to weekStart (the Monday of the active week) so that a
   // last-working-day Gamma paycheck for Month M+1 never changes the final week of Month M mid-week.
   const actualIncome = computeActualSpendingIncome(transactions, categories, weekStart);
-  // Baseline monthly salary for budget waterfalls is strictly Gamma Salary (default £2,400) or explicit expected income.
-  // Never inflate baseline monthly living budget with random one-off client deposits, invoices, or internal transfers!
-  const expectedSalary = (assumptions.expected_monthly_income && assumptions.expected_monthly_income > 0)
-    ? assumptions.expected_monthly_income
-    : (actualIncome.gamma > 0 ? actualIncome.gamma : 2400);
-  const monthlyIncome = expectedSalary;
+  const monthlyIncome = (overrideMonthlyIncome && overrideMonthlyIncome > 0)
+    ? overrideMonthlyIncome
+    : (actualIncome.total > 0
+        ? actualIncome.total
+        : ((assumptions.expected_monthly_income && assumptions.expected_monthly_income > 0)
+            ? assumptions.expected_monthly_income
+            : 2400));
   const isDrawdownMode = monthlyIncome === 0;
 
   // Core pools
