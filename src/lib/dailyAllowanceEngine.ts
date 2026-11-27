@@ -287,6 +287,7 @@ export function computeMonthDailyAllowancePlan(params: {
 
   // 1. Identify Gamma Salary, Weekly Venture Advisory deposits, and Other Side Income (ElevenLabs/BPG/Etsy)
   const gammaCandidates: Array<{ amount: number; rawDate: Date; txId: string }> = [];
+  const allGammaCandidates: Array<{ amount: number; rawDate: Date; txId: string }> = [];
   const ventureDepositsInMonth: VentureWeeklyDepositItem[] = [];
   const extraIncomeItems: ExtraIncomeSpreadItem[] = [];
 
@@ -295,6 +296,11 @@ export function computeMonthDailyAllowancePlan(params: {
     if (!info) continue;
 
     if (info.kind === 'gamma') {
+      allGammaCandidates.push({
+        amount: info.amount,
+        rawDate: info.rawDate,
+        txId: tx.id,
+      });
       if (info.effectiveMonthDate >= mStart && info.effectiveMonthDate <= mEnd) {
         gammaCandidates.push({
           amount: info.amount,
@@ -330,10 +336,13 @@ export function computeMonthDailyAllowancePlan(params: {
     }
   }
 
-  // Pick the primary Gamma paycheck if landed, otherwise use expected_monthly_income (default £2,400)
+  // Pick the primary Gamma paycheck if landed for this month; otherwise use the most recent actual Gamma salary deposit (~£2,400)
   gammaCandidates.sort((a, b) => b.rawDate.getTime() - a.rawDate.getTime());
+  allGammaCandidates.sort((a, b) => b.rawDate.getTime() - a.rawDate.getTime());
   const expectedGamma =
-    assumptions.expected_monthly_income && assumptions.expected_monthly_income > 0
+    allGammaCandidates.length > 0
+      ? allGammaCandidates[0].amount
+      : assumptions.expected_monthly_income && assumptions.expected_monthly_income > 0
       ? assumptions.expected_monthly_income
       : 2400;
   const gammaMonthlyIncome =
