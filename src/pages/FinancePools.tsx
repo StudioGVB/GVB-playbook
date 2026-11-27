@@ -547,7 +547,31 @@ export default function FinancePoolsPage() {
         : null;
 
       const daysCount = plan?.daysInMonth ?? Math.max(1, differenceInCalendarDays(mEnd, mStart) + 1);
-      const rawGoalSavings = plan?.potSavingsMonthly ?? 0;
+
+      // Check if a Gamma paycheck for this month has already been processed & allocated into the savings pots.
+      // CRITICAL: Once the paycheck tops up the savings pots' `assigned_amount` in the database, a fresh
+      // un-anchored calculation would see `remainingToSave` reduced by that amount!
+      // By reading the persisted paycheck allocation breakdown for this month, we preserve the exact
+      // amount transferred into each savings pot and show the per-pot transfer chips inside the Living Pot card!
+      let persistedPotAllocations: Array<{ goalId: string; goalName: string; allocatedAmount: number }> = [];
+      let persistedPotTotal = 0;
+
+      for (const tx of dedupedTxs) {
+        if (tx.amount < 1000 || tx.is_transfer) continue;
+        const effDate = getEffectiveTxMonthDate(tx, catMap);
+        if (effDate < mStart || effDate > mEnd) continue;
+        const rawObj = (tx.raw as any) || {};
+        const snapFromRaw = rawObj.paycheck_allocation_breakdown;
+        const snapFromLocal = getPaycheckAllocationMeta(tx.id)?.breakdown;
+        const breakdownObj = snapFromRaw || snapFromLocal;
+        if (breakdownObj && Array.isArray(breakdownObj.goalAllocations) && breakdownObj.totalGoalAllocations > 0) {
+          persistedPotAllocations = breakdownObj.goalAllocations.filter((a: any) => a.allocatedAmount > 0.01);
+          persistedPotTotal = Number(breakdownObj.totalGoalAllocations) || 0;
+          break;
+        }
+      }
+
+      const rawGoalSavings = persistedPotTotal > 0 ? persistedPotTotal : (plan?.potSavingsMonthly ?? 0);
       const gammaIncome = plan?.gammaMonthlyIncome ?? (assumptions?.expected_monthly_income || 2400);
       const extraIncome = (plan?.ventureIncomeTotalInMonth ?? 0) + (plan?.extraIncomeTotal ?? 0);
       const totalIncome = gammaIncome + extraIncome;
@@ -664,6 +688,7 @@ export default function FinancePoolsPage() {
         remCardSpendable,
         remLivingReserve,
         totalSpent,
+        persistedPotAllocations,
       };
     };
   }, [assumptions, finance.transactions, finance.categories, finance.goals, finance.convertToBase, effectiveFixedMonthly, essentialVariable, wtMap, trips, essentialCatIds]);
@@ -1098,7 +1123,7 @@ export default function FinancePoolsPage() {
         }
       }
 
-      // 3. Save allocation metadata (for revert) & mark processed
+      // 3. Save allocation metadata (for revert & permanent Living Pot display) & mark processed
       savePaycheckAllocationMeta(paycheckTx.id, waterfallBreakdown);
       markPaycheckProcessed(paycheckTx.id);
       await finance.updateTransaction(paycheckTx.id, {
@@ -1106,6 +1131,7 @@ export default function FinancePoolsPage() {
           ...((paycheckTx.raw as any) || {}),
           paycheck_allocated: true,
           allocated_at: Date.now(),
+          paycheck_allocation_breakdown: waterfallBreakdown,
         }
       });
       setPaycheckAllocated(true);
@@ -2058,13 +2084,27 @@ export default function FinancePoolsPage() {
                       )}
                     </span>
                   </div>
-                  <div className="flex justify-between items-center gap-2 bg-purple-50/70 -mx-1.5 px-1.5 py-1 rounded-lg border border-purple-100">
-                    <span className="text-purple-900 font-bold flex items-center gap-1">
-                      3. Savings Pots Transferred:
-                    </span>
-                    <span className="font-extrabold text-purple-700 text-right">
-                      {fmt(potSummary.potSavingsDedicated)} moved to pots ✓ ({fmt((potSummary.potSavingsDedicated / potSummary.daysInMonth) * 7)}/wk)
-                    </span>
+                  <div className="bg-purple-50/70 -mx-1.5 px-1.5 py-1.5 rounded-lg border border-purple-100 space-y-1">
+                    <div className="flex justify-between items-center gap-2">
+                      <span className="text-purple-900 font-bold flex items-center gap-1">
+                        3. Savings Pots Transferred:
+                      </span>
+                      <span className="font-extrabold text-purple-700 text-right">
+                        {fmt(potSummary.potSavingsDedicated)} moved to pots ✓ ({fmt((potSummary.potSavingsDedicated / potSummary.daysInMonth) * 7)}/wk)
+                      </span>
+                    </div>
+                    {potSummary.persistedPotAllocations && potSummary.persistedPotAllocations.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-1 pt-0.5">
+                        {potSummary.persistedPotAllocations.map((alloc) => (
+                          <span
+                            key={alloc.goalId}
+                            className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-white text-purple-900 border border-purple-200/80 shadow-2xs"
+                          >
+                            ✓ {alloc.goalName}: <strong>+{fmt(alloc.allocatedAmount)}</strong>
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   <div className="flex justify-between items-center gap-2">
                     <span className="text-slate-500 font-semibold">4. Base Fun Money Dedicated:</span>

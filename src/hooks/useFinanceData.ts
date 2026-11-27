@@ -1029,46 +1029,6 @@ export function useFinanceDataState() {
       }
       if (goalRes.data) {
         setGoals(goalRes.data as any);
-
-        // Self-healing: Transfer Visa pool funds to Emergency Reserve and set Visa start_date to Jan 1st 2027 (once)
-        if (goalRes.data.length > 0 && !visaMigrationRef.current) {
-          const visaGoal = goalRes.data.find((g: any) => g.name.toLowerCase().includes('visa'));
-          const emergencyGoal = goalRes.data.find((g: any) => (g as any).is_emergency === true || g.name.toLowerCase().includes('emergency'));
-          
-          if (visaGoal) {
-            const visaAssigned = visaGoal.assigned_amount || 0;
-            const currentStartDate = (visaGoal as any).start_date ? String((visaGoal as any).start_date).split('T')[0] : '';
-            const needsStartDateUpdate = currentStartDate !== '2027-01-01';
-
-            if (visaAssigned > 0 || needsStartDateUpdate) {
-              visaMigrationRef.current = true;
-              localStorage.setItem('gvb_visa_migrated_v1', 'true');
-              const updates: Promise<any>[] = [];
-              if (visaAssigned > 0 && emergencyGoal) {
-                updates.push(
-                  Promise.resolve(supabase.from('finance_goals').update({
-                    assigned_amount: (emergencyGoal.assigned_amount || 0) + visaAssigned
-                  }).eq('id', emergencyGoal.id))
-                );
-              }
-              updates.push(
-                Promise.resolve(supabase.from('finance_goals').update({
-                  assigned_amount: 0,
-                  start_date: '2027-01-01'
-                }).eq('id', visaGoal.id))
-              );
-              Promise.all(updates).then(() => {
-                toast.success(`Transferred ${visaAssigned > 0 ? `Visa funds into Emergency Reserve & set ` : ''}Visa start date to 1 Jan 2027`);
-                fetchAll();
-              }).catch(err => {
-                console.error('[self-healing] Failed to update Visa pool', err);
-              });
-            } else {
-              visaMigrationRef.current = true;
-              localStorage.setItem('gvb_visa_migrated_v1', 'true');
-            }
-          }
-        }
       }
       if (planRes.data) setGoalPlans(planRes.data as any);
       if (logRes.data) setImportLogs(logRes.data as any);

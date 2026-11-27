@@ -362,6 +362,26 @@ export function computeMonthDailyAllowancePlan(params: {
   );
 
   // 4. Savings Pots for Month M
+  // Check if Month M's Gamma paycheck has already topped up the savings pots (persisted in tx.raw.paycheck_allocation_breakdown
+  // or localStorage). Once the pots' `assigned_amount` is incremented on payday, we must lock Month M's pot deduction
+  // to that allocated amount so Month M doesn't think the pots need less and dump the difference into Fun Money!
+  let persistedPaycheckPotTotal = 0;
+  if (gammaCandidates.length > 0) {
+    const primaryGammaTx = dedupedTxs.find(t => t.id === gammaCandidates[0].txId);
+    const rawSnap = (primaryGammaTx?.raw as any)?.paycheck_allocation_breakdown;
+    let localSnap: any = null;
+    try {
+      const s = typeof localStorage !== 'undefined' ? localStorage.getItem(`paycheck_allocation_snapshot_${gammaCandidates[0].txId}`) : null;
+      if (s) localSnap = JSON.parse(s);
+    } catch {
+      localSnap = null;
+    }
+    const snap = rawSnap || localSnap;
+    if (snap && Number(snap.totalGoalAllocations) > 0) {
+      persistedPaycheckPotTotal = Number(snap.totalGoalAllocations);
+    }
+  }
+
   // CRITICAL: Always anchor the monthly pot schedule to `mStart` (the 1st of Month M) so that
   // Month M's full 30/31-day pot savings requirement is deducted from Month M's £2,400 Gamma salary!
   const potSchedule = computeMonthlyPotSchedule({
@@ -372,20 +392,22 @@ export function computeMonthDailyAllowancePlan(params: {
     referenceDate: mStart,
   });
 
-  let scheduledPotSavings = 0;
-  const targetPoint = potSchedule.months.find(m => m.monthKey === monthKey);
-  if (targetPoint) {
-    scheduledPotSavings = targetPoint.total;
-  } else {
-    for (const g of goals) {
-      const lower = (g.name || '').trim().toLowerCase();
-      if ((g as any).is_stash || (g as any).is_emergency) continue;
-      if (lower.includes('stash') || lower.includes('emergency') || lower === 'savings' || lower === 'core savings') {
-        continue;
-      }
-      const plan = potSchedule.getGoalPlanForMonth(g.id, mStart);
-      if (plan && !plan.isFutureStart && plan.monthlyAmount > 0) {
-        scheduledPotSavings += Math.min(plan.remainingToSaveBase, plan.monthlyAmount);
+  let scheduledPotSavings = persistedPaycheckPotTotal;
+  if (scheduledPotSavings <= 0) {
+    const targetPoint = potSchedule.months.find(m => m.monthKey === monthKey);
+    if (targetPoint) {
+      scheduledPotSavings = targetPoint.total;
+    } else {
+      for (const g of goals) {
+        const lower = (g.name || '').trim().toLowerCase();
+        if ((g as any).is_stash || (g as any).is_emergency) continue;
+        if (lower.includes('stash') || lower.includes('emergency') || lower === 'savings' || lower === 'core savings') {
+          continue;
+        }
+        const plan = potSchedule.getGoalPlanForMonth(g.id, mStart);
+        if (plan && !plan.isFutureStart && plan.monthlyAmount > 0) {
+          scheduledPotSavings += Math.min(plan.remainingToSaveBase, plan.monthlyAmount);
+        }
       }
     }
   }
