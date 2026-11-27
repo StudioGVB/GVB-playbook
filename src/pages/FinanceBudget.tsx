@@ -1156,6 +1156,34 @@ export default function FinanceBudget() {
         </div>
       </div>
 
+      {/* === BILLS & POTS PROTECTED VERIFICATION BAR === */}
+      {snapshot.weekAllowancePlan && snapshot.weekAllowancePlan.segments.length > 0 && (() => {
+        const primarySeg = snapshot.weekAllowancePlan.segments[snapshot.weekAllowancePlan.segments.length - 1];
+        return (
+          <div className="rounded-2xl border border-emerald-200/90 bg-emerald-50/70 px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 font-semibold text-emerald-900">
+              <span className="inline-flex items-center gap-1.5">
+                <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                <span>
+                  {primarySeg.monthLabel} Waterfall ({fmt(primarySeg.gammaMonthlyIncome)} Gamma):
+                </span>
+              </span>
+              <span className="inline-flex items-center gap-1 text-slate-700">
+                <Lock className="w-3 h-3 text-rose-500" />
+                Fixed Bills Reserved: <strong className="text-slate-900 tabular-nums">{fmt(primarySeg.fixedBillsMonthly)}</strong>
+              </span>
+              <span className="inline-flex items-center gap-1 text-slate-700">
+                <Target className="w-3 h-3 text-purple-600" />
+                Savings Pots Locked: <strong className="text-purple-800 tabular-nums">{fmt(primarySeg.potSavingsMonthly)}</strong>
+              </span>
+            </div>
+            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-800 bg-amber-100/80 border border-amber-300/70 px-2.5 py-0.5 rounded-full">
+              💰 Stash Pool: {fmt(stashBalance)} (Locked from weekly cap)
+            </span>
+          </div>
+        );
+      })()}
+
       {/* === KPI STRIP (3 colorful bento tiles) === */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
         <div className="bg-white rounded-2xl border-2 border-[#FF7AD1]/40 p-4 sm:p-5 shadow-[4px_4px_0px_0px_rgba(255,46,184,0.15)]">
@@ -1170,23 +1198,37 @@ export default function FinanceBudget() {
           <p className="text-slate-900 font-display font-black tabular-nums text-2xl sm:text-3xl leading-none">{fmt(totalWeeklyBudget)}</p>
           <p className="text-[11px] text-slate-500 mt-1.5 font-medium">
             {fmt(essentialWeeklyBudget)} essentials · {fmt(snapshot.weeklyFunBudget)} fun
-            {boostAmount < 0 && ` (−${fmt(Math.abs(boostAmount))} pot save)`}
-            {boostAmount > 0 && ` (+${fmt(boostAmount)} boost)`}
           </p>
+
+          {/* 3-Line Weekly Allowance Receipt */}
           {snapshot.weekAllowancePlan && (
-            <div className="mt-2 pt-2 border-t border-slate-100 space-y-1 text-[10px] text-slate-500">
-              {snapshot.weekAllowancePlan.isCrossMonthWeek ? (
-                <p className="font-semibold text-slate-700">
-                  {snapshot.weekAllowancePlan.segments
-                    .map(seg => `${seg.daysCount}d ${seg.shortMonthLabel} (${fmt(seg.totalDailyAvg)}/d)`)
-                    .join(' + ')}
-                </p>
-              ) : (
-                <p className="font-medium text-slate-600">
-                  7 days × <strong className="text-slate-800">{fmt(snapshot.weekAllowancePlan.weeklyTotalSpendCap / 7)}/day</strong> from {snapshot.weekAllowancePlan.segments[0]?.shortMonthLabel} spend cap
-                </p>
+            <div className="mt-2.5 pt-2.5 border-t border-slate-100 space-y-1 text-[11px]">
+              {/* Line 1: Base Card Allowance from Gamma (7 days) */}
+              <div className="flex items-center justify-between text-slate-600">
+                <span className="truncate pr-2">
+                  {snapshot.weekAllowancePlan.isCrossMonthWeek
+                    ? snapshot.weekAllowancePlan.segments
+                        .map(seg => `${seg.daysCount}d ${seg.shortMonthLabel} (${fmt(seg.baseDailyCap)}/d)`)
+                        .join(' + ')
+                    : `Base Cap (7d × ${fmt(snapshot.weekAllowancePlan.weeklyBaseSpendCap / 7)}/d)`}
+                </span>
+                <span className="font-bold text-slate-900 tabular-nums shrink-0">
+                  {fmt(snapshot.weekAllowancePlan.weeklyBaseSpendCap)}
+                </span>
+              </div>
+
+              {/* Line 2: Weekly Venture Advisory (added directly to this week) */}
+              {snapshot.weekAllowancePlan.weeklyVentureBoost > 0.01 && (
+                <div className="flex items-center justify-between text-sky-700 font-semibold">
+                  <span>+ Weekly Venture Advisory</span>
+                  <span className="tabular-nums shrink-0">
+                    +{fmt(snapshot.weekAllowancePlan.weeklyVentureBoost)}
+                  </span>
+                </div>
               )}
-              {snapshot.weekAllowancePlan.weeklyExtraIncomeBoost > 0.01 && (() => {
+
+              {/* Line 3: Other Side Income (ElevenLabs / BPG / Etsy divided by remaining days in month) */}
+              {snapshot.weekAllowancePlan.weeklyExtraIncomeDrip > 0.01 && (() => {
                 const byStream = new Map<string, number>();
                 for (const item of snapshot.weekAllowancePlan.activeExtraIncomeItems) {
                   byStream.set(item.streamName, (byStream.get(item.streamName) || 0) + item.dailyBoostAmount);
@@ -1195,11 +1237,41 @@ export default function FinanceBudget() {
                   .map(([name, dailySum]) => `${name} +${fmt(dailySum)}/d`)
                   .join(', ');
                 return (
-                  <p className="text-emerald-700 font-semibold">
-                    +{fmt(snapshot.weekAllowancePlan.weeklyExtraIncomeBoost)}/wk extra income ({streamSummary})
-                  </p>
+                  <div className="flex items-center justify-between text-emerald-700 font-semibold">
+                    <span className="truncate pr-2" title={streamSummary}>
+                      + Side Income ({streamSummary})
+                    </span>
+                    <span className="tabular-nums shrink-0">
+                      +{fmt(snapshot.weekAllowancePlan.weeklyExtraIncomeDrip)}
+                    </span>
+                  </div>
                 );
               })()}
+
+              {/* Line 4: Manual Stash Boost or Mid-Month Pot Deduction */}
+              {Math.abs(boostAmount) > 0.01 && (
+                <div
+                  className={cn(
+                    "flex items-center justify-between font-semibold",
+                    boostAmount > 0 ? "text-amber-700" : "text-[#FF2EB8]"
+                  )}
+                >
+                  <span>{boostAmount > 0 ? '+ Manual Stash Boost' : '− Mid-Month Pot Save'}</span>
+                  <span className="tabular-nums shrink-0">
+                    {boostAmount > 0 ? `+${fmt(boostAmount)}` : `−${fmt(Math.abs(boostAmount))}`}
+                  </span>
+                </div>
+              )}
+
+              {/* Line 5: Unabsorbed Last-Week Overspend Deduction (only if Stash was empty) */}
+              {snapshot.carryForwardDebt > 0.01 && (
+                <div className="flex items-center justify-between text-rose-600 font-semibold">
+                  <span>− Last Week Overspend</span>
+                  <span className="tabular-nums shrink-0">
+                    −{fmt(snapshot.carryForwardDebt)}
+                  </span>
+                </div>
+              )}
             </div>
           )}
         </div>

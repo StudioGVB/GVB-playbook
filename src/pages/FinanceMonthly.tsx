@@ -168,12 +168,12 @@ export default function FinanceMonthly() {
     });
   }, [assumptions, selectedMonth, dedupedAllTxns, finance.categories, finance.goals, finance.convertToBase, fixedExpensesMonthlyAll, wtMap, trips]);
 
-  // Monthly budgets (Spend Cap = Variable Essentials + Base Fun Money + Extra Non-Gamma Income)
+  // Monthly budgets (Spend Cap = Variable Essentials + Base Fun Money + Venture Advisory + Extra Side Income)
   const monthlyEssentialBudget = monthAllowancePlan
     ? monthAllowancePlan.variableEssentialsMonthly
     : (assumptions?.estimated_essential_variable || 400);
   const monthlyFunBudget = monthAllowancePlan
-    ? (monthAllowancePlan.baseFunMonthly + monthAllowancePlan.extraIncomeTotal)
+    ? (monthAllowancePlan.baseFunMonthly + monthAllowancePlan.ventureIncomeTotalInMonth + monthAllowancePlan.extraIncomeTotal)
     : 0;
   const monthlyVariableBudget = monthAllowancePlan
     ? monthAllowancePlan.totalMonthlySpendCap

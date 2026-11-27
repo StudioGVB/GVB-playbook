@@ -36,6 +36,13 @@ export interface ExtraIncomeSpreadItem {
   dailyBoostAmount: number;
 }
 
+export interface VentureWeeklyDepositItem {
+  txId: string;
+  name: string;
+  amount: number;
+  postedDate: Date;
+}
+
 export interface MonthDailyAllowancePlan {
   monthKey: string;
   monthLabel: string;
@@ -51,9 +58,11 @@ export interface MonthDailyAllowancePlan {
   baseDailySpendCap: number;   // BaseSpendCap / daysInMonth
   baseDailyEssential: number;  // VariableEssentials / daysInMonth
   baseDailyFun: number;        // BaseFunMoney / daysInMonth
-  extraIncomeTotal: number;
+  ventureIncomeTotalInMonth: number;
+  ventureDepositsInMonth: VentureWeeklyDepositItem[];
+  extraIncomeTotal: number;    // ElevenLabs / Back Pocket Games / Etsy in this month
   extraIncomeItems: ExtraIncomeSpreadItem[];
-  totalMonthlySpendCap: number; // BaseSpendCap + ExtraIncomeTotal
+  totalMonthlySpendCap: number; // BaseSpendCap + VentureTotal + ExtraIncomeTotal
   /** Array of length daysInMonth (index 0 = day 1 of month) */
   days: Array<{
     date: Date;
@@ -62,7 +71,7 @@ export interface MonthDailyAllowancePlan {
     baseDailyCap: number;
     baseDailyEssential: number;
     baseDailyFun: number;
-    extraDailyBoost: number;
+    extraDailyBoost: number; // From ElevenLabs / BPG / Etsy spread over remaining days in month
     totalDailyAllowance: number;
     totalDailyFun: number;
   }>;
@@ -76,7 +85,12 @@ export interface WeekMonthSegment {
   baseDailyCap: number;
   extraDailyAvg: number;
   totalDailyAvg: number;
+  segmentBaseAllowance: number;
+  segmentExtraDripAllowance: number;
   segmentTotalAllowance: number;
+  fixedBillsMonthly: number;
+  potSavingsMonthly: number;
+  gammaMonthlyIncome: number;
 }
 
 export interface WeekAllowanceFromDaysResult {
@@ -86,9 +100,13 @@ export interface WeekAllowanceFromDaysResult {
   isCrossMonthWeek: boolean;
   weeklyEssentialAllowance: number;
   weeklyBaseFunAllowance: number;
-  weeklyExtraIncomeBoost: number;
-  weeklyTotalFunAllowance: number;
-  weeklyTotalSpendCap: number; // 7-day sum of (Essentials + Base Fun + Extra Income)
+  weeklyBaseSpendCap: number;       // 7-day sum of Base Daily Cap (Essentials + Base Fun from Gamma)
+  weeklyVentureBoost: number;       // Venture Advisory deposits that landed in this Mon-Sun week
+  weeklyVentureItems: VentureWeeklyDepositItem[];
+  weeklyExtraIncomeDrip: number;    // ElevenLabs / BPG / Etsy daily drips active during this week's 7 days
+  weeklyExtraIncomeBoost: number;   // weeklyVentureBoost + weeklyExtraIncomeDrip
+  weeklyTotalFunAllowance: number;  // weeklyBaseFunAllowance + weeklyVentureBoost + weeklyExtraIncomeDrip
+  weeklyTotalSpendCap: number;      // weeklyEssentialAllowance + weeklyTotalFunAllowance
   segments: WeekMonthSegment[];
   activeExtraIncomeItems: ExtraIncomeSpreadItem[];
   days: Array<{
@@ -117,15 +135,17 @@ export interface MonthStashSweepSummary {
 }
 
 /**
- * Classifies an income transaction into either:
- * - 'gamma': Base monthly Gamma salary (~£2,400), shifted to Month M+1 if paid on/after the 24th of Month M.
- * - 'extra': Any non-Gamma earned income (ElevenLabs, Venture Advisory, Back Pocket Games, Etsy, etc.)
+ * Classifies an income transaction into one of 3 distinct cadences:
+ * 1. 'gamma': Base monthly Gamma salary (~£2,400), shifted to Month M+1 if paid on/after the 24th of Month M.
+ * 2. 'venture': Weekly Venture Advisory / Batchbase pay (~£70/wk), added directly to the week it lands.
+ * 3. 'extra': Irregular side income (ElevenLabs, Back Pocket Games, Etsy, etc.), divided across
+ *             the remaining days left in the calendar month from the day it lands.
  */
 export function classifyIncomeTxForMonth(
   tx: FinanceTransaction,
   catById: Map<string, FinanceCategory>,
 ): {
-  kind: 'gamma' | 'extra';
+  kind: 'gamma' | 'venture' | 'extra';
   streamName: string;
   amount: number;
   rawDate: Date;
@@ -156,7 +176,7 @@ export function classifyIncomeTxForMonth(
     amt >= 1000;
 
   if (isGamma) {
-    // Gamma salary paid on/after the 24th of Month M funds Month M+1
+    // Gamma salary paid on/after the 24th of Month M funds Month M+1 (e.g. paid Nov 30 -> funds December)
     const effectiveMonthDate =
       rawDate.getDate() >= 24
         ? new Date(rawDate.getFullYear(), rawDate.getMonth() + 1, 1, 0, 0, 0, 0)
@@ -170,14 +190,8 @@ export function classifyIncomeTxForMonth(
     };
   }
 
-  let streamName = '';
+  // Weekly Venture Advisory (~£70/wk): added directly to the week it lands
   if (
-    text.includes('eleven') ||
-    text.includes('11labs') ||
-    catLower.includes('eleven')
-  ) {
-    streamName = 'ElevenLabs';
-  } else if (
     text.includes('venture') ||
     text.includes('batchbase') ||
     text.includes('batch base') ||
@@ -186,7 +200,23 @@ export function classifyIncomeTxForMonth(
     catLower.includes('batchbase') ||
     catLower.includes('advisory')
   ) {
-    streamName = 'Venture Advisory';
+    return {
+      kind: 'venture',
+      streamName: 'Venture Advisory',
+      amount: amt,
+      rawDate,
+      effectiveMonthDate: rawDate,
+    };
+  }
+
+  // Irregular / Side Income (ElevenLabs, Back Pocket Games, Etsy): spread across remaining days left in the month
+  let streamName = '';
+  if (
+    text.includes('eleven') ||
+    text.includes('11labs') ||
+    catLower.includes('eleven')
+  ) {
+    streamName = 'ElevenLabs';
   } else if (
     text.includes('back pocket') ||
     text.includes('bpg') ||
@@ -212,15 +242,16 @@ export function classifyIncomeTxForMonth(
 
 /**
  * Computes the complete daily allowance schedule for a single calendar month M:
- * 1. Gamma Salary (~£2,400)
- * 2. - Fixed Bills
- * 3. - Variable Essentials
- * 4. - Monthly Savings Pots (scheduled for Month M)
- * 5. = Base Fun Money
- * 6. Base Monthly Spend Cap = Variable Essentials + Base Fun Money
- * 7. Base Daily Rate = Base Monthly Spend Cap / DaysInMonth(M)
- * 8. Extra Income (ElevenLabs, Venture Advisory, Etsy, etc.) in Month M is spread across
- *    the remaining days left in Month M from the date it landed through the end of Month M.
+ * 1. Gamma Salary (~£2,400, paid on Nov 30th for December)
+ * 2. - Fixed Bills (~£1,000)
+ * 3. - Variable Essentials (~£300)
+ * 4. - Monthly Savings Pots (~£800 scheduled for Month M)
+ * 5. = Base Fun Money (~£300)
+ * 6. Base Monthly Spend Cap = Variable Essentials + Base Fun Money (~£600)
+ * 7. Base Daily Rate = Base Monthly Spend Cap / DaysInMonth(M) (~£600 / 31 = £19.35/day)
+ * 8. Other Side Income (ElevenLabs, Back Pocket Games, Etsy) in Month M is divided by
+ *    the remaining days left in Month M from the date it lands through the end of Month M.
+ * 9. Weekly Venture Advisory (£70/wk) is tracked separately and added directly to the week it lands.
  */
 export function computeMonthDailyAllowancePlan(params: {
   monthDate: Date;
@@ -254,8 +285,9 @@ export function computeMonthDailyAllowancePlan(params: {
   const catById = new Map(categories.map(c => [c.id, c]));
   const { cleaned: dedupedTxs } = deduplicateTransactions(transactions);
 
-  // 1. Identify Gamma Salary for this calendar month (or fallback to expected_monthly_income / £2,400)
+  // 1. Identify Gamma Salary, Weekly Venture Advisory deposits, and Other Side Income (ElevenLabs/BPG/Etsy)
   const gammaCandidates: Array<{ amount: number; rawDate: Date; txId: string }> = [];
+  const ventureDepositsInMonth: VentureWeeklyDepositItem[] = [];
   const extraIncomeItems: ExtraIncomeSpreadItem[] = [];
 
   for (const tx of dedupedTxs) {
@@ -270,14 +302,20 @@ export function computeMonthDailyAllowancePlan(params: {
           txId: tx.id,
         });
       }
+    } else if (info.kind === 'venture') {
+      if (info.rawDate >= mStart && info.rawDate <= mEnd) {
+        ventureDepositsInMonth.push({
+          txId: tx.id,
+          name: tx.merchant || tx.description || 'Venture Advisory',
+          amount: info.amount,
+          postedDate: startOfDay(info.rawDate),
+        });
+      }
     } else if (info.kind === 'extra') {
       if (info.rawDate >= mStart && info.rawDate <= mEnd) {
         const dayOfMonth = Math.max(1, Math.min(daysInMonth, getDate(info.rawDate)));
         const remainingDaysInMonth = Math.max(1, daysInMonth - dayOfMonth + 1);
-        // To prevent late-month deposits (e.g. a weekly Venture Advisory deposit on Nov 25 with 5 days left)
-        // from cramming 6x their normal daily rate into Week 4 and snowballing on top of earlier weeks' deposits,
-        // divide by daysInMonth so each extra deposit contributes its true monthly daily rate from the day it lands.
-        const dailyBoostAmount = info.amount / daysInMonth;
+        const dailyBoostAmount = info.amount / remainingDaysInMonth;
         extraIncomeItems.push({
           txId: tx.id,
           name: tx.merchant || tx.description || info.streamName,
@@ -326,8 +364,6 @@ export function computeMonthDailyAllowancePlan(params: {
   // 4. Savings Pots for Month M
   // CRITICAL: Always anchor the monthly pot schedule to `mStart` (the 1st of Month M) so that
   // Month M's full 30/31-day pot savings requirement is deducted from Month M's £2,400 Gamma salary!
-  // Never pass `today` (e.g. Nov 27 = 4 days left), which would only deduct 4 days of pot savings
-  // and dump the other ~£700 of pot money into Fun Money!
   const potSchedule = computeMonthlyPotSchedule({
     goals,
     transactions: dedupedTxs,
@@ -371,7 +407,8 @@ export function computeMonthDailyAllowancePlan(params: {
   const baseDailyEssential = daysInMonth > 0 ? variableEssentialsMonthly / daysInMonth : 0;
   const baseDailyFun = daysInMonth > 0 ? baseFunMonthly / daysInMonth : 0;
 
-  // 8. Build day-by-day array with Extra Income distributed across remaining days in the month
+  // 8. Build day-by-day array with Extra Income (ElevenLabs, BPG, Etsy) distributed across remaining days in the month
+  const ventureIncomeTotalInMonth = ventureDepositsInMonth.reduce((sum, item) => sum + item.amount, 0);
   const extraIncomeTotal = extraIncomeItems.reduce((sum, item) => sum + item.amount, 0);
   const days: MonthDailyAllowancePlan['days'] = [];
 
@@ -379,7 +416,7 @@ export function computeMonthDailyAllowancePlan(params: {
     const curDate = new Date(mStart.getFullYear(), mStart.getMonth(), d, 0, 0, 0, 0);
     const dateKey = format(curDate, 'yyyy-MM-dd');
 
-    // Sum daily boost from all extra income items that landed on or before day `d` in this month
+    // Sum daily boost from all irregular extra income items (ElevenLabs, BPG, Etsy) that landed on or before day `d` in this month
     let extraDailyBoost = 0;
     for (const item of extraIncomeItems) {
       if (d >= item.dayOfMonth) {
@@ -415,17 +452,20 @@ export function computeMonthDailyAllowancePlan(params: {
     baseDailySpendCap,
     baseDailyEssential,
     baseDailyFun,
+    ventureIncomeTotalInMonth,
+    ventureDepositsInMonth,
     extraIncomeTotal,
     extraIncomeItems,
-    totalMonthlySpendCap: baseMonthlySpendCap + extraIncomeTotal,
+    totalMonthlySpendCap: baseMonthlySpendCap + ventureIncomeTotalInMonth + extraIncomeTotal,
     days,
   };
 }
 
 /**
- * Computes the 7-day weekly spending allowance (Monday–Sunday) by summing the exact
- * daily allowance of each of the 7 calendar days.
- * Automatically handles split-month weeks (e.g. 3 days in November + 4 days in December).
+ * Computes the 7-day weekly spending allowance (Monday–Sunday) by:
+ * 1. Summing the Base Daily Allowance of each of the 7 calendar days (handling split months, e.g. 3d Nov + 4d Dec).
+ * 2. Adding any Venture Advisory weekly payment (£70) that landed inside this Mon–Sun week directly to this week.
+ * 3. Adding any ElevenLabs / Back Pocket Games / Etsy daily drips active on those 7 days (Amount / RemainingDaysInMonth).
  */
 export function computeWeekAllowanceFromDays(params: {
   weekStartInput: Date;
@@ -478,7 +518,7 @@ export function computeWeekAllowanceFromDays(params: {
 
   let weeklyEssentialAllowance = 0;
   let weeklyBaseFunAllowance = 0;
-  let weeklyExtraIncomeBoost = 0;
+  let weeklyExtraIncomeDrip = 0;
   const days: WeekAllowanceFromDaysResult['days'] = [];
   const segmentMap = new Map<
     string,
@@ -490,6 +530,9 @@ export function computeWeekAllowanceFromDays(params: {
       baseCapSum: number;
       extraSum: number;
       totalSum: number;
+      fixedBillsMonthly: number;
+      potSavingsMonthly: number;
+      gammaMonthlyIncome: number;
     }
   >();
   const activeExtraItemsMap = new Map<string, ExtraIncomeSpreadItem>();
@@ -512,7 +555,7 @@ export function computeWeekAllowanceFromDays(params: {
 
     weeklyEssentialAllowance += dayEntry.baseDailyEssential;
     weeklyBaseFunAllowance += dayEntry.baseDailyFun;
-    weeklyExtraIncomeBoost += dayEntry.extraDailyBoost;
+    weeklyExtraIncomeDrip += dayEntry.extraDailyBoost;
 
     for (const item of plan.extraIncomeItems) {
       if (dayOfMonth >= item.dayOfMonth) {
@@ -545,9 +588,23 @@ export function computeWeekAllowanceFromDays(params: {
         baseCapSum: dayEntry.baseDailyCap,
         extraSum: dayEntry.extraDailyBoost,
         totalSum: dayEntry.totalDailyAllowance,
+        fixedBillsMonthly: plan.fixedBillsMonthly,
+        potSavingsMonthly: plan.potSavingsMonthly,
+        gammaMonthlyIncome: plan.gammaMonthlyIncome,
       });
     }
   }
+
+  // Venture Advisory weekly payments: added directly to the week they land (never stacked across the whole month)
+  const weeklyVentureItems: VentureWeeklyDepositItem[] = [];
+  for (const plan of monthPlans.values()) {
+    for (const vItem of plan.ventureDepositsInMonth) {
+      if (vItem.postedDate >= startOfDay(ws) && vItem.postedDate <= we) {
+        weeklyVentureItems.push(vItem);
+      }
+    }
+  }
+  const weeklyVentureBoost = weeklyVentureItems.reduce((sum, item) => sum + item.amount, 0);
 
   const segments: WeekMonthSegment[] = Array.from(segmentMap.values()).map(seg => ({
     monthKey: seg.monthKey,
@@ -557,9 +614,16 @@ export function computeWeekAllowanceFromDays(params: {
     baseDailyCap: seg.daysCount > 0 ? seg.baseCapSum / seg.daysCount : 0,
     extraDailyAvg: seg.daysCount > 0 ? seg.extraSum / seg.daysCount : 0,
     totalDailyAvg: seg.daysCount > 0 ? seg.totalSum / seg.daysCount : 0,
+    segmentBaseAllowance: seg.baseCapSum,
+    segmentExtraDripAllowance: seg.extraSum,
     segmentTotalAllowance: seg.totalSum,
+    fixedBillsMonthly: seg.fixedBillsMonthly,
+    potSavingsMonthly: seg.potSavingsMonthly,
+    gammaMonthlyIncome: seg.gammaMonthlyIncome,
   }));
 
+  const weeklyBaseSpendCap = weeklyEssentialAllowance + weeklyBaseFunAllowance;
+  const weeklyExtraIncomeBoost = weeklyVentureBoost + weeklyExtraIncomeDrip;
   const weeklyTotalFunAllowance = weeklyBaseFunAllowance + weeklyExtraIncomeBoost;
   const weeklyTotalSpendCap = weeklyEssentialAllowance + weeklyTotalFunAllowance;
 
@@ -570,6 +634,10 @@ export function computeWeekAllowanceFromDays(params: {
     isCrossMonthWeek: segments.length > 1,
     weeklyEssentialAllowance,
     weeklyBaseFunAllowance,
+    weeklyBaseSpendCap,
+    weeklyVentureBoost,
+    weeklyVentureItems,
+    weeklyExtraIncomeDrip,
     weeklyExtraIncomeBoost,
     weeklyTotalFunAllowance,
     weeklyTotalSpendCap,
@@ -582,7 +650,7 @@ export function computeWeekAllowanceFromDays(params: {
 /**
  * Computes how much of a calendar month's spending cap has already been swept into
  * Savings Stash from completed weeks, so that:
- * 1. Past weeks' unspent allowance NEVER shows as "underspend / left to spend" in the Monthly total.
+ * 1. Past weeks' unspent allowance NEVER shows as "left to spend" in the Monthly total.
  * 2. Remaining spendable money in the month strictly reflects the active week's remaining allowance
  *    plus any future days in the month after the active week.
  */
@@ -611,15 +679,16 @@ export function computeMonthStashSweepSummary(params: {
   const stashMeta = parseCoverMeta((stashGoal as any)?.description);
 
   // Group all days in this month by their Monday weekStart key
-  const daysByWeek = new Map<string, { weekStart: Date; days: MonthDailyAllowancePlan['days'] }>();
+  const daysByWeek = new Map<string, { weekStart: Date; weekEnd: Date; days: MonthDailyAllowancePlan['days'] }>();
   for (const dayObj of monthPlan.days) {
     const ws = startOfWeek(dayObj.date, { weekStartsOn: 1 });
+    const we = endOfWeek(ws, { weekStartsOn: 1 });
     const wkKey = format(ws, 'yyyy-MM-dd');
     const existing = daysByWeek.get(wkKey);
     if (existing) {
       existing.days.push(dayObj);
     } else {
-      daysByWeek.set(wkKey, { weekStart: ws, days: [dayObj] });
+      daysByWeek.set(wkKey, { weekStart: ws, weekEnd: we, days: [dayObj] });
     }
   }
 
@@ -629,16 +698,20 @@ export function computeMonthStashSweepSummary(params: {
   const closedWeeksInMonth: MonthStashSweepSummary['closedWeeksInMonth'] = [];
 
   for (const [wkKey, grp] of daysByWeek.entries()) {
-    const allowanceInMonth = grp.days.reduce((s, d) => s + d.totalDailyAllowance, 0);
+    // Include any Venture Advisory deposits that landed on the days of this week inside this month
+    const ventureInThisWeekPortion = monthPlan.ventureDepositsInMonth
+      .filter(v => grp.days.some(d => format(d.date, 'yyyy-MM-dd') === format(v.postedDate, 'yyyy-MM-dd')))
+      .reduce((s, v) => s + v.amount, 0);
+
+    const allowanceInMonth =
+      grp.days.reduce((s, d) => s + d.totalDailyAllowance, 0) + ventureInThisWeekPortion;
     const isPastClosedWeek = grp.weekStart < currentWeekStart;
 
     if (isPastClosedWeek) {
-      // Check if we have a locked closed_week record or compute actual spend in this week's days inside the month
       const weekSummary = computeWeekVariableSpend(transactions, categories, grp.weekStart, trips);
       const closedRecord = stashMeta.closed_weeks?.[wkKey];
       const fractionOfWeekInMonth = grp.days.length / 7;
 
-      // Attribute spend in this week to the days that fall inside this month
       const spentInMonth = grp.days.reduce((sum, d) => {
         const dayIdx = Math.min(6, Math.max(0, differenceInCalendarDays(d.date, grp.weekStart)));
         return sum + (weekSummary.daily[dayIdx]?.total || 0);
@@ -646,7 +719,6 @@ export function computeMonthStashSweepSummary(params: {
 
       let sweptForMonthPortion = Math.max(0, allowanceInMonth - spentInMonth);
       if (closedRecord && typeof closedRecord.netDifference === 'number' && closedRecord.netDifference > 0) {
-        // If full week is inside this month, use exact closed netDifference
         if (grp.days.length === 7) {
           sweptForMonthPortion = Math.max(0, closedRecord.netDifference);
         } else {

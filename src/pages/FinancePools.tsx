@@ -542,7 +542,7 @@ export default function FinancePoolsPage() {
     ?? ((snapshot?.split?.monthlyIncome && snapshot.split.monthlyIncome > 0)
         ? snapshot.split.monthlyIncome
         : (effectiveFixedMonthly + essentialVariable + rawMonthlyGoalSavingsTarget + (snapshot?.split?.funAmount || (effectiveWeeklyFun * (daysInTargetMonth / 7)))));
-  const extraMonthlyIncome = targetMonthAllowancePlan?.extraIncomeTotal ?? 0;
+  const extraMonthlyIncome = (targetMonthAllowancePlan?.ventureIncomeTotalInMonth ?? 0) + (targetMonthAllowancePlan?.extraIncomeTotal ?? 0);
   const monthlyTotalIncome = gammaBaseIncome + extraMonthlyIncome;
 
   // Track living expenses already paid so far this month (Fixed Bills / Rent, Essentials, Discretionary/Fun)
