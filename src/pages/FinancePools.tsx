@@ -506,6 +506,8 @@ export default function FinancePoolsPage() {
     finance.categories.filter(c => c.is_essential && c.type === 'variable').map(c => c.id)
   ), [finance.categories]);
 
+  const effectiveFixedMonthly = fixedMonthlyTotalAll || fixedMonthlyTotal;
+
   // Helper to build the complete dynamic Living Budget Pot summary for any calendar month M
   // (Supports showing BOTH November Living Budget and December Living Budget during the end-of-month payday overlap,
   // and automatically retiring November as soon as the calendar turns to December 1st!)
