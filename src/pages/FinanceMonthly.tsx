@@ -419,9 +419,21 @@ export default function FinanceMonthly() {
     });
   }, [monthAllowancePlan, dedupedAllTxns, finance.categories, finance.goals, trips]);
 
-  const weeklyVariableAllowance = snapshot
-    ? (snapshot.weeklyEssentialBudget + snapshot.weeklyFunBudget)
-    : (monthlyVariableBudget / (daysInMonth / 7));
+  const activeWeekSnapshot = useMemo(() => {
+    if (!assumptions || !allDataReady) return null;
+    return computePolicySnapshot(
+      assumptions, finance.accounts, dedupedAllTxns,
+      finance.categories, finance.goals, finance.convertToBase,
+      fixedExpensesMonthly, totalBoostThisWeek, typeof wtMap === 'function' ? wtMap() : wtMap, trips, fixedExpensesMonthlyAll,
+      today
+    );
+  }, [assumptions, allDataReady, finance.accounts, dedupedAllTxns, finance.categories, finance.goals, finance.convertToBase, fixedExpensesMonthly, fixedExpensesMonthlyAll, totalBoostThisWeek, wtMap, trips]);
+
+  const weeklyVariableAllowance = activeWeekSnapshot
+    ? (activeWeekSnapshot.weeklyEssentialBudget + activeWeekSnapshot.weeklyFunBudget)
+    : (snapshot
+        ? (snapshot.weeklyEssentialBudget + snapshot.weeklyFunBudget)
+        : (monthlyVariableBudget / (daysInMonth / 7)));
   const activeWeekSpent = currentWeekSummary.totalSpent;
   const activeWeekRemaining = Math.max(0, weeklyVariableAllowance - activeWeekSpent);
   const activeWeekDailyPace = activeWeekRemaining / daysLeftInActiveWeek;
@@ -1556,10 +1568,10 @@ export default function FinanceMonthly() {
                     </p>
                   </div>
 
-                  {/* Pillar 3: True Left to Spend (Freely Spendable for Remaining Days) */}
+                  {/* Pillar 3: True Left to Spend in Month (Freely Spendable for Remaining Days) */}
                   <div className={cn("rounded-xl border p-3.5", paceBg)}>
                     <p className="text-[10px] font-bold uppercase tracking-wider" style={{ color: paceColor }}>
-                      {isCurrentMonth ? `3. Left to Spend (${daysRemaining}d left)` : '3. Unspent Allowance'}
+                      {isCurrentMonth ? `3. Month Cap Remaining (${daysRemaining}d left)` : '3. Unspent Allowance'}
                     </p>
                     <div className="flex items-baseline gap-2 mt-1">
                       <span className="text-2xl font-display font-black tabular-nums" style={{ color: paceColor }}>
@@ -1574,7 +1586,10 @@ export default function FinanceMonthly() {
                     <p className="text-[11px] font-medium mt-1 leading-snug" style={{ color: paceColor }}>
                       {isCurrentMonth ? (
                         <>
-                          <strong className="text-slate-800">{fmt(activeWeekRemaining)}</strong> left in this week&apos;s allowance ({daysLeftInActiveWeek}d left)
+                          <strong className="text-slate-800">{fmt(activeWeekRemaining)}</strong> safe for this week ({daysLeftInActiveWeek}d left)
+                          {daysRemaining > daysLeftInActiveWeek && (
+                            <span> + {fmt(Math.max(0, trueSpendableRemainingInMonth - activeWeekRemaining))} for month end</span>
+                          )}
                         </>
                       ) : (
                         `Excludes ${fmt(unspentSavedSurplus)} already banked to Stash`
