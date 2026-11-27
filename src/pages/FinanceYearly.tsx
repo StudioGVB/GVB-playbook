@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Progress } from '@/components/ui/progress';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useFinanceData } from '@/hooks/useFinanceData';
@@ -12,21 +12,22 @@ import { useFinanceTrips } from '@/hooks/useFinanceTrips';
 import { useWeekTypes } from '@/hooks/useWeekTypes';
 import { useWeeklyBoosts } from '@/hooks/useWeeklyBoosts';
 import { computePolicySnapshot, isInternalTransferTx } from '@/lib/policyEngine';
-import { computeMonthlyPotSchedule } from '@/lib/potPacingEngine';
+import { computeMonthlyPotSchedule, FALLBACK_POT_COLORS } from '@/lib/potPacingEngine';
 import { formatCurrency, baseAmt, parseUkDate, getEffectiveTxMonthDate } from '@/lib/financeUtils';
 import {
   startOfMonth, endOfMonth, subMonths, addMonths, format,
   differenceInCalendarDays, isSameMonth, isBefore, isAfter,
 } from 'date-fns';
 import {
-  BarChart, Bar, LineChart, Line, AreaChart, Area, XAxis, YAxis,
+  ComposedChart, Bar, Line, AreaChart, Area, BarChart, XAxis, YAxis,
   CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer,
-  Legend, ReferenceLine, Cell
+  Legend, ReferenceLine
 } from 'recharts';
 import {
   TrendingUp, TrendingDown, Calendar, ShieldCheck, Target,
   Sparkles, Wallet, ArrowUpRight, ArrowDownRight, Clock,
-  CheckCircle2, AlertCircle, Info, Plane, Coins, Zap
+  CheckCircle2, AlertCircle, Info, Plane, Coins, Zap,
+  Layers, Check
 } from 'lucide-react';
 
 export default function FinanceYearly() {
@@ -37,8 +38,11 @@ export default function FinanceYearly() {
   const { weekTypeMap: wtMap } = useWeekTypes();
   const { totalBoostThisWeek } = useWeeklyBoosts();
 
-  const [activeChartTab, setActiveChartTab] = useState<'cashflow' | 'wealth' | 'capacity'>('cashflow');
+  // Primary chart mode: default to the full waterfall stack
+  const [activeChartTab, setActiveChartTab] = useState<'stack' | 'cashflow' | 'wealth' | 'capacity'>('stack');
+  const [timeHorizonView, setTimeHorizonView] = useState<'future6' | 'all12'>('all12');
   const [forecastScenario, setForecastScenario] = useState<'conservative' | 'expected'>('expected');
+  const [selectedMonthKey, setSelectedMonthKey] = useState<string | null>(null);
 
   const baseCurrency = finance.settings?.base_currency || 'GBP';
   const fmt = (val: number) => formatCurrency(val, baseCurrency, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
@@ -94,7 +98,6 @@ export default function FinanceYearly() {
   }, [activeFixedExpenses, finance.convertToBase]);
 
   // 12-Month Array Construction: 6 months past (-6 to -1) + current month (0) + 5 months future (+1 to +5)
-  // Or 6 full past months + 6 future months including current
   const monthWindows = useMemo(() => {
     const list: Array<{
       date: Date;
@@ -225,7 +228,7 @@ export default function FinanceYearly() {
     return map;
   }, [monthWindows, finance.transactions, catMap, essentialCatIds]);
 
-  // Historical Averages from the Past 6 Months (for benchmark & predictability)
+  // Historical Averages from the Past 6 Months
   const past6Stats = useMemo(() => {
     const pastMonths = monthWindows.filter(m => m.isPast);
     if (!pastMonths.length) {
@@ -260,7 +263,6 @@ export default function FinanceYearly() {
 
     const n = pastMonths.length;
     const avgSpend = spendList.reduce((a, b) => a + b, 0) / n;
-    // Standard deviation / mean for variance
     const variance = Math.sqrt(spendList.map(x => Math.pow(x - avgSpend, 2)).reduce((a, b) => a + b, 0) / n) / (avgSpend || 1);
 
     return {
@@ -278,7 +280,6 @@ export default function FinanceYearly() {
   // Predictable Forward Forecast Construction (Next 6 Months)
   const full12MonthsSeries = useMemo(() => {
     let cumulativeWealth = snapshot?.totalLiquidCash ?? 5000;
-    // Trace backward for past months wealth or forward for future
     const series: Array<{
       monthKey: string;
       label: string;
@@ -305,7 +306,6 @@ export default function FinanceYearly() {
     const predictableSide = forecastScenario === 'expected' ? 303 : 0; // ~£70/wk Venture Advisory retainer
     const forecastIncome = baselineGamma + predictableSide;
 
-    // Predictable living expenses baseline
     const forecastEssential = assumptions?.estimated_essential_variable && assumptions.estimated_essential_variable > 0
       ? assumptions.estimated_essential_variable
       : (past6Stats.avgEssential || 600);
@@ -327,7 +327,7 @@ export default function FinanceYearly() {
           isPast: m.isPast,
           isCurrent: m.isCurrent,
           isFuture: m.isFuture,
-          type: m.isCurrent ? 'Actual' : 'Actual',
+          type: 'Actual',
           income: Math.round(hist.income),
           fixed: Math.round(hist.fixed || fixedMonthlyBase),
           essential: Math.round(hist.essential),
@@ -335,23 +335,20 @@ export default function FinanceYearly() {
           pots: Math.round(hist.pots),
           totalSpend: Math.round(hist.totalSpend),
           netSurplus: Math.round(hist.netSurplus),
-          wealth: 0, // filled in second pass
+          wealth: 0,
           weeklyLivingCapacity: Math.round(weeklyCap),
         });
       } else {
-        // Future Forecast month
         const mStart = m.date;
         const potPlan = potSchedule.getScheduleForMonth(mStart);
         const scheduledPots = potPlan?.totalScheduledMonthly ?? past6Stats.avgPots;
 
-        // Check for trip in this month
         const hasTrip = trips.some(t => {
           const tStart = parseUkDate(t.start_date);
           const tEnd = parseUkDate(t.end_date);
           return (tStart <= endOfMonth(mStart) && tEnd >= mStart);
         });
 
-        // If on travel, variable spend is partially replaced by travel pool
         const monthEssential = hasTrip ? forecastEssential * 0.7 : forecastEssential;
         const monthFun = hasTrip ? forecastFun * 0.8 : forecastFun;
         const monthSpend = fixedMonthlyBase + monthEssential + monthFun + scheduledPots;
@@ -373,23 +370,20 @@ export default function FinanceYearly() {
           pots: Math.round(scheduledPots),
           totalSpend: Math.round(monthSpend),
           netSurplus: Math.round(monthNet),
-          wealth: 0, // filled in pass
+          wealth: 0,
           weeklyLivingCapacity: Math.round(weeklyCap),
         });
       }
     }
 
-    // Pass 2: Calculate cumulative wealth progression pinned from Current Month
     const currentIdx = series.findIndex(s => s.isCurrent);
     if (currentIdx !== -1) {
       series[currentIdx].wealth = Math.round(cumulativeWealth);
-      // Forward projection
       let forwardWealth = cumulativeWealth;
       for (let i = currentIdx + 1; i < series.length; i++) {
         forwardWealth += series[i].netSurplus;
         series[i].wealth = Math.round(forwardWealth);
       }
-      // Backward projection
       let backwardWealth = cumulativeWealth;
       for (let i = currentIdx - 1; i >= 0; i--) {
         backwardWealth -= series[i + 1].netSurplus;
@@ -409,6 +403,55 @@ export default function FinanceYearly() {
     potSchedule,
     trips,
   ]);
+
+  // Stacked Data for the Full Outflow Stack (Fixed + Variable + Individual Saving Pots vs. Projected Income)
+  const stackedChartData = useMemo(() => {
+    return full12MonthsSeries.map(s => {
+      const m = monthWindows.find(mw => mw.monthKey === s.monthKey);
+      const mDate = m?.date || now;
+
+      const point: any = {
+        ...s,
+        fixed: s.fixed,
+        variable: s.essential + s.fun,
+        income: s.income,
+      };
+
+      let totalPots = 0;
+      for (const meta of potSchedule.activeGoalMetas) {
+        let amt = 0;
+        if (s.isFuture || s.isCurrent) {
+          const plan = potSchedule.getGoalPlanForMonth(meta.goal.id, mDate);
+          amt = Math.round(plan?.monthlyAmount ?? 0);
+        } else {
+          const pastSum = finance.transactions
+            .filter(tx => (tx as any).goal_id === meta.goal.id)
+            .filter(tx => {
+              const d = getEffectiveTxMonthDate(tx);
+              return d >= mDate && d <= endOfMonth(mDate);
+            })
+            .reduce((sum, tx) => sum + Math.abs(baseAmt(tx)), 0);
+          amt = Math.round(pastSum);
+        }
+        point[meta.goal.id] = amt;
+        totalPots += amt;
+      }
+
+      point.totalPots = totalPots;
+      point.totalAllocated = point.fixed + point.variable + totalPots;
+      point.surplusHeadroom = point.income - point.totalAllocated;
+
+      return point;
+    });
+  }, [full12MonthsSeries, monthWindows, now, potSchedule, finance.transactions]);
+
+  // Display series based on time horizon view
+  const displayedSeries = useMemo(() => {
+    if (timeHorizonView === 'future6') {
+      return stackedChartData.filter(s => s.isFuture || s.isCurrent);
+    }
+    return stackedChartData;
+  }, [stackedChartData, timeHorizonView]);
 
   // Future 6 Months Aggregates
   const future6Stats = useMemo(() => {
@@ -444,7 +487,6 @@ export default function FinanceYearly() {
       const remaining = Math.max(0, target - assigned);
       const pct = Math.min(100, Math.round((assigned / target) * 100));
 
-      // Calculate projected hit month from potSchedule
       let accumulated = assigned;
       let hitMonth: string = 'Beyond 6m';
 
@@ -472,6 +514,17 @@ export default function FinanceYearly() {
       };
     });
   }, [finance.goals, finance.convertToBase, full12MonthsSeries, monthWindows, now, potSchedule]);
+
+  // Selected Month Spotlight (for deep-dive inspection)
+  const activeSpotlightMonth = useMemo(() => {
+    if (selectedMonthKey) {
+      const found = stackedChartData.find(s => s.monthKey === selectedMonthKey);
+      if (found) return found;
+    }
+    // Default to next month if available, else current month
+    const nextMonth = stackedChartData.find(s => s.isFuture);
+    return nextMonth || stackedChartData.find(s => s.isCurrent) || stackedChartData[0] || null;
+  }, [selectedMonthKey, stackedChartData]);
 
   // Predictability Score (0-100%)
   const predictabilityScore = useMemo(() => {
@@ -629,14 +682,18 @@ export default function FinanceYearly() {
       </div>
 
       {/* ========================================================= */}
-      {/* MAIN 12-MONTH VISUAL HORIZON CHART                        */}
+      {/* FEATURED: SAVING POT GOAL PREDICTIONS & OUTFLOW STACK     */}
+      {/* AGAINST PROJECTED INCOME                                  */}
       {/* ========================================================= */}
-      <Card className="rounded-3xl border-slate-200/80 shadow-sm bg-white overflow-hidden">
+      <Card className="rounded-3xl border-slate-200/80 shadow-md bg-white overflow-hidden">
         <CardHeader className="p-6 pb-2 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2">
+              <span className="p-1.5 rounded-lg bg-pink-100 text-pink-600">
+                <Layers className="w-4 h-4" />
+              </span>
               <CardTitle className="text-lg font-display font-bold text-slate-900">
-                12-Month Financial Trajectory
+                Saving Pot Predictions & Full Budget Stack vs. Projected Income
               </CardTitle>
               <TooltipProvider>
                 <Tooltip>
@@ -644,40 +701,79 @@ export default function FinanceYearly() {
                     <Info className="w-4 h-4 text-slate-400 cursor-pointer" />
                   </TooltipTrigger>
                   <TooltipContent className="max-w-xs text-xs">
-                    The chart places "Today" right in the center. The left 6 bars are your recorded Wise & Up bank transactions, while the right 6 bars represent predictable fixed commitments, pot contributions, and baseline living allowances.
+                    Each bar stacks Fixed Bills, Variable Living, and individual Saving Pot Goals (colored segments). The dashed green line represents your Projected Income ceiling for that month. Headroom between the top of the stack and the line is unallocated surplus fun money.
                   </TooltipContent>
                 </Tooltip>
               </TooltipProvider>
             </div>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Comparison of past actual transactions vs. future predictable plan
+            <p className="text-xs text-slate-500 mt-1">
+              Fixed Bills + Variable Living + Each Saving Pot stacked together against monthly income
             </p>
           </div>
 
-          <Tabs value={activeChartTab} onValueChange={(v) => setActiveChartTab(v as any)} className="w-auto">
-            <TabsList className="bg-slate-100 p-1 rounded-xl">
-              <TabsTrigger value="cashflow" className="text-xs rounded-lg px-3 py-1.5 font-medium">
-                Cash Flow & Net
-              </TabsTrigger>
-              <TabsTrigger value="wealth" className="text-xs rounded-lg px-3 py-1.5 font-medium">
-                Liquid Wealth Growth
-              </TabsTrigger>
-              <TabsTrigger value="capacity" className="text-xs rounded-lg px-3 py-1.5 font-medium">
-                Weekly Living Capacity
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
+          <div className="flex items-center gap-3">
+            {/* View Horizon Toggle */}
+            <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs font-medium">
+              <button
+                onClick={() => setTimeHorizonView('future6')}
+                className={`px-2.5 py-1 rounded-lg transition-all ${
+                  timeHorizonView === 'future6'
+                    ? 'bg-white text-slate-900 shadow-sm font-semibold'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                Next 6m Forecast
+              </button>
+              <button
+                onClick={() => setTimeHorizonView('all12')}
+                className={`px-2.5 py-1 rounded-lg transition-all ${
+                  timeHorizonView === 'all12'
+                    ? 'bg-white text-slate-900 shadow-sm font-semibold'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                Full 12m Horizon
+              </button>
+            </div>
+
+            {/* Main Tabs */}
+            <Tabs value={activeChartTab} onValueChange={(v) => setActiveChartTab(v as any)} className="w-auto">
+              <TabsList className="bg-slate-100 p-1 rounded-xl">
+                <TabsTrigger value="stack" className="text-xs rounded-lg px-3 py-1.5 font-medium">
+                  Full Stack vs Income
+                </TabsTrigger>
+                <TabsTrigger value="cashflow" className="text-xs rounded-lg px-3 py-1.5 font-medium">
+                  Inflow vs Outflow
+                </TabsTrigger>
+                <TabsTrigger value="wealth" className="text-xs rounded-lg px-3 py-1.5 font-medium">
+                  Wealth Growth
+                </TabsTrigger>
+                <TabsTrigger value="capacity" className="text-xs rounded-lg px-3 py-1.5 font-medium">
+                  Living Capacity
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+          </div>
         </CardHeader>
 
         <CardContent className="p-6">
-          <div className="h-[380px] w-full">
+          <div className="h-[420px] w-full">
             <ResponsiveContainer width="100%" height="100%">
-              {activeChartTab === 'cashflow' ? (
-                <BarChart data={full12MonthsSeries} margin={{ top: 20, right: 20, left: 0, bottom: 20 }}>
+              {activeChartTab === 'stack' ? (
+                <ComposedChart
+                  data={displayedSeries}
+                  margin={{ top: 25, right: 25, left: 0, bottom: 20 }}
+                  onClick={(e) => {
+                    if (e && e.activePayload && e.activePayload.length > 0) {
+                      const clicked = e.activePayload[0].payload;
+                      if (clicked?.monthKey) setSelectedMonthKey(clicked.monthKey);
+                    }
+                  }}
+                >
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                   <XAxis
                     dataKey="label"
-                    tick={{ fontSize: 11, fill: '#64748b' }}
+                    tick={{ fontSize: 12, fill: '#64748b' }}
                     axisLine={{ stroke: '#cbd5e1' }}
                     tickLine={false}
                   />
@@ -688,136 +784,263 @@ export default function FinanceYearly() {
                     tickFormatter={(v) => `£${v >= 1000 ? `${(v/1000).toFixed(1)}k` : v}`}
                   />
                   <RechartsTooltip
-                    content={({ active, payload, label }) => {
+                    content={({ active, payload }) => {
                       if (!active || !payload?.length) return null;
                       const item = payload[0].payload;
+                      const totalAlloc = item.totalAllocated || (item.fixed + item.variable + item.totalPots);
+                      const surplus = item.income - totalAlloc;
+
                       return (
-                        <div className="bg-slate-900 text-white p-3 rounded-xl shadow-xl border border-slate-800 text-xs space-y-1.5 min-w-[200px]">
-                          <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
-                            <span className="font-bold font-display">{item.fullLabel}</span>
+                        <div className="bg-slate-900/95 backdrop-blur-md text-white p-4 rounded-2xl shadow-2xl border border-slate-800 text-xs space-y-2 min-w-[280px]">
+                          <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                            <div>
+                              <span className="font-bold font-display text-sm block">{item.fullLabel}</span>
+                              <span className="text-[10px] text-slate-400">Click bar to lock spotlight</span>
+                            </div>
                             <Badge variant="outline" className={`text-[10px] ${item.isFuture ? 'text-violet-400 border-violet-800' : 'text-emerald-400 border-emerald-800'}`}>
                               {item.type}
                             </Badge>
                           </div>
-                          <div className="flex justify-between text-slate-300">
-                            <span>Income:</span>
-                            <span className="font-semibold text-emerald-400">{fmt(item.income)}</span>
+
+                          {/* Income vs Outflow Header */}
+                          <div className="grid grid-cols-2 gap-2 bg-slate-800/60 p-2.5 rounded-xl">
+                            <div>
+                              <span className="text-[10px] uppercase font-bold text-emerald-400 block">Projected Income</span>
+                              <span className="text-sm font-display font-black text-emerald-300">{fmt(item.income)}</span>
+                            </div>
+                            <div className="text-right">
+                              <span className="text-[10px] uppercase font-bold text-slate-400 block">Total Outflows</span>
+                              <span className="text-sm font-display font-black text-slate-200">{fmt(totalAlloc)}</span>
+                            </div>
                           </div>
-                          <div className="flex justify-between text-slate-300">
-                            <span>Fixed Bills:</span>
-                            <span className="font-medium text-slate-200">{fmt(item.fixed)}</span>
+
+                          {/* Stack Layers */}
+                          <div className="space-y-1.5 pt-1 text-slate-300">
+                            <div className="flex justify-between items-center">
+                              <span className="flex items-center gap-1.5">
+                                <span className="w-2.5 h-2.5 rounded-full bg-slate-500 inline-block" />
+                                Fixed Bills:
+                              </span>
+                              <span className="font-semibold text-slate-100">{fmt(item.fixed)}</span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="flex items-center gap-1.5">
+                                <span className="w-2.5 h-2.5 rounded-full bg-amber-500 inline-block" />
+                                Variable Living (Ess + Fun):
+                              </span>
+                              <span className="font-semibold text-amber-300">{fmt(item.variable)}</span>
+                            </div>
+
+                            {/* Pot Goals Sub-List */}
+                            {potSchedule.activeGoalMetas.map(meta => {
+                              const amt = item[meta.goal.id] || 0;
+                              if (amt <= 0) return null;
+                              return (
+                                <div key={meta.goal.id} className="flex justify-between items-center pl-4 text-[11px]">
+                                  <span className="flex items-center gap-1.5 text-slate-400">
+                                    <span className="w-2 h-2 rounded-full inline-block" style={{ backgroundColor: meta.color }} />
+                                    {meta.goal.name}:
+                                  </span>
+                                  <span className="font-medium text-slate-200">{fmt(amt)}</span>
+                                </div>
+                              );
+                            })}
                           </div>
-                          <div className="flex justify-between text-slate-300">
-                            <span>Living (Essential + Fun):</span>
-                            <span className="font-medium text-amber-300">{fmt(item.essential + item.fun)}</span>
-                          </div>
-                          <div className="flex justify-between text-slate-300">
-                            <span>Pot Savings:</span>
-                            <span className="font-medium text-blue-400">{fmt(item.pots)}</span>
-                          </div>
-                          <div className="border-t border-slate-800 pt-1.5 flex justify-between font-bold">
-                            <span>Net Surplus:</span>
-                            <span className={item.netSurplus >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
-                              {item.netSurplus >= 0 ? '+' : ''}{fmt(item.netSurplus)}
+
+                          {/* Net Surplus / Deficit */}
+                          <div className="border-t border-slate-800 pt-2 flex justify-between items-center">
+                            <span className="font-bold text-slate-200">
+                              {surplus >= 0 ? '🌟 Leftover Fun Surplus:' : '⚠️ Over Budget By:'}
+                            </span>
+                            <span className={`font-display font-black text-sm ${surplus >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                              {surplus >= 0 ? '+' : ''}{fmt(surplus)}
                             </span>
                           </div>
                         </div>
                       );
                     }}
                   />
-                  <Legend verticalAlign="top" height={36} iconType="circle" />
+                  <Legend verticalAlign="top" height={44} iconType="circle" />
                   <ReferenceLine x={format(now, 'MMM')} stroke="#8b5cf6" strokeDasharray="3 3" label={{ value: 'TODAY', position: 'top', fill: '#8b5cf6', fontSize: 10, fontWeight: 700 }} />
+
+                  {/* 1. Fixed Bills (Base of Stack) */}
+                  <Bar dataKey="fixed" stackId="allocations" name="Fixed Bills" fill="#475569" radius={[0, 0, 0, 0]} />
+
+                  {/* 2. Variable Living (Middle of Stack) */}
+                  <Bar dataKey="variable" stackId="allocations" name="Variable Living (Essentials + Fun)" fill="#f59e0b" radius={[0, 0, 0, 0]} />
+
+                  {/* 3. Individual Saving Pot Goals (Top of Stack) */}
+                  {potSchedule.activeGoalMetas.map((meta, idx) => (
+                    <Bar
+                      key={meta.goal.id}
+                      dataKey={meta.goal.id}
+                      stackId="allocations"
+                      name={meta.goal.name}
+                      fill={meta.color || FALLBACK_POT_COLORS[idx % FALLBACK_POT_COLORS.length]}
+                      radius={idx === potSchedule.activeGoalMetas.length - 1 ? [4, 4, 0, 0] : [0, 0, 0, 0]}
+                    />
+                  ))}
+
+                  {/* 4. Projected Income Ceiling Line */}
+                  <Line
+                    type="monotone"
+                    dataKey="income"
+                    name="Projected Income"
+                    stroke="#10b981"
+                    strokeWidth={3.5}
+                    strokeDasharray="4 4"
+                    dot={{ r: 5, fill: '#10b981', stroke: '#ffffff', strokeWidth: 2 }}
+                    activeDot={{ r: 7 }}
+                  />
+                </ComposedChart>
+              ) : activeChartTab === 'cashflow' ? (
+                <BarChart data={displayedSeries} margin={{ top: 20, right: 20, left: 0, bottom: 20 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                  <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={{ stroke: '#cbd5e1' }} tickLine={false} />
+                  <YAxis tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} tickFormatter={(v) => `£${v >= 1000 ? `${(v/1000).toFixed(1)}k` : v}`} />
+                  <RechartsTooltip />
+                  <Legend verticalAlign="top" height={36} iconType="circle" />
+                  <ReferenceLine x={format(now, 'MMM')} stroke="#8b5cf6" strokeDasharray="3 3" />
                   <Bar dataKey="income" name="Income" fill="#10b981" radius={[4, 4, 0, 0]} />
                   <Bar dataKey="totalSpend" name="Total Outflows" fill="#64748b" radius={[4, 4, 0, 0]} />
                 </BarChart>
               ) : activeChartTab === 'wealth' ? (
-                <AreaChart data={full12MonthsSeries} margin={{ top: 20, right: 20, left: 0, bottom: 20 }}>
+                <AreaChart data={displayedSeries} margin={{ top: 20, right: 20, left: 0, bottom: 20 }}>
                   <defs>
-                    <linearGradient id="wealthGradient" x1="0" y1="0" x2="0" y2="1">
+                    <linearGradient id="wealthGradient2" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.3}/>
                       <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0.0}/>
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                  <XAxis
-                    dataKey="label"
-                    tick={{ fontSize: 11, fill: '#64748b' }}
-                    axisLine={{ stroke: '#cbd5e1' }}
-                    tickLine={false}
-                  />
-                  <YAxis
-                    tick={{ fontSize: 11, fill: '#64748b' }}
-                    axisLine={false}
-                    tickLine={false}
-                    tickFormatter={(v) => `£${(v/1000).toFixed(1)}k`}
-                  />
-                  <RechartsTooltip
-                    content={({ active, payload }) => {
-                      if (!active || !payload?.length) return null;
-                      const item = payload[0].payload;
-                      return (
-                        <div className="bg-slate-900 text-white p-3 rounded-xl shadow-xl border border-slate-800 text-xs space-y-1">
-                          <p className="font-bold font-display">{item.fullLabel}</p>
-                          <p className="text-violet-300 font-semibold text-sm">
-                            Wealth: {fmt(item.wealth)}
-                          </p>
-                          <p className="text-[10px] text-slate-400">
-                            Status: {item.isFuture ? 'Forecasted accumulation' : 'Actual historical cash'}
-                          </p>
-                        </div>
-                      );
-                    }}
-                  />
-                  <ReferenceLine x={format(now, 'MMM')} stroke="#8b5cf6" strokeDasharray="3 3" label={{ value: 'TODAY', position: 'top', fill: '#8b5cf6', fontSize: 10, fontWeight: 700 }} />
+                  <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={{ stroke: '#cbd5e1' }} tickLine={false} />
+                  <YAxis tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} tickFormatter={(v) => `£${(v/1000).toFixed(1)}k`} />
+                  <RechartsTooltip />
+                  <ReferenceLine x={format(now, 'MMM')} stroke="#8b5cf6" strokeDasharray="3 3" />
                   <ReferenceLine y={1000} stroke="#f43f5e" strokeDasharray="3 3" label={{ value: '£1,000 Emergency Floor', position: 'right', fill: '#f43f5e', fontSize: 9 }} />
-                  <Area
-                    type="monotone"
-                    dataKey="wealth"
-                    name="Liquid Cash & Pot Reserves"
-                    stroke="#8b5cf6"
-                    strokeWidth={2.5}
-                    fillOpacity={1}
-                    fill="url(#wealthGradient)"
-                  />
+                  <Area type="monotone" dataKey="wealth" name="Liquid Cash & Pot Reserves" stroke="#8b5cf6" strokeWidth={2.5} fillOpacity={1} fill="url(#wealthGradient2)" />
                 </AreaChart>
               ) : (
-                <BarChart data={full12MonthsSeries} margin={{ top: 20, right: 20, left: 0, bottom: 20 }}>
+                <BarChart data={displayedSeries} margin={{ top: 20, right: 20, left: 0, bottom: 20 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                  <XAxis
-                    dataKey="label"
-                    tick={{ fontSize: 11, fill: '#64748b' }}
-                    axisLine={{ stroke: '#cbd5e1' }}
-                    tickLine={false}
-                  />
-                  <YAxis
-                    tick={{ fontSize: 11, fill: '#64748b' }}
-                    axisLine={false}
-                    tickLine={false}
-                    tickFormatter={(v) => `£${v}`}
-                  />
-                  <RechartsTooltip
-                    content={({ active, payload }) => {
-                      if (!active || !payload?.length) return null;
-                      const item = payload[0].payload;
-                      return (
-                        <div className="bg-slate-900 text-white p-3 rounded-xl shadow-xl border border-slate-800 text-xs space-y-1">
-                          <p className="font-bold font-display">{item.fullLabel}</p>
-                          <p className="text-amber-300 font-semibold">
-                            Weekly Living Allowance: {fmt(item.weeklyLivingCapacity)} / wk
-                          </p>
-                          <p className="text-[10px] text-slate-400">
-                            Combines variable essentials & discretionary fun money
-                          </p>
-                        </div>
-                      );
-                    }}
-                  />
-                  <ReferenceLine x={format(now, 'MMM')} stroke="#8b5cf6" strokeDasharray="3 3" label={{ value: 'TODAY', position: 'top', fill: '#8b5cf6', fontSize: 10, fontWeight: 700 }} />
-                  <Bar dataKey="weeklyLivingCapacity" name="Weekly Living Spend (Essentials + Fun)" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+                  <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={{ stroke: '#cbd5e1' }} tickLine={false} />
+                  <YAxis tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} tickFormatter={(v) => `£${v}`} />
+                  <RechartsTooltip />
+                  <ReferenceLine x={format(now, 'MMM')} stroke="#8b5cf6" strokeDasharray="3 3" />
+                  <Bar dataKey="weeklyLivingCapacity" name="Weekly Living Spend" fill="#f59e0b" radius={[4, 4, 0, 0]} />
                 </BarChart>
               )}
             </ResponsiveContainer>
           </div>
+
+          {/* Interactive Month Spotlight Strip */}
+          {activeSpotlightMonth && (
+            <div className="mt-6 p-5 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-display font-black text-slate-900 text-base">
+                      {activeSpotlightMonth.fullLabel} Breakdown Spotlight
+                    </span>
+                    <Badge variant="outline" className={`text-[10px] ${activeSpotlightMonth.isFuture ? 'text-violet-700 bg-violet-50 border-violet-200' : 'text-emerald-700 bg-emerald-50 border-emerald-200'}`}>
+                      {activeSpotlightMonth.type}
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Click any column in the chart above or choose from the month tabs below
+                  </p>
+                </div>
+
+                {/* Quick month pills */}
+                <div className="flex flex-wrap gap-1">
+                  {displayedSeries.map(s => (
+                    <button
+                      key={s.monthKey}
+                      onClick={() => setSelectedMonthKey(s.monthKey)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
+                        activeSpotlightMonth.monthKey === s.monthKey
+                          ? 'bg-slate-900 text-white shadow-sm'
+                          : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
+                      }`}
+                    >
+                      {s.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Progress Bar of Budget Stack against Income */}
+              <div className="space-y-1.5">
+                <div className="flex justify-between text-xs font-semibold">
+                  <span className="text-slate-700">
+                    Total Committed Outflow Stack: <strong className="text-slate-900">{fmt(activeSpotlightMonth.totalAllocated)}</strong> of {fmt(activeSpotlightMonth.income)} Income
+                  </span>
+                  <span className={activeSpotlightMonth.surplusHeadroom >= 0 ? 'text-emerald-600 font-bold' : 'text-rose-600 font-bold'}>
+                    {activeSpotlightMonth.surplusHeadroom >= 0 ? `+${fmt(activeSpotlightMonth.surplusHeadroom)} surplus headroom` : `${fmt(Math.abs(activeSpotlightMonth.surplusHeadroom))} over budget`}
+                  </span>
+                </div>
+                <div className="h-3 rounded-full bg-slate-200 overflow-hidden flex">
+                  <div
+                    className="h-full bg-slate-600 transition-all"
+                    style={{ width: `${Math.min(100, (activeSpotlightMonth.fixed / (activeSpotlightMonth.income || 1)) * 100)}%` }}
+                    title={`Fixed Bills: ${fmt(activeSpotlightMonth.fixed)}`}
+                  />
+                  <div
+                    className="h-full bg-amber-500 transition-all"
+                    style={{ width: `${Math.min(100, (activeSpotlightMonth.variable / (activeSpotlightMonth.income || 1)) * 100)}%` }}
+                    title={`Variable Living: ${fmt(activeSpotlightMonth.variable)}`}
+                  />
+                  <div
+                    className="h-full bg-blue-500 transition-all"
+                    style={{ width: `${Math.min(100, (activeSpotlightMonth.totalPots / (activeSpotlightMonth.income || 1)) * 100)}%` }}
+                    title={`Saving Pots Total: ${fmt(activeSpotlightMonth.totalPots)}`}
+                  />
+                </div>
+                <div className="flex items-center gap-4 text-[11px] text-slate-500 pt-1 flex-wrap">
+                  <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-slate-600" /> Fixed Bills: <strong>{fmt(activeSpotlightMonth.fixed)}</strong></span>
+                  <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-amber-500" /> Variable Living: <strong>{fmt(activeSpotlightMonth.variable)}</strong></span>
+                  <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-blue-500" /> Saving Pots: <strong>{fmt(activeSpotlightMonth.totalPots)}</strong></span>
+                  <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-emerald-500" /> Headroom: <strong>{fmt(Math.max(0, activeSpotlightMonth.surplusHeadroom))}</strong></span>
+                </div>
+              </div>
+
+              {/* Individual Saving Pots for this Month */}
+              <div className="pt-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-400 block mb-2.5">
+                  Saving Pots Scheduled in {activeSpotlightMonth.fullLabel}
+                </span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5">
+                  {potSchedule.activeGoalMetas.map(meta => {
+                    const monthlyAmt = activeSpotlightMonth[meta.goal.id] || 0;
+                    return (
+                      <div
+                        key={meta.goal.id}
+                        className="p-3 rounded-xl bg-white border border-slate-200/80 flex items-center justify-between"
+                      >
+                        <div className="min-w-0 pr-2">
+                          <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-900 truncate">
+                            <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: meta.color }} />
+                            {meta.goal.name}
+                          </span>
+                          <span className="text-[10px] text-slate-400 block mt-0.5">
+                            Target: {fmt(meta.targetBase)}
+                          </span>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <span className="text-xs font-display font-bold text-slate-900 block">
+                            {fmt(monthlyAmt)}
+                          </span>
+                          <span className="text-[10px] text-slate-400 font-medium">
+                            ≈ {fmt(monthlyAmt / 4.33)}/wk
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 
