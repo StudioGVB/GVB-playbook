@@ -303,11 +303,11 @@ export default function FinanceYearly() {
     };
   }, [monthWindows, historicalDataMap, fixedMonthlyBase]);
 
-  // Detect most recent Gamma base salary deposit (prioritize actual Gamma salary transactions ~£2,400 over stale total-income assumption)
+  // Detect most recent Gamma base salary deposit (prioritize actual Gamma salary transactions ~£2,400 over multi-source total-income assumptions)
   const latestGammaSalary = useMemo(() => {
     const gammaTxs = transactions
       .filter(tx => {
-        if (tx.amount < 1000 || tx.is_transfer || tx.is_reimbursable || (tx as any).is_refund) return false;
+        if (tx.amount < 1000 || tx.amount > 3200 || tx.is_transfer || tx.is_reimbursable || (tx as any).is_refund) return false;
         const rawText = `${tx.merchant || ''} ${tx.description || ''}`.toLowerCase();
         const cat = catMap.get(tx.category_id || '');
         const catLower = (cat?.name || '').toLowerCase();
@@ -320,13 +320,13 @@ export default function FinanceYearly() {
     if (gammaTxs.length > 0) {
       return baseAmt(gammaTxs[0]);
     }
-    if (assumptions?.expected_monthly_income && assumptions.expected_monthly_income > 0) {
+    if (assumptions?.expected_monthly_income && assumptions.expected_monthly_income > 0 && assumptions.expected_monthly_income <= 3000) {
       return assumptions.expected_monthly_income;
     }
     return 2400;
   }, [assumptions, transactions, catMap]);
 
-  // Predictable Forward Forecast Construction (Next 6 Months) using the 4-Step Gamma Waterfall
+  // Predictable Forward Forecast Construction (Next 6 Months) using the 5-Step Gamma Waterfall
   const full12MonthsSeries = useMemo(() => {
     let cumulativeWealth = snapshot?.totalLiquidCash ?? 5000;
     const series: Array<{
@@ -344,6 +344,7 @@ export default function FinanceYearly() {
       income: number;
       fixed: number;
       essential: number;
+      emergency: number;
       rawScheduledPots: number;
       pots: number;
       baseFunFromGamma: number;
@@ -391,6 +392,7 @@ export default function FinanceYearly() {
           income: Math.round(hist.income),
           fixed: Math.round(hist.fixed || fixedMonthlyBase),
           essential: Math.round(hist.essential),
+          emergency: 0,
           rawScheduledPots: Math.round(hist.pots),
           pots: Math.round(hist.pots),
           baseFunFromGamma: Math.round(hist.fun),
@@ -414,7 +416,7 @@ export default function FinanceYearly() {
         const potPlan = typeof potSchedule?.getScheduleForMonth === 'function'
           ? potSchedule.getScheduleForMonth(mStart)
           : potSchedule?.months?.find((s: any) => s.monthKey === targetMonthKey);
-        const rawScheduledPots = potPlan?.totalScheduledMonthly ?? (potPlan as any)?.total ?? 0;
+        const rawScheduledPots = Math.round(potPlan?.totalScheduledMonthly ?? (potPlan as any)?.total ?? 0);
 
         const hasTrip = trips.some(t => {
           const tStart = parseUkDate(t.start_date);
@@ -422,44 +424,47 @@ export default function FinanceYearly() {
           return (tStart <= endOfMonth(mStart) && tEnd >= mStart);
         });
 
-        // 4-Step Gamma Waterfall for Month M:
+        // 5-Step Gamma Waterfall for Month M:
         // 1. Fixed Bills [x]
-        const monthFixed = fixedMonthlyBase;
+        const monthFixed = Math.round(fixedMonthlyBase);
         // 2. Variable Essentials [y]
-        const monthEssential = hasTrip ? forecastEssential * 0.7 : forecastEssential;
-        // 3. Savings Pots [z]
-        const availableForPotsFromGamma = Math.max(0, baselineGamma - monthFixed - monthEssential);
+        const monthEssential = Math.round(hasTrip ? forecastEssential * 0.7 : forecastEssential);
+        // 3. Emergency Fund (10% of Gamma Salary)
+        const monthEmergency = Math.round(baselineGamma * 0.10);
+        // 4. Savings Pots [z]
+        const availableForPotsFromGamma = Math.max(0, Math.round(baselineGamma) - monthFixed - monthEssential - monthEmergency);
         const fundedPotsFromGamma = Math.min(rawScheduledPots, availableForPotsFromGamma);
         const potShortfallFromGamma = Math.max(0, rawScheduledPots - availableForPotsFromGamma);
-        // 4. Base Fun Money [a] = Leftover from Gamma
-        const baseFunFromGamma = Math.max(0, baselineGamma - monthFixed - monthEssential - fundedPotsFromGamma);
+        // 5. Base Fun Money [a] = Strictly whatever is left over from Gamma after Fixed + Essentials + Emergency + Pots
+        const baseFunFromGamma = Math.max(0, Math.round(baselineGamma) - monthFixed - monthEssential - monthEmergency - fundedPotsFromGamma);
 
         // Weekly Venture Advisory (£70/wk in 'expected' mode, £0 in 'conservative' mode)
         const weeklySideIncome = forecastScenario === 'expected' ? 70 : 0;
         const expectedSideIncome = forecastScenario === 'expected' ? Math.round((m.daysInMonth / 7) * 70) : 0;
-        const totalProjectedIncome = baselineGamma + expectedSideIncome;
+        const totalProjectedIncome = Math.round(baselineGamma) + expectedSideIncome;
 
-        // If Gamma wasn't enough to cover all scheduled pots, side income can cover the remaining pot shortfall first
+        // If Gamma wasn't enough to cover all scheduled pots, side income covers the remaining pot shortfall first
         const extraPotCoverFromSide = Math.min(expectedSideIncome, potShortfallFromGamma);
         const effectivePotsFunded = fundedPotsFromGamma + extraPotCoverFromSide;
         const remainingSideForFun = Math.max(0, expectedSideIncome - extraPotCoverFromSide);
 
-        const totalFunCapacity = baseFunFromGamma + remainingSideForFun;
+        // Total Fun Money is strictly the leftover after Fixed + Essentials + Emergency + Pots
+        const totalFunCapacity = Math.max(0, totalProjectedIncome - monthFixed - monthEssential - monthEmergency - effectivePotsFunded);
 
         // Daily & Weekly Allowance Math:
         // Base Card Spend Cap = Variable Essentials [y] + Base Fun Money [a]
         const baseCardSpendCap = monthEssential + baseFunFromGamma;
         const baseDailyAllowance = m.daysInMonth > 0 ? baseCardSpendCap / m.daysInMonth : 0;
         const baseWeeklyAllowance = baseDailyAllowance * 7;
-        const predictedWeeklyAllowance = baseWeeklyAllowance + (remainingSideForFun > 0 ? weeklySideIncome : 0);
+        const predictedWeeklyAllowance = m.daysInMonth > 0 ? ((monthEssential + totalFunCapacity) / m.daysInMonth) * 7 : 0;
         const predictedDailyAllowance = predictedWeeklyAllowance / 7;
 
         const baseWeeklyFun = m.daysInMonth > 0 ? (baseFunFromGamma / m.daysInMonth) * 7 : 0;
-        const predictedWeeklyFun = baseWeeklyFun + (remainingSideForFun > 0 ? weeklySideIncome : 0);
+        const predictedWeeklyFun = m.daysInMonth > 0 ? (totalFunCapacity / m.daysInMonth) * 7 : 0;
 
-        const monthTotalAllocated = monthFixed + monthEssential + totalFunCapacity + effectivePotsFunded;
-        // Wealth accumulates from the ring-fenced savings pots funded each month
-        const monthWealthGain = effectivePotsFunded;
+        const monthTotalAllocated = monthFixed + monthEssential + monthEmergency + totalFunCapacity + effectivePotsFunded;
+        // Wealth accumulates from the ring-fenced emergency + savings pots funded each month
+        const monthWealthGain = monthEmergency + effectivePotsFunded;
 
         series.push({
           monthKey: m.monthKey,
@@ -474,22 +479,23 @@ export default function FinanceYearly() {
           expectedSideIncome: Math.round(expectedSideIncome),
           weeklySideIncome,
           income: Math.round(totalProjectedIncome),
-          fixed: Math.round(monthFixed),
-          essential: Math.round(monthEssential),
-          rawScheduledPots: Math.round(rawScheduledPots),
-          pots: Math.round(effectivePotsFunded),
-          baseFunFromGamma: Math.round(baseFunFromGamma),
-          fun: Math.round(totalFunCapacity),
-          potShortfallFromGamma: Math.round(potShortfallFromGamma),
-          baseCardSpendCap: Math.round(baseCardSpendCap),
+          fixed: monthFixed,
+          essential: monthEssential,
+          emergency: monthEmergency,
+          rawScheduledPots,
+          pots: effectivePotsFunded,
+          baseFunFromGamma,
+          fun: totalFunCapacity,
+          potShortfallFromGamma,
+          baseCardSpendCap,
           baseDailyAllowance,
           baseWeeklyAllowance,
           predictedWeeklyAllowance,
           predictedDailyAllowance,
           baseWeeklyFun,
           predictedWeeklyFun,
-          totalSpend: Math.round(monthTotalAllocated),
-          netSurplus: Math.round(monthWealthGain),
+          totalSpend: monthTotalAllocated,
+          netSurplus: monthWealthGain,
           wealth: 0,
           weeklyLivingCapacity: Math.round(predictedWeeklyAllowance),
         });
@@ -534,11 +540,10 @@ export default function FinanceYearly() {
       const point: any = {
         ...s,
         fixed: s.fixed,
-        variable: s.essential + s.fun,
         income: s.income,
       };
 
-      let totalPots = 0;
+      let totalGoalPots = 0;
       const monthPotBreakdowns: Array<{ id: string; name: string; color: string; amount: number; targetBase: number }> = [];
       for (const meta of potSchedule.activeGoalMetas) {
         let amt = 0;
@@ -556,7 +561,7 @@ export default function FinanceYearly() {
           amt = Math.round(pastSum);
         }
         point[meta.goal.id] = amt;
-        totalPots += amt;
+        totalGoalPots += amt;
         if (amt > 0) {
           monthPotBreakdowns.push({
             id: meta.goal.id,
@@ -568,10 +573,41 @@ export default function FinanceYearly() {
         }
       }
 
-      point.totalPots = totalPots;
+      if (s.isFuture && s.emergency > 0) {
+        monthPotBreakdowns.unshift({
+          id: 'emergency-10pct',
+          name: 'Emergency Fund (10% Gamma)',
+          color: '#10b981',
+          amount: s.emergency,
+          targetBase: 1000,
+        });
+      }
+
+      const totalPotsWithEmergency = totalGoalPots + (s.isFuture ? s.emergency : 0);
+
+      // For future forecast months, Fun Money is strictly the leftover after Fixed + Essentials + Emergency + Goal Pots,
+      // so total outflows never exceed projected income because of Fun Money!
+      if (s.isFuture) {
+        const exactLeftoverFun = Math.max(0, s.income - s.fixed - s.essential - totalPotsWithEmergency);
+        const exactBaseFun = Math.max(0, s.expectedGamma - s.fixed - s.essential - totalPotsWithEmergency);
+        point.fun = exactLeftoverFun;
+        point.baseFunFromGamma = exactBaseFun;
+        point.baseWeeklyFun = s.daysInMonth > 0 ? (exactBaseFun / s.daysInMonth) * 7 : 0;
+        point.predictedWeeklyFun = s.daysInMonth > 0 ? (exactLeftoverFun / s.daysInMonth) * 7 : 0;
+        point.baseCardSpendCap = s.essential + exactBaseFun;
+        point.baseDailyAllowance = s.daysInMonth > 0 ? point.baseCardSpendCap / s.daysInMonth : 0;
+        point.baseWeeklyAllowance = point.baseDailyAllowance * 7;
+        point.predictedWeeklyAllowance = s.daysInMonth > 0 ? ((s.essential + exactLeftoverFun) / s.daysInMonth) * 7 : 0;
+        point.predictedDailyAllowance = point.predictedWeeklyAllowance / 7;
+        point.pots = totalPotsWithEmergency;
+      }
+
+      point.variable = s.essential + point.fun;
+      point.totalGoalPots = totalGoalPots;
+      point.totalPots = totalPotsWithEmergency;
       point.monthPotBreakdowns = monthPotBreakdowns;
-      point.totalAllocated = point.fixed + point.variable + totalPots;
-      point.surplusHeadroom = point.income - (point.fixed + s.essential + totalPots);
+      point.totalAllocated = point.fixed + point.variable + totalPotsWithEmergency;
+      point.surplusHeadroom = point.income - (point.fixed + s.essential + totalPotsWithEmergency);
 
       return point;
     });
@@ -1353,6 +1389,15 @@ export default function FinanceYearly() {
                             </div>
 
                             {/* Pot Goals Sub-List */}
+                            {item.emergency > 0 && (
+                              <div className="flex justify-between items-center pl-4 text-[11px]">
+                                <span className="flex items-center gap-1.5 text-emerald-300">
+                                  <span className="w-2 h-2 rounded-full inline-block bg-emerald-400" />
+                                  Emergency Fund (10% Gamma):
+                                </span>
+                                <span className="font-medium text-emerald-200">{fmt(item.emergency)}</span>
+                              </div>
+                            )}
                             {potSchedule.activeGoalMetas.map(meta => {
                               const amt = item[meta.goal.id] || 0;
                               if (amt <= 0) return null;
@@ -1368,13 +1413,19 @@ export default function FinanceYearly() {
                             })}
                           </div>
 
-                          {/* Net Surplus / Deficit */}
+                          {/* Leftover Fun / Budget Status */}
                           <div className="border-t border-slate-800 pt-2 flex justify-between items-center">
                             <span className="font-bold text-slate-200">
-                              {surplus >= 0 ? '🌟 Leftover Fun Surplus:' : '⚠️ Over Budget By:'}
+                              {item.isFuture
+                                ? surplus >= 0
+                                  ? '🌟 Leftover Fun Included:'
+                                  : '⚠️ Pot / Bill Shortfall:'
+                                : surplus >= 0
+                                ? '🌟 Net Cash Flow Surplus:'
+                                : '⚠️ Over Budget By:'}
                             </span>
                             <span className={`font-display font-black text-sm ${surplus >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                              {surplus >= 0 ? '+' : ''}{fmt(surplus)}
+                              {item.isFuture && surplus >= 0 ? fmt(item.fun || 0) : `${surplus >= 0 ? '+' : ''}${fmt(surplus)}`}
                             </span>
                           </div>
                         </div>
@@ -1396,8 +1447,8 @@ export default function FinanceYearly() {
                           </div>
                           <div className="flex items-center gap-1.5">
                             <span className="w-2.5 h-2.5 rounded-full bg-violet-500 inline-block" />
-                            <span className="font-medium text-slate-700">Saving Pots</span>
-                            <span className="text-[10px] text-slate-400">({potSchedule.activeGoalMetas.length} active goals)</span>
+                            <span className="font-medium text-slate-700">Emergency & Saving Pots</span>
+                            <span className="text-[10px] text-slate-400">(10% Gamma + {potSchedule.activeGoalMetas.length} goals)</span>
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
@@ -1416,7 +1467,10 @@ export default function FinanceYearly() {
                   {/* 2. Variable Living (Middle of Stack) */}
                   <Bar dataKey="variable" stackId="allocations" name="Variable Living" legendType="none" fill="#f59e0b" radius={[0, 0, 0, 0]} />
 
-                  {/* 3. Individual Saving Pot Goals (Top of Stack) */}
+                  {/* 3. Emergency Fund (10% Gamma) */}
+                  <Bar dataKey="emergency" stackId="allocations" name="Emergency Fund (10% Gamma)" legendType="none" fill="#10b981" radius={potSchedule.activeGoalMetas.length === 0 ? [4, 4, 0, 0] : [0, 0, 0, 0]} />
+
+                  {/* 4. Individual Saving Pot Goals (Top of Stack) */}
                   {potSchedule.activeGoalMetas.map((meta, idx) => (
                     <Bar
                       key={meta.goal.id}
@@ -1429,7 +1483,7 @@ export default function FinanceYearly() {
                     />
                   ))}
 
-                  {/* 4. Monthly Income Ceiling Line */}
+                  {/* 5. Monthly Income Ceiling Line */}
                   <Line
                     type="monotone"
                     dataKey="income"
@@ -1503,26 +1557,32 @@ export default function FinanceYearly() {
                             </div>
                             <div className="flex justify-between items-center">
                               <span className="flex items-center gap-1.5">
-                                <span className="w-2.5 h-2.5 rounded-full bg-pink-500 inline-block" />
-                                Fun Spend:
+                                <span className="w-2.5 h-2.5 rounded-full bg-violet-500 inline-block" />
+                                Saving Pots (incl. 10% Emergency):
                               </span>
-                              <span className="font-semibold text-pink-300">{fmt(item.fun || 0)}</span>
+                              <span className="font-semibold text-violet-300">{fmt(potsAmt)}</span>
                             </div>
                             <div className="flex justify-between items-center">
                               <span className="flex items-center gap-1.5">
-                                <span className="w-2.5 h-2.5 rounded-full bg-violet-500 inline-block" />
-                                Saving Pots:
+                                <span className="w-2.5 h-2.5 rounded-full bg-pink-500 inline-block" />
+                                {item.isFuture ? 'Leftover Fun Money:' : 'Fun Spend:'}
                               </span>
-                              <span className="font-semibold text-violet-300">{fmt(potsAmt)}</span>
+                              <span className="font-semibold text-pink-300">{fmt(item.fun || 0)}</span>
                             </div>
                           </div>
 
                           <div className="border-t border-slate-800 pt-2 flex justify-between items-center">
                             <span className="font-bold text-slate-200">
-                              {netDiff >= 0 ? 'Net Cash Flow Surplus:' : 'Net Cash Flow Deficit:'}
+                              {item.isFuture
+                                ? netDiff >= 0
+                                  ? '✓ 100% Balanced Budget:'
+                                  : '⚠️ Pot / Bill Deficit:'
+                                : netDiff >= 0
+                                ? 'Net Cash Flow Surplus:'
+                                : 'Net Cash Flow Deficit:'}
                             </span>
                             <span className={`font-display font-black text-sm ${netDiff >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                              {netDiff >= 0 ? '+' : ''}{fmt(netDiff)}
+                              {item.isFuture && netDiff === 0 ? `${fmt(item.fun || 0)} Fun + ${fmt(potsAmt)} Saved` : `${netDiff >= 0 ? '+' : ''}${fmt(netDiff)}`}
                             </span>
                           </div>
                         </div>
@@ -1534,8 +1594,8 @@ export default function FinanceYearly() {
                   <Bar dataKey="income" name="Monthly Income" fill="#10b981" radius={[4, 4, 0, 0]} />
                   <Bar dataKey="fixed" stackId="outflow" name="Fixed Bills" fill="#475569" radius={[0, 0, 0, 0]} />
                   <Bar dataKey="essential" stackId="outflow" name="Variable Essentials" fill="#f59e0b" radius={[0, 0, 0, 0]} />
-                  <Bar dataKey="fun" stackId="outflow" name="Fun Spend" fill="#ec4899" radius={[0, 0, 0, 0]} />
-                  <Bar dataKey="totalPots" stackId="outflow" name="Saving Pots" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="totalPots" stackId="outflow" name="Saving Pots" fill="#8b5cf6" radius={[0, 0, 0, 0]} />
+                  <Bar dataKey="fun" stackId="outflow" name="Leftover Fun Spend" fill="#ec4899" radius={[4, 4, 0, 0]} />
                 </BarChart>
               )}
             </ResponsiveContainer>
