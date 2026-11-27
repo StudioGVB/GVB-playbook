@@ -962,25 +962,99 @@ export default function FinanceYearly() {
                   />
                 </ComposedChart>
               ) : activeChartTab === 'cashflow' ? (
-                <BarChart data={displayedSeries} margin={{ top: 20, right: 20, left: 0, bottom: 20 }}>
+                <BarChart
+                  data={displayedSeries}
+                  margin={{ top: 20, right: 20, left: 0, bottom: 20 }}
+                  onClick={(e) => {
+                    if (e && e.activePayload && e.activePayload.length > 0) {
+                      const clicked = e.activePayload[0].payload;
+                      if (clicked?.monthKey) setSelectedMonthKey(clicked.monthKey);
+                    }
+                  }}
+                >
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                   <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={{ stroke: '#cbd5e1' }} tickLine={false} />
                   <YAxis tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} tickFormatter={(v) => `£${v >= 1000 ? `${(v/1000).toFixed(1)}k` : v}`} />
                   <RechartsTooltip
-                    formatter={(val: any, name: any, item: any) => {
-                      const isIncome = name?.toString().toLowerCase().includes('income');
-                      const label = isIncome
-                        ? (item?.payload?.isFuture ? 'Projected Income' : 'Actual Income')
-                        : 'Total Outflows';
-                      return [fmt(Number(val)), label];
+                    content={({ active, payload }) => {
+                      if (!active || !payload?.length) return null;
+                      const item = payload[0].payload;
+                      const potsAmt = item.totalPots ?? item.pots ?? 0;
+                      const totalOutflow = (item.fixed || 0) + (item.essential || 0) + (item.fun || 0) + potsAmt;
+                      const netDiff = (item.income || 0) - totalOutflow;
+
+                      return (
+                        <div className="bg-slate-900/95 backdrop-blur-md text-white p-4 rounded-2xl shadow-2xl border border-slate-800 text-xs space-y-2 min-w-[270px]">
+                          <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                            <span className="font-bold font-display text-sm">{item.fullLabel}</span>
+                            <Badge variant="outline" className={`text-[10px] ${item.isFuture ? 'text-violet-400 border-violet-800' : 'text-emerald-400 border-emerald-800'}`}>
+                              {item.type}
+                            </Badge>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2 bg-slate-800/60 p-2.5 rounded-xl">
+                            <div>
+                              <span className="text-[10px] uppercase font-bold text-emerald-400 block">
+                                {item.isFuture ? 'Projected Inflow' : 'Monthly Income'}
+                              </span>
+                              <span className="text-sm font-display font-black text-emerald-300">{fmt(item.income || 0)}</span>
+                            </div>
+                            <div className="text-right">
+                              <span className="text-[10px] uppercase font-bold text-slate-400 block">Stacked Outflows</span>
+                              <span className="text-sm font-display font-black text-slate-200">{fmt(totalOutflow)}</span>
+                            </div>
+                          </div>
+
+                          <div className="space-y-1.5 pt-1 text-slate-300">
+                            <div className="flex justify-between items-center">
+                              <span className="flex items-center gap-1.5">
+                                <span className="w-2.5 h-2.5 rounded-full bg-slate-600 inline-block" />
+                                Fixed Bills:
+                              </span>
+                              <span className="font-semibold text-slate-100">{fmt(item.fixed || 0)}</span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="flex items-center gap-1.5">
+                                <span className="w-2.5 h-2.5 rounded-full bg-amber-500 inline-block" />
+                                Variable Essentials:
+                              </span>
+                              <span className="font-semibold text-amber-300">{fmt(item.essential || 0)}</span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="flex items-center gap-1.5">
+                                <span className="w-2.5 h-2.5 rounded-full bg-pink-500 inline-block" />
+                                Fun Spend:
+                              </span>
+                              <span className="font-semibold text-pink-300">{fmt(item.fun || 0)}</span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="flex items-center gap-1.5">
+                                <span className="w-2.5 h-2.5 rounded-full bg-violet-500 inline-block" />
+                                Saving Pots:
+                              </span>
+                              <span className="font-semibold text-violet-300">{fmt(potsAmt)}</span>
+                            </div>
+                          </div>
+
+                          <div className="border-t border-slate-800 pt-2 flex justify-between items-center">
+                            <span className="font-bold text-slate-200">
+                              {netDiff >= 0 ? 'Net Cash Flow Surplus:' : 'Net Cash Flow Deficit:'}
+                            </span>
+                            <span className={`font-display font-black text-sm ${netDiff >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                              {netDiff >= 0 ? '+' : ''}{fmt(netDiff)}
+                            </span>
+                          </div>
+                        </div>
+                      );
                     }}
-                    contentStyle={{ backgroundColor: 'rgba(15, 23, 42, 0.95)', borderRadius: '12px', border: '1px solid #1e293b', color: '#fff', fontSize: '12px' }}
-                    labelStyle={{ color: '#94a3b8', fontWeight: 600, marginBottom: '4px' }}
                   />
                   <Legend verticalAlign="top" height={36} iconType="circle" />
                   <ReferenceLine x={format(now, 'MMM')} stroke="#8b5cf6" strokeDasharray="3 3" />
                   <Bar dataKey="income" name="Monthly Income" fill="#10b981" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="totalSpend" name="Total Outflows" fill="#64748b" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="fixed" stackId="outflow" name="Fixed Bills" fill="#475569" radius={[0, 0, 0, 0]} />
+                  <Bar dataKey="essential" stackId="outflow" name="Variable Essentials" fill="#f59e0b" radius={[0, 0, 0, 0]} />
+                  <Bar dataKey="fun" stackId="outflow" name="Fun Spend" fill="#ec4899" radius={[0, 0, 0, 0]} />
+                  <Bar dataKey="totalPots" stackId="outflow" name="Saving Pots" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
                 </BarChart>
               ) : activeChartTab === 'wealth' ? (
                 <AreaChart data={displayedSeries} margin={{ top: 20, right: 20, left: 0, bottom: 20 }}>
