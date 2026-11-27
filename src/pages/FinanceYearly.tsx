@@ -45,7 +45,7 @@ export default function FinanceYearly() {
   const tripsList = useMemo(() => trips || [], [trips]);
 
   // Primary chart mode: default to the full waterfall stack
-  const [activeChartTab, setActiveChartTab] = useState<'stack' | 'cashflow' | 'wealth' | 'capacity'>('stack');
+  const [activeChartTab, setActiveChartTab] = useState<'stack' | 'cashflow'>('stack');
   const [timeHorizonView, setTimeHorizonView] = useState<'future6' | 'all12'>('all12');
   const [forecastScenario, setForecastScenario] = useState<'conservative' | 'expected'>('expected');
   const [selectedMonthKey, setSelectedMonthKey] = useState<string | null>(null);
@@ -1265,12 +1265,6 @@ export default function FinanceYearly() {
                 <TabsTrigger value="cashflow" className="text-xs rounded-lg px-3 py-1.5 font-medium">
                   Inflow vs Outflow
                 </TabsTrigger>
-                <TabsTrigger value="wealth" className="text-xs rounded-lg px-3 py-1.5 font-medium">
-                  Wealth Growth
-                </TabsTrigger>
-                <TabsTrigger value="capacity" className="text-xs rounded-lg px-3 py-1.5 font-medium">
-                  Living Capacity
-                </TabsTrigger>
               </TabsList>
             </Tabs>
           </div>
@@ -1443,7 +1437,7 @@ export default function FinanceYearly() {
                     activeDot={{ r: 6 }}
                   />
                 </ComposedChart>
-              ) : activeChartTab === 'cashflow' ? (
+              ) : (
                 <BarChart
                   data={displayedSeries}
                   margin={{ top: 20, right: 20, left: 0, bottom: 20 }}
@@ -1537,31 +1531,6 @@ export default function FinanceYearly() {
                   <Bar dataKey="essential" stackId="outflow" name="Variable Essentials" fill="#f59e0b" radius={[0, 0, 0, 0]} />
                   <Bar dataKey="fun" stackId="outflow" name="Fun Spend" fill="#ec4899" radius={[0, 0, 0, 0]} />
                   <Bar dataKey="totalPots" stackId="outflow" name="Saving Pots" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              ) : activeChartTab === 'wealth' ? (
-                <AreaChart data={displayedSeries} margin={{ top: 20, right: 20, left: 0, bottom: 20 }}>
-                  <defs>
-                    <linearGradient id="wealthGradient2" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0.0}/>
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                  <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={{ stroke: '#cbd5e1' }} tickLine={false} />
-                  <YAxis tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} tickFormatter={(v) => `£${(v/1000).toFixed(1)}k`} />
-                  <RechartsTooltip />
-                  <ReferenceLine x={format(now, 'MMM')} stroke="#8b5cf6" strokeDasharray="3 3" />
-                  <ReferenceLine y={1000} stroke="#f43f5e" strokeDasharray="3 3" label={{ value: '£1,000 Emergency Floor', position: 'right', fill: '#f43f5e', fontSize: 9 }} />
-                  <Area type="monotone" dataKey="wealth" name="Liquid Cash & Pot Reserves" stroke="#8b5cf6" strokeWidth={2.5} fillOpacity={1} fill="url(#wealthGradient2)" />
-                </AreaChart>
-              ) : (
-                <BarChart data={displayedSeries} margin={{ top: 20, right: 20, left: 0, bottom: 20 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                  <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={{ stroke: '#cbd5e1' }} tickLine={false} />
-                  <YAxis tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} tickFormatter={(v) => `£${v}`} />
-                  <RechartsTooltip />
-                  <ReferenceLine x={format(now, 'MMM')} stroke="#8b5cf6" strokeDasharray="3 3" />
-                  <Bar dataKey="weeklyLivingCapacity" name="Weekly Living Spend" fill="#f59e0b" radius={[4, 4, 0, 0]} />
                 </BarChart>
               )}
             </ResponsiveContainer>
