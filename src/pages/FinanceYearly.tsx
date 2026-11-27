@@ -820,6 +820,388 @@ export default function FinanceYearly() {
       </div>
 
       {/* ========================================================= */}
+      {/* NEXT MONTH FINANCIAL PREDICTION & VIGILANCE BRIEFING      */}
+      {/* ========================================================= */}
+      {(() => {
+        const futureSeries = stackedChartData.filter((s: any) => s.isFuture);
+        const predMonth: any =
+          (selectedMonthKey && futureSeries.find((s: any) => s.monthKey === selectedMonthKey)) ||
+          futureSeries[0] ||
+          stackedChartData[stackedChartData.length - 1];
+
+        if (!predMonth) return null;
+
+        const histMonthlyFun = past6Stats.avgFun || 300;
+        const histWeeklyFun = histMonthlyFun / 4.33;
+        const baseWeeklyEss = predMonth.daysInMonth > 0 ? (predMonth.essential / predMonth.daysInMonth) * 7 : 0;
+        const baseWeeklyFun = predMonth.baseWeeklyFun ?? 0;
+        const totalWeeklyFun = predMonth.predictedWeeklyFun ?? baseWeeklyFun;
+        const funDiffWeekly = totalWeeklyFun - histWeeklyFun;
+        const baseFunDiffWeekly = baseWeeklyFun - histWeeklyFun;
+        const potShareOfGamma = predMonth.expectedGamma > 0
+          ? Math.round((predMonth.rawScheduledPots / predMonth.expectedGamma) * 100)
+          : 0;
+
+        const isPotDeficit = predMonth.potShortfallFromGamma > 0.5;
+        const isVigilantTight = !isPotDeficit && (totalWeeklyFun < histWeeklyFun * 0.95 || baseWeeklyFun < 45);
+
+        const statusBadge = isPotDeficit
+          ? {
+              label: '🚨 Over-Committed — Pot Shortfall on Gamma Alone',
+              cls: 'bg-rose-100 text-rose-900 border-rose-300',
+              boxCls: 'bg-rose-50/80 border-rose-200 text-rose-950',
+            }
+          : isVigilantTight
+          ? {
+              label: '⚠️ Vigilance Advised — Tight Fun Money Month',
+              cls: 'bg-amber-100 text-amber-900 border-amber-300',
+              boxCls: 'bg-amber-50/80 border-amber-200 text-amber-950',
+            }
+          : {
+              label: '✅ Feasible & Comfortable Headroom',
+              cls: 'bg-emerald-100 text-emerald-900 border-emerald-300',
+              boxCls: 'bg-emerald-50/80 border-emerald-200 text-emerald-950',
+            };
+
+        return (
+          <Card className="rounded-3xl border-2 border-violet-200/90 shadow-md bg-gradient-to-br from-violet-50/40 via-white to-sky-50/30 overflow-hidden">
+            <CardHeader className="p-6 pb-4 border-b border-violet-100/80 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <span className="p-2 rounded-xl bg-gradient-to-tr from-violet-600 to-[#FF2EB8] text-white shadow-xs">
+                    <Sparkles className="w-4 h-4" />
+                  </span>
+                  <CardTitle className="text-lg sm:text-xl font-display font-black text-slate-900">
+                    {predMonth.fullLabel} Financial Prediction & Feasibility Briefing
+                  </CardTitle>
+                  <Badge className={`border font-bold text-[11px] px-2.5 py-0.5 ${statusBadge.cls}`}>
+                    {statusBadge.label}
+                  </Badge>
+                </div>
+                <p className="text-xs text-slate-500 mt-1">
+                  Complete 4-step Gamma waterfall forecast, predicted weekly spending allowance ({predMonth.daysInMonth} days), and fun-money vigilance check against your historical habits
+                </p>
+              </div>
+
+              {/* Quick Forecast Month Switcher */}
+              {futureSeries.length > 1 && (
+                <div className="flex items-center gap-1 bg-slate-100/90 p-1 rounded-xl self-start lg:self-auto flex-wrap">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-2">
+                    Inspect Month:
+                  </span>
+                  {futureSeries.map((fm: any, idx: number) => {
+                    const isSel = fm.monthKey === predMonth.monthKey;
+                    return (
+                      <button
+                        key={fm.monthKey}
+                        onClick={() => setSelectedMonthKey(fm.monthKey)}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
+                          isSel
+                            ? 'bg-violet-600 text-white shadow-xs'
+                            : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                        }`}
+                      >
+                        {idx === 0 ? `Next (${fm.label})` : fm.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </CardHeader>
+
+            <CardContent className="p-6 space-y-6">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* PANEL 1: 4-STEP GAMMA WATERFALL & INCOME PREDICTION */}
+                <div className="rounded-2xl border border-slate-200/90 bg-white p-5 space-y-3.5 shadow-2xs flex flex-col justify-between">
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+                      <div>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-violet-600 block">
+                          Step 1 — Monthly Waterfall
+                        </span>
+                        <h3 className="text-sm font-display font-bold text-slate-900">
+                          {predMonth.fullLabel} Income & Deductions
+                        </h3>
+                      </div>
+                      <Badge variant="outline" className="text-[10px] bg-slate-50 text-slate-700 border-slate-200 font-semibold">
+                        {predMonth.daysInMonth} Days
+                      </Badge>
+                    </div>
+
+                    <div className="space-y-2 text-xs">
+                      <div className="flex justify-between items-center p-2 rounded-xl bg-emerald-50/70 border border-emerald-200/70">
+                        <span className="font-bold text-emerald-900">Expected Gamma Salary:</span>
+                        <span className="font-display font-black text-sm text-emerald-700">
+                          {fmtExact(predMonth.expectedGamma)}
+                        </span>
+                      </div>
+
+                      <div className="flex justify-between items-center px-1 pt-1">
+                        <span className="text-slate-600 font-medium">1. Expected Fixed Bills [x]:</span>
+                        <span className="font-bold text-slate-900">-{fmtExact(predMonth.fixed)}</span>
+                      </div>
+
+                      <div className="flex justify-between items-center px-1">
+                        <span className="text-slate-600 font-medium">2. Variable Essentials [y]:</span>
+                        <span className="font-bold text-amber-700">-{fmtExact(predMonth.essential)}</span>
+                      </div>
+
+                      <div className="p-2.5 rounded-xl bg-violet-50/70 border border-violet-200/70 space-y-1.5">
+                        <div className="flex justify-between items-center">
+                          <span className="text-violet-900 font-bold">
+                            3. Scheduled Savings Pots [z]:
+                          </span>
+                          <span className="font-extrabold text-violet-700">
+                            -{fmtExact(predMonth.pots)}
+                          </span>
+                        </div>
+                        {predMonth.rawScheduledPots > predMonth.pots && (
+                          <p className="text-[10px] text-rose-600 font-semibold">
+                            Full pot schedule requires {fmtExact(predMonth.rawScheduledPots)} ({fmtExact(predMonth.potShortfallFromGamma)} above Gamma capacity)
+                          </p>
+                        )}
+                        {Array.isArray(predMonth.monthPotBreakdowns) && predMonth.monthPotBreakdowns.length > 0 && (
+                          <div className="flex flex-wrap gap-1 pt-0.5">
+                            {predMonth.monthPotBreakdowns.map((p: any) => (
+                              <span
+                                key={p.id}
+                                className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-white text-violet-900 border border-violet-200/80"
+                              >
+                                <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: p.color }} />
+                                {p.name}: <strong>{fmt(p.amount)}</strong>
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="flex justify-between items-center px-1 pt-0.5">
+                        <span className="text-slate-700 font-bold">4. Leftover Base Fun Money [a]:</span>
+                        <span className="font-display font-black text-sm text-[#FF2EB8]">
+                          {fmtExact(predMonth.baseFunFromGamma)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="pt-3 border-t border-slate-100 space-y-1.5 text-xs">
+                    <div className="flex justify-between items-center text-slate-600">
+                      <span>+ Expected Venture Advisory (£70/wk):</span>
+                      <span className="font-bold text-emerald-700">
+                        +{fmtExact(predMonth.expectedSideIncome)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center text-slate-600">
+                      <span>Total Projected Monthly Income:</span>
+                      <span className="font-display font-black text-slate-900">
+                        {fmtExact(predMonth.income)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center text-slate-600">
+                      <span>Projected Closing Liquid Wealth:</span>
+                      <span className="font-display font-bold text-violet-700">
+                        {fmt(predMonth.wealth)} (+{fmt(predMonth.netSurplus)} saved)
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* PANEL 2: PREDICTED WEEKLY & DAILY SPENDING ALLOWANCE */}
+                <div className="rounded-2xl border border-slate-200/90 bg-white p-5 space-y-4 shadow-2xs flex flex-col justify-between">
+                  <div className="space-y-3.5">
+                    <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+                      <div>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 block">
+                          Step 2 — Card Allowance Math
+                        </span>
+                        <h3 className="text-sm font-display font-bold text-slate-900">
+                          Predicted Weekly Spending Allowance
+                        </h3>
+                      </div>
+                      <Wallet className="w-4 h-4 text-emerald-600" />
+                    </div>
+
+                    {/* Hero Weekly Allowance Callout */}
+                    <div className="p-4 rounded-2xl bg-gradient-to-br from-slate-900 via-slate-800 to-violet-950 text-white space-y-1.5 shadow-sm">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] uppercase tracking-wider font-bold text-emerald-300">
+                          Predicted Weekly Allowance ({predMonth.label})
+                        </span>
+                        <Badge className="bg-emerald-500/20 text-emerald-200 border-emerald-400/30 text-[10px]">
+                          {fmtExact(predMonth.predictedDailyAllowance)}/day
+                        </Badge>
+                      </div>
+                      <div className="flex items-baseline gap-2">
+                        <span className="text-3xl font-display font-black tracking-tight text-white">
+                          {fmtExact(predMonth.predictedWeeklyAllowance)}
+                        </span>
+                        <span className="text-xs text-slate-300 font-medium">/ week</span>
+                      </div>
+                      <p className="text-[11px] text-slate-300 leading-snug">
+                        {forecastScenario === 'expected'
+                          ? `Includes ${fmtExact(predMonth.baseWeeklyAllowance)}/wk from Gamma + £70.00/wk Venture Advisory`
+                          : `Conservative (Gamma only): ${fmtExact(predMonth.baseDailyAllowance)}/day × 7 days`}
+                      </p>
+                    </div>
+
+                    {/* Step-by-Step Daily & Weekly Math Receipt */}
+                    <div className="space-y-2 text-xs">
+                      <div className="flex justify-between items-center">
+                        <span className="text-slate-500 font-medium">
+                          Base Card Spend Cap ([y] + [a]):
+                        </span>
+                        <span className="font-bold text-slate-900">
+                          {fmtExact(predMonth.baseCardSpendCap)} / mo
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-slate-500 font-medium">
+                          ÷ {predMonth.daysInMonth} Days in {predMonth.label} (Base Daily):
+                        </span>
+                        <span className="font-bold text-slate-900">
+                          {fmtExact(predMonth.baseDailyAllowance)} / day
+                        </span>
+                      </div>
+                      <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200/70 space-y-1">
+                        <div className="flex justify-between items-center font-semibold text-slate-800">
+                          <span>Base 7-Day Weekly Cap (Gamma):</span>
+                          <span>{fmtExact(predMonth.baseWeeklyAllowance)} / wk</span>
+                        </div>
+                        <div className="flex justify-between items-center text-[11px] text-slate-500 pl-2">
+                          <span>• Essentials Share ([y] ÷ {predMonth.daysInMonth} × 7):</span>
+                          <span className="font-semibold text-amber-700">{fmtExact(baseWeeklyEss)}/wk</span>
+                        </div>
+                        <div className="flex justify-between items-center text-[11px] text-slate-500 pl-2">
+                          <span>• Base Fun Share ([a] ÷ {predMonth.daysInMonth} × 7):</span>
+                          <span className="font-semibold text-[#FF2EB8]">{fmtExact(baseWeeklyFun)}/wk</span>
+                        </div>
+                      </div>
+                      <div className="flex justify-between items-center pt-0.5">
+                        <span className="text-slate-600 font-medium">
+                          + Weekly Venture Advisory Retainer:
+                        </span>
+                        <span className="font-bold text-emerald-700">
+                          +{fmtExact(predMonth.weeklySideIncome)} / wk
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="pt-2.5 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
+                    <span>Ring-Fenced Living Card Balance ([x]+[y]+[a]):</span>
+                    <span className="font-display font-bold text-slate-900">
+                      {fmtExact(predMonth.fixed + predMonth.baseCardSpendCap)}
+                    </span>
+                  </div>
+                </div>
+
+                {/* PANEL 3: FEASIBILITY & FUN MONEY VIGILANCE DIAGNOSTIC */}
+                <div className="rounded-2xl border border-slate-200/90 bg-white p-5 space-y-4 shadow-2xs flex flex-col justify-between">
+                  <div className="space-y-3.5">
+                    <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+                      <div>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-amber-600 block">
+                          Step 3 — Feasibility & Vigilance Check
+                        </span>
+                        <h3 className="text-sm font-display font-bold text-slate-900">
+                          Fun Money vs. Your Typical Habits
+                        </h3>
+                      </div>
+                      <AlertCircle className={`w-4 h-4 ${isPotDeficit ? 'text-rose-600' : isVigilantTight ? 'text-amber-600' : 'text-emerald-600'}`} />
+                    </div>
+
+                    {/* Diagnostic Alert Box */}
+                    <div className={`p-3.5 rounded-xl border text-xs space-y-1.5 leading-relaxed ${statusBadge.boxCls}`}>
+                      {isPotDeficit ? (
+                        <>
+                          <p className="font-bold">
+                            🚨 High Savings Pot Load ({potShareOfGamma}% of Gamma Salary)
+                          </p>
+                          <p>
+                            Your scheduled savings pots ({fmtExact(predMonth.rawScheduledPots)}) plus fixed bills and essentials exceed your {fmtExact(predMonth.expectedGamma)} Gamma salary by <strong>{fmtExact(predMonth.potShortfallFromGamma)}</strong>. Base Fun Money from Gamma is squeezed to <strong>£0.00</strong>, meaning your fun spending relies on your <strong>£70/wk Venture Advisory</strong> (or extending a pot deadline).
+                          </p>
+                        </>
+                      ) : isVigilantTight ? (
+                        <>
+                          <p className="font-bold">
+                            ⚠️ Stay Vigilant on Fun Spending in {predMonth.fullLabel}
+                          </p>
+                          <p>
+                            Because <strong>{fmtExact(predMonth.pots)}</strong> ({potShareOfGamma}% of Gamma) goes straight into your savings pots on payday, your Base Fun Money is <strong>{fmtExact(baseWeeklyFun)}/wk</strong> (or <strong>{fmtExact(totalWeeklyFun)}/wk</strong> with Venture Advisory).
+                            {funDiffWeekly < 0
+                              ? ` That is ${fmtExact(Math.abs(funDiffWeekly))}/wk lower than your typical historical fun spend (${fmtExact(histWeeklyFun)}/wk).`
+                              : ` Without Venture Advisory, your base fun allowance is ${fmtExact(Math.abs(baseFunDiffWeekly))}/wk below your usual ${fmtExact(histWeeklyFun)}/wk pace.`}
+                          </p>
+                        </>
+                      ) : (
+                        <>
+                          <p className="font-bold">
+                            ✅ 100% Feasible — Bills, Pots & Fun Money Covered
+                          </p>
+                          <p>
+                            After ring-fencing <strong>{fmtExact(predMonth.fixed)}</strong> for Fixed Bills, <strong>{fmtExact(predMonth.essential)}</strong> for Essentials, and transferring <strong>{fmtExact(predMonth.pots)}</strong> to your Savings Pots, you still have <strong>{fmtExact(totalWeeklyFun)}/wk</strong> for Fun Money ({fmtExact( Math.max(0, funDiffWeekly) )}/wk above your typical {fmtExact(histWeeklyFun)}/wk fun spend).
+                          </p>
+                        </>
+                      )}
+                    </div>
+
+                    {/* Visual Bar Comparison: Predicted Weekly Fun vs Historical Typical Weekly Fun */}
+                    <div className="space-y-2.5 text-xs pt-1">
+                      <div>
+                        <div className="flex justify-between items-center mb-1">
+                          <span className="text-slate-600 font-medium">Base Fun Allowance (Gamma Only):</span>
+                          <span className="font-bold text-[#FF2EB8]">{fmtExact(baseWeeklyFun)}/wk ({fmt(predMonth.baseFunFromGamma)}/mo)</span>
+                        </div>
+                        <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
+                          <div
+                            className="h-full bg-[#FF2EB8] rounded-full transition-all"
+                            style={{ width: `${Math.min(100, (baseWeeklyFun / Math.max(histWeeklyFun, totalWeeklyFun, 1)) * 100)}%` }}
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="flex justify-between items-center mb-1">
+                          <span className="text-slate-600 font-medium">Total Predicted Fun (incl. Venture):</span>
+                          <span className="font-bold text-emerald-700">{fmtExact(totalWeeklyFun)}/wk ({fmt(predMonth.fun)}/mo)</span>
+                        </div>
+                        <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
+                          <div
+                            className="h-full bg-emerald-500 rounded-full transition-all"
+                            style={{ width: `${Math.min(100, (totalWeeklyFun / Math.max(histWeeklyFun, totalWeeklyFun, 1)) * 100)}%` }}
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="flex justify-between items-center mb-1">
+                          <span className="text-slate-500 font-medium">Your Typical Historical Fun Spend:</span>
+                          <span className="font-bold text-slate-700">{fmtExact(histWeeklyFun)}/wk ({fmt(histMonthlyFun)}/mo)</span>
+                        </div>
+                        <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
+                          <div
+                            className="h-full bg-slate-500 rounded-full transition-all"
+                            style={{ width: `${Math.min(100, (histWeeklyFun / Math.max(histWeeklyFun, totalWeeklyFun, 1)) * 100)}%` }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="pt-2.5 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
+                    <span>Savings Pot Load (% of Gamma):</span>
+                    <span className={`font-display font-bold ${potShareOfGamma >= 35 ? 'text-amber-700' : 'text-violet-700'}`}>
+                      {potShareOfGamma}% ({fmtExact(predMonth.pots)} of {fmtExact(predMonth.expectedGamma)})
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })()}
+
+      {/* ========================================================= */}
       {/* FEATURED: SAVING POT GOAL PREDICTIONS & OUTFLOW STACK     */}
       {/* AGAINST PROJECTED INCOME                                  */}
       {/* ========================================================= */}
