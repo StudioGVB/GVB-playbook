@@ -133,6 +133,16 @@ export interface PotScheduleResult {
     isLighterThisMonth: boolean;
     isBoostedThisMonth: boolean;
   } | null;
+  /** Returns the full pot allocation schedule point for a specific month */
+  getScheduleForMonth: (targetMonth?: Date) => {
+    monthKey: string;
+    total: number;
+    totalScheduledMonthly: number;
+    fixedTotal: number;
+    dynamicTotal: number;
+    contributions: MonthPotContribution[];
+    point: MonthSeriesPoint;
+  } | null;
 }
 
 export function computeSpentByGoalBase(
@@ -490,6 +500,21 @@ export function computeMonthlyPotSchedule(params: {
     };
   };
 
+  const getScheduleForMonth = (targetMonth: Date = today) => {
+    const targetKey = format(targetMonth, 'yyyy-MM');
+    const found = series.find(s => s.monthKey === targetKey);
+    if (!found) return null;
+    return {
+      monthKey: found.monthKey,
+      total: found.total,
+      totalScheduledMonthly: found.total,
+      fixedTotal: found.fixedTotal,
+      dynamicTotal: found.dynamicTotal,
+      contributions: found.contributions,
+      point: found,
+    };
+  };
+
   const fixedCount = metas.filter(m => m.pacingMode === 'fixed').length;
   const dynamicCount = metas.filter(m => m.pacingMode === 'dynamic').length;
 
@@ -500,5 +525,6 @@ export function computeMonthlyPotSchedule(params: {
     fixedCount,
     dynamicCount,
     getGoalPlanForMonth,
+    getScheduleForMonth,
   };
 }

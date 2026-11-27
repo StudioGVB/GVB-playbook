@@ -346,8 +346,11 @@ export default function FinanceYearly() {
         });
       } else {
         const mStart = m.date;
-        const potPlan = potSchedule.getScheduleForMonth(mStart);
-        const scheduledPots = potPlan?.totalScheduledMonthly ?? past6Stats.avgPots;
+        const targetMonthKey = format(mStart, 'yyyy-MM');
+        const potPlan = typeof potSchedule?.getScheduleForMonth === 'function'
+          ? potSchedule.getScheduleForMonth(mStart)
+          : potSchedule?.months?.find((s: any) => s.monthKey === targetMonthKey);
+        const scheduledPots = potPlan?.totalScheduledMonthly ?? (potPlan as any)?.total ?? past6Stats.avgPots;
 
         const hasTrip = trips.some(t => {
           const tStart = parseUkDate(t.start_date);
