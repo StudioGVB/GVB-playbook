@@ -27,7 +27,7 @@ import WeeklyPoolSavingsCard from '@/components/finance/WeeklyPoolSavingsCard';
 import PotLinkedExpensesDialog from '@/components/finance/PotLinkedExpensesDialog';
 import { format, startOfMonth, endOfMonth, parseISO, isSameMonth, startOfWeek, addWeeks, differenceInCalendarDays } from 'date-fns';
 import { detectPaycheck, calculatePaycheckWaterfall, isPaycheckProcessed, markPaycheckProcessed, unmarkPaycheckProcessed, savePaycheckAllocationMeta, getPaycheckAllocationMeta } from '@/lib/paycheckEngine';
-import { baseAmt, parseUkDate } from '@/lib/financeUtils';
+import { baseAmt, parseUkDate, getEffectiveTxMonthDate } from '@/lib/financeUtils';
 import { evaluatePoolFeasibility } from '@/lib/feasibilityEngine';
 import { computeEmergencyLadder } from '@/lib/emergencyLadderEngine';
 import EmergencyLadderModal from '@/components/finance/EmergencyLadderModal';
@@ -94,7 +94,8 @@ import { useFinanceAssumptions } from '@/hooks/useFinanceAssumptions';
 import { useFixedExpenses } from '@/hooks/useFixedExpenses';
 import { useWeekTypes } from '@/hooks/useWeekTypes';
 import { useFinanceTrips } from '@/hooks/useFinanceTrips';
-import { computePolicySnapshot, computeTripSpent, computeTypicalWeeklyVariableSpend, computeWeekVariableSpend, evaluateMidMonthPotFeasibility, isInternalTransferTx, computeWeeksInMonth } from '@/lib/policyEngine';
+import { computePolicySnapshot, computeTripSpent, computeTypicalWeeklyVariableSpend, computeWeekVariableSpend, evaluateMidMonthPotFeasibility, isInternalTransferTx, computeWeeksInMonth, isInAnyTrip } from '@/lib/policyEngine';
+import { deduplicateTransactions } from '@/lib/deduplication';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -546,46 +547,60 @@ export default function FinancePoolsPage() {
   const monthlyTotalIncome = gammaBaseIncome + extraMonthlyIncome;
 
   // Track living expenses already paid so far this month (Fixed Bills / Rent, Essentials, Discretionary/Fun)
-  // When bills like rent are paid on the 1st, they are paid OUT OF this month's living reserve.
-  // Ring-fencing must only reserve the REMAINING unpaid bills so emergency cash is never drained by paid rent.
+  // Uses the exact same deduplicated transaction set, effective month date, refund offsets, and fixed-bill
+  // overage split as FinanceMonthly.tsx so "Total Spent So Far" matches to the exact penny across both pages!
   const { fixedPaidSoFar, essentialSpentSoFar, funSpentSoFar } = useMemo(() => {
-    const curStart = startOfMonth(new Date());
-    const curEnd = endOfMonth(new Date());
+    const curStart = startOfMonth(targetMonthDate);
+    const curEnd = endOfMonth(targetMonthDate);
+    const { cleaned: dedupedTxs } = deduplicateTransactions(finance.transactions);
+    const catMap = new Map(finance.categories.map(c => [c.id, c]));
+
     let fixedPaid = 0;
     let essentialSpent = 0;
     let funSpent = 0;
 
-    for (const tx of finance.transactions) {
-      if (tx.amount >= 0 || tx.is_transfer || tx.is_reimbursable) continue;
+    for (const tx of dedupedTxs) {
+      if (tx.is_transfer || tx.is_reimbursable) continue;
       if (tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') continue;
       if (isInternalTransferTx(tx)) continue;
       if ((tx as any).goal_id || (tx as any).is_travel_spend || (tx as any).trip_id) continue;
 
-      const d = parseUkDate(tx.posted_at);
+      const d = getEffectiveTxMonthDate(tx, catMap);
       if (d < curStart || d > curEnd) continue;
 
-      const cat = finance.categories.find(c => c.id === tx.category_id);
-      if (cat?.exclude_from_reports || cat?.type === 'income' || cat?.type === 'transfer') continue;
+      const cat = catMap.get(tx.category_id || '');
+      if (cat?.exclude_from_reports) continue;
 
       const amt = Math.abs(baseAmt(tx));
-      const rawText = `${tx.merchant || ''} ${tx.description || ''} ${cat?.name || ''}`.toLowerCase();
 
-      const isFixed = Boolean(
-        (tx as any).fixed_expense_id ||
-        tx.is_fixed ||
-        cat?.type === 'fixed' ||
-        (amt >= 100 && /\b(rent|landlord|tenancy|accommodation)\b/i.test(rawText)) ||
-        fixedExpenses.some(e => {
-          const eName = (e.name || '').toLowerCase().trim();
-          if (!eName || eName.length < 3) return false;
-          const feAmt = finance.convertToBase(e.amount, e.currency);
-          const amountClose = Math.abs(amt - feAmt) <= Math.max(2, feAmt * 0.1);
-          return amountClose && rawText.includes(eName);
-        })
-      );
+      // Handle refunds (offsetting variable spend identically to Monthly Report)
+      if ((tx as any).is_refund && tx.amount > 0) {
+        if (essentialCatIds.has(tx.category_id || '') || cat?.is_essential) {
+          essentialSpent = Math.max(0, essentialSpent - amt);
+        } else {
+          funSpent = Math.max(0, funSpent - amt);
+        }
+        continue;
+      }
+
+      if (tx.amount >= 0) continue;
+      if (cat?.type === 'income' || cat?.type === 'transfer') continue;
+
+      const isFixed = Boolean((tx as any).fixed_expense_id || tx.is_fixed || cat?.type === 'fixed');
 
       if (isFixed) {
-        fixedPaid += amt;
+        const overage = Number((tx as any).fixed_overage_amount) || 0;
+        const covered = (tx as any).fixed_covered_amount !== undefined
+          ? Number((tx as any).fixed_covered_amount)
+          : Math.max(0, amt - overage);
+        fixedPaid += covered;
+        if (overage > 0) {
+          if (essentialCatIds.has(tx.category_id || '') || cat?.is_essential) {
+            essentialSpent += overage;
+          } else {
+            funSpent += overage;
+          }
+        }
       } else if (essentialCatIds.has(tx.category_id || '') || cat?.is_essential) {
         essentialSpent += amt;
       } else {
@@ -594,7 +609,7 @@ export default function FinancePoolsPage() {
     }
 
     return { fixedPaidSoFar: fixedPaid, essentialSpentSoFar: essentialSpent, funSpentSoFar: funSpent };
-  }, [finance.transactions, finance.categories, fixedExpenses, finance.convertToBase, essentialCatIds]);
+  }, [finance.transactions, finance.categories, essentialCatIds, targetMonthDate]);
 
   // In the current month, removing a future start_date mid-month must NEVER backtrack and
   // claw back money that has already been spent or reserved for this month's living costs.

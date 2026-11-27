@@ -22,7 +22,7 @@ import { useFixedExpenses, FREQ_TO_MONTHLY } from '@/hooks/useFixedExpenses';
 import { useWeeklyBoosts } from '@/hooks/useWeeklyBoosts';
 import { useFinanceTrips } from '@/hooks/useFinanceTrips';
 import { useWeekTypes } from '@/hooks/useWeekTypes';
-import { computePolicySnapshot, computeRequiredGoalSavingsMonthly, computeWeekVariableSpend, isInternalTransferTx } from '@/lib/policyEngine';
+import { computePolicySnapshot, computeRequiredGoalSavingsMonthly, computeWeekVariableSpend, isInternalTransferTx, isInAnyTrip } from '@/lib/policyEngine';
 import {
   computeMonthDailyAllowancePlan,
   computeMonthStashSweepSummary,
