@@ -220,9 +220,19 @@ export default function FinanceMonthly() {
       const cat = catMap.get(tx.category_id || '');
       const rawText = `${tx.merchant || ''} ${tx.description || ''}`.toLowerCase();
       const catNameLower = (cat?.name || '').toLowerCase();
-      const isIncomeCategory = cat?.type === 'income';
-      const isGabriellaIncome = rawText.includes('gabriella') && tx.amount > 0 && !tx.transfer_group_id && !tx.is_transfer;
-      const isIncomeKeyword = rawText.includes('batchbase') || rawText.includes('batch base') || rawText.includes('payroll') || rawText.includes('salary') || rawText.includes('venture') || rawText.includes('etsy') || isGabriellaIncome;
+      const isIncomeCategory = cat?.type === 'income' && catNameLower !== 'income';
+      const isIncomeKeyword =
+        rawText.includes('batchbase') ||
+        rawText.includes('batch base') ||
+        rawText.includes('payroll') ||
+        rawText.includes('salary') ||
+        rawText.includes('venture') ||
+        rawText.includes('advisory') ||
+        rawText.includes('back pocket') ||
+        rawText.includes('bpg') ||
+        rawText.includes('eleven') ||
+        rawText.includes('11labs') ||
+        rawText.includes('etsy');
 
       if ((tx as any).is_refund && tx.amount > 0) {
         const amt = Math.abs(baseAmt(tx));
@@ -236,8 +246,12 @@ export default function FinanceMonthly() {
         continue;
       }
 
-      if (tx.amount > 0 && (!tx.is_transfer || isIncomeCategory || isIncomeKeyword)) {
-        if (!tx.is_reimbursable && (cat?.type !== 'transfer' || isIncomeKeyword)) {
+      if (isInternalTransferTx(tx) || tx.is_transfer || tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') {
+        continue;
+      }
+
+      if (tx.amount > 0 && (isIncomeCategory || isIncomeKeyword)) {
+        if (!tx.is_reimbursable && cat?.type !== 'transfer') {
           const txAmt = baseAmt(tx);
           const isMonthlyGammaSalary =
             txAmt >= 1000 &&
@@ -448,9 +462,19 @@ export default function FinanceMonthly() {
       const cat = catMap.get(tx.category_id || '');
       const rawText = `${tx.merchant || ''} ${tx.description || ''}`.toLowerCase();
       const catNameLower = (cat?.name || '').toLowerCase();
-      const isIncomeCategory = cat?.type === 'income';
-      const isGabriellaIncome = rawText.includes('gabriella') && tx.amount > 0 && !tx.transfer_group_id && !tx.is_transfer;
-      const isIncomeKeyword = rawText.includes('batchbase') || rawText.includes('batch base') || rawText.includes('payroll') || rawText.includes('salary') || rawText.includes('venture') || rawText.includes('etsy') || isGabriellaIncome;
+      const isIncomeCategory = cat?.type === 'income' && catNameLower !== 'income';
+      const isIncomeKeyword =
+        rawText.includes('batchbase') ||
+        rawText.includes('batch base') ||
+        rawText.includes('payroll') ||
+        rawText.includes('salary') ||
+        rawText.includes('venture') ||
+        rawText.includes('advisory') ||
+        rawText.includes('back pocket') ||
+        rawText.includes('bpg') ||
+        rawText.includes('eleven') ||
+        rawText.includes('11labs') ||
+        rawText.includes('etsy');
       if ((tx as any).is_refund && tx.amount > 0) {
         const amt = Math.abs(baseAmt(tx));
         if (essentialCatIds.has(tx.category_id || '')) {
@@ -460,8 +484,11 @@ export default function FinanceMonthly() {
         }
         continue;
       }
-      if (tx.amount > 0 && (!tx.is_transfer || isIncomeCategory || isIncomeKeyword)) {
-        if (!tx.is_reimbursable && !(tx as any).is_refund && !(tx as any).is_kiri_payback && (cat?.type !== 'transfer' || isIncomeKeyword)) {
+      if (isInternalTransferTx(tx) || tx.is_transfer || tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') {
+        continue;
+      }
+      if (tx.amount > 0 && (isIncomeCategory || isIncomeKeyword)) {
+        if (!tx.is_reimbursable && !(tx as any).is_refund && !(tx as any).is_kiri_payback && cat?.type !== 'transfer') {
           const txAmt = baseAmt(tx);
           const isMonthlyGammaSalary =
             txAmt >= 1000 &&
@@ -565,19 +592,26 @@ export default function FinanceMonthly() {
         const cat = catMap.get(tx.category_id || '');
         const rawText = `${tx.merchant || ''} ${tx.description || ''}`.toLowerCase();
         const catNameLower = (cat?.name || '').toLowerCase();
-        const isIncomeCategory = cat?.type === 'income';
-        const isGabriellaIncome = rawText.includes('gabriella') && tx.amount > 0 && !tx.transfer_group_id && !tx.is_transfer;
+        const isIncomeCategory = cat?.type === 'income' && catNameLower !== 'income';
         const isIncomeKeyword =
           rawText.includes('batchbase') ||
           rawText.includes('batch base') ||
           rawText.includes('payroll') ||
           rawText.includes('salary') ||
           rawText.includes('venture') ||
-          rawText.includes('etsy') ||
-          isGabriellaIncome;
+          rawText.includes('advisory') ||
+          rawText.includes('back pocket') ||
+          rawText.includes('bpg') ||
+          rawText.includes('eleven') ||
+          rawText.includes('11labs') ||
+          rawText.includes('etsy');
 
-        if (tx.amount > 0 && (!tx.is_transfer || isIncomeCategory || isIncomeKeyword)) {
-          if (cat?.type !== 'transfer' || isIncomeKeyword) {
+        if (isInternalTransferTx(tx) || tx.is_transfer || tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') {
+          continue;
+        }
+
+        if (tx.amount > 0 && (isIncomeCategory || isIncomeKeyword)) {
+          if (cat?.type !== 'transfer') {
             const txAmt = baseAmt(tx);
             const isMonthlyGammaSalary =
               txAmt >= 1000 &&

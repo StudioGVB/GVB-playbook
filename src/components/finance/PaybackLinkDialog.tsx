@@ -9,8 +9,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
-import { Handshake, Search, ArrowRight, CheckCircle2, RotateCcw, ArrowDownLeft, ArrowUpRight } from 'lucide-react';
+import { Handshake, Search, CheckCircle2 } from 'lucide-react';
 import { formatCurrency, parseUkDate } from '@/lib/financeUtils';
 import type { FinanceTransaction } from '@/hooks/useFinanceData';
 import { format, differenceInDays } from 'date-fns';
@@ -27,6 +26,20 @@ interface Props {
   onUnlinkPayback?: (tx: FinanceTransaction) => Promise<void>;
 }
 
+const getOrigAmount = (tx?: FinanceTransaction | null): number => {
+  if (!tx) return 0;
+  return (tx as any).original_amount !== undefined
+    ? Number((tx as any).original_amount)
+    : Number(tx.amount) || 0;
+};
+
+const getOrigBaseAmount = (tx?: FinanceTransaction | null): number => {
+  if (!tx) return 0;
+  return (tx as any).original_base_amount !== undefined
+    ? Number((tx as any).original_base_amount)
+    : Number((tx as any).base_amount ?? tx.amount) || 0;
+};
+
 export default function PaybackLinkDialog({
   open,
   onOpenChange,
@@ -40,11 +53,15 @@ export default function PaybackLinkDialog({
   const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const isSourceIncome = Boolean(sourceTransaction && sourceTransaction.amount > 0);
-  const isSourceExpense = Boolean(sourceTransaction && sourceTransaction.amount < 0);
+  const sourceOrigAmt = getOrigAmount(sourceTransaction);
+  const isSourceIncome = Boolean(sourceTransaction && sourceOrigAmt > 0);
 
   const paybackMeta = (sourceTransaction?.raw as any)?.payback_meta;
-  const isAlreadyLinked = Boolean(paybackMeta?.is_payback || paybackMeta?.has_payback);
+  const isAlreadyLinked = Boolean(
+    paybackMeta?.is_payback ||
+      paybackMeta?.has_payback ||
+      (sourceTransaction as any)?.is_payback_pair
+  );
 
   // If source is income, we look for expense candidates.
   // If source is expense, we look for income candidates.
@@ -55,12 +72,13 @@ export default function PaybackLinkDialog({
     return allTransactions
       .filter(tx => {
         if (tx.id === sourceTransaction.id) return false;
+        const origAmt = getOrigAmount(tx);
         if (isSourceIncome) {
           // Look for outgoing purchases
-          return tx.amount < 0 && !tx.is_transfer;
+          return origAmt < 0 && !tx.is_transfer;
         } else {
-          // Look for incoming transfers / deposits from friends
-          return tx.amount > 0;
+          // Look for incoming transfers / deposits
+          return origAmt > 0 && !tx.is_transfer;
         }
       })
       .filter(tx => {
@@ -68,7 +86,7 @@ export default function PaybackLinkDialog({
         const q = search.toLowerCase();
         const desc = (tx.description || '').toLowerCase();
         const merch = (tx.merchant || '').toLowerCase();
-        const amtStr = Math.abs(tx.amount).toFixed(2);
+        const amtStr = Math.abs(getOrigAmount(tx)).toFixed(2);
         return desc.includes(q) || merch.includes(q) || amtStr.includes(q);
       })
       .sort((a, b) => {
@@ -78,7 +96,7 @@ export default function PaybackLinkDialog({
         if (da !== db) return da - db;
         return parseUkDate(b.posted_at).getTime() - parseUkDate(a.posted_at).getTime();
       })
-      .slice(0, 30);
+      .slice(0, 35);
   }, [sourceTransaction, allTransactions, isSourceIncome, search]);
 
   const selectedCandidate = useMemo(() => {
@@ -89,15 +107,30 @@ export default function PaybackLinkDialog({
   const expenseTx = isSourceIncome ? selectedCandidate : sourceTransaction;
   const incomeTx = isSourceIncome ? sourceTransaction : selectedCandidate;
 
-  const expenseAmt = expenseTx ? Math.abs(expenseTx.amount) : 0;
-  const incomeAmt = incomeTx ? Math.abs(incomeTx.amount) : 0;
-  const netRemaining = Math.max(0, Math.round((expenseAmt - incomeAmt) * 100) / 100);
+  // Use remaining uncovered expense if the expense already has an earlier partial payback linked
+  const expenseOrigBase = Math.abs(getOrigBaseAmount(expenseTx));
+  const expensePriorCovered =
+    expenseTx && (expenseTx as any).payback_covered_base
+      ? Number((expenseTx as any).payback_covered_base) || 0
+      : 0;
+  const expenseAmt = Math.max(0, Math.round((expenseOrigBase - expensePriorCovered) * 100) / 100);
+
+  const incomeOrigBase = Math.abs(getOrigBaseAmount(incomeTx));
+  const incomePriorUsed =
+    incomeTx && (incomeTx as any).payback_used_base
+      ? Number((incomeTx as any).payback_used_base) || 0
+      : 0;
+  const incomeAmt = Math.max(0, Math.round((incomeOrigBase - incomePriorUsed) * 100) / 100);
+
+  const netRemainingSpend = Math.max(0, Math.round((expenseAmt - incomeAmt) * 100) / 100);
+  const netExcessIncome = Math.max(0, Math.round((incomeAmt - expenseAmt) * 100) / 100);
 
   const handleSubmit = async () => {
     if (!expenseTx || !incomeTx) return;
     setIsSubmitting(true);
     try {
       await onLinkPayback(expenseTx, incomeTx);
+      setSelectedCandidateId(null);
       onOpenChange(false);
     } finally {
       setIsSubmitting(false);
@@ -109,6 +142,7 @@ export default function PaybackLinkDialog({
     setIsSubmitting(true);
     try {
       await onUnlinkPayback(sourceTransaction);
+      setSelectedCandidateId(null);
       onOpenChange(false);
     } finally {
       setIsSubmitting(false);
@@ -123,19 +157,17 @@ export default function PaybackLinkDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-lg font-bold">
             <Handshake className="w-5 h-5 text-emerald-600" />
-            {isSourceIncome ? 'Offset Expense with Friend Payback' : 'Link Friend Payback to Purchase'}
+            {isSourceIncome ? 'Pair Payback with Purchase' : 'Link Friend Payback to Purchase'}
           </DialogTitle>
           <DialogDescription className="text-xs">
-            {isSourceIncome
-              ? 'Connect this incoming transfer from your friend to the purchase you paid for, so your weekly spending is accurately offset.'
-              : 'Select the income transfer your friend sent to repay you for this purchase.'}
+            Paired paybacks stay neutral: if paid back equally, both spending and income are £0. If paid back less, only the remaining cost is deducted from spending. If paid back more, only the extra amount is added to income.
           </DialogDescription>
         </DialogHeader>
 
         {/* Source Transaction Banner */}
         <div className="p-3 rounded-xl border border-slate-200 bg-slate-50 space-y-1">
           <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-            {isSourceIncome ? 'Incoming Payback Transfer' : 'Original Purchase'}
+            {isSourceIncome ? 'Incoming Payback Deposit' : 'Original Purchase'}
           </div>
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-slate-900 truncate">
@@ -147,7 +179,7 @@ export default function PaybackLinkDialog({
               }`}
             >
               {isSourceIncome ? '+' : '−'}
-              {formatCurrency(Math.abs(sourceTransaction.amount), sourceTransaction.currency || baseCurrency)}
+              {formatCurrency(Math.abs(sourceOrigAmt), sourceTransaction.currency || baseCurrency)}
             </span>
           </div>
           <p className="text-[10px] text-muted-foreground">
@@ -157,10 +189,16 @@ export default function PaybackLinkDialog({
 
         {/* Existing Link Warning / Notice */}
         {isAlreadyLinked && (
-          <div className="p-2.5 rounded-lg bg-emerald-50 border border-emerald-200 text-xs text-emerald-900 flex items-center justify-between">
-            <div className="flex items-center gap-1.5">
+          <div className="p-2.5 rounded-lg bg-emerald-50 border border-emerald-200 text-xs text-emerald-900 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5 min-w-0">
               <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-              <span>Currently linked as an offset payback.</span>
+              <span className="truncate">
+                {paybackMeta?.expense_description
+                  ? `Paired with "${paybackMeta.expense_description}"`
+                  : paybackMeta?.income_description
+                  ? `Paired with "${paybackMeta.income_description}"`
+                  : 'Currently paired as a payback.'}
+              </span>
             </div>
             {onUnlinkPayback && (
               <Button
@@ -169,7 +207,7 @@ export default function PaybackLinkDialog({
                 size="sm"
                 onClick={handleUnlink}
                 disabled={isSubmitting}
-                className="text-[11px] h-7 text-destructive border-destructive/30 hover:bg-destructive/10"
+                className="text-[11px] h-7 text-destructive border-destructive/30 hover:bg-destructive/10 shrink-0"
               >
                 Unlink
               </Button>
@@ -180,7 +218,7 @@ export default function PaybackLinkDialog({
         {/* Candidate Selector */}
         <div className="space-y-2 pt-1">
           <div className="flex items-center justify-between text-xs font-semibold text-slate-700">
-            <span>{isSourceIncome ? 'Select Purchase to Offset' : 'Select Incoming Transfer from Friend'}</span>
+            <span>{isSourceIncome ? 'Select Purchase to Pair With' : 'Select Incoming Payback Transfer'}</span>
           </div>
 
           <div className="relative">
@@ -201,8 +239,10 @@ export default function PaybackLinkDialog({
             ) : (
               candidates.map(candidate => {
                 const isSelected = selectedCandidateId === candidate.id;
-                const candidateAmt = Math.abs(candidate.amount);
-                const isCandidateIncome = candidate.amount > 0;
+                const candidateOrigAmt = getOrigAmount(candidate);
+                const candidateAmtAbs = Math.abs(candidateOrigAmt);
+                const isCandidateIncome = candidateOrigAmt > 0;
+                const alreadyPaired = Boolean((candidate as any).is_payback_pair);
                 return (
                   <button
                     key={candidate.id}
@@ -220,6 +260,7 @@ export default function PaybackLinkDialog({
                       </span>
                       <span className="text-[10px] text-muted-foreground">
                         {candidate.posted_at ? format(new Date(candidate.posted_at), 'MMM d, yyyy') : 'Recent'}
+                        {alreadyPaired && ' · Already has a payback linked'}
                       </span>
                     </div>
                     <span
@@ -228,7 +269,7 @@ export default function PaybackLinkDialog({
                       }`}
                     >
                       {isCandidateIncome ? '+' : '−'}
-                      {formatCurrency(candidateAmt, candidate.currency || baseCurrency)}
+                      {formatCurrency(candidateAmtAbs, candidate.currency || baseCurrency)}
                     </span>
                   </button>
                 );
@@ -237,22 +278,34 @@ export default function PaybackLinkDialog({
           </div>
         </div>
 
-        {/* Net Spending Preview */}
+        {/* Net Spending & Income Preview */}
         {selectedCandidate && (
           <div className="p-3 rounded-xl bg-gradient-to-r from-emerald-50 via-white to-sky-50 border border-emerald-300 text-xs space-y-1.5">
             <div className="flex items-center justify-between text-slate-700">
-              <span>Original Purchase:</span>
+              <span>Purchase Cost:</span>
               <span className="font-semibold tabular-nums">−{formatCurrency(expenseAmt, baseCurrency)}</span>
             </div>
             <div className="flex items-center justify-between text-emerald-700">
-              <span>Friend Payback Offset:</span>
+              <span>Payback Received:</span>
               <span className="font-bold tabular-nums">+{formatCurrency(incomeAmt, baseCurrency)}</span>
             </div>
-            <div className="border-t border-emerald-200 pt-1 flex items-center justify-between font-extrabold text-slate-900 text-sm">
-              <span>Your Net Personal Spend:</span>
-              <span className="text-emerald-700 tabular-nums">
-                {netRemaining <= 0.01 ? '£0.00 (Fully Covered! 🎉)' : `−${formatCurrency(netRemaining, baseCurrency)}`}
-              </span>
+            <div className="border-t border-emerald-200 pt-1.5 space-y-1">
+              <div className="flex items-center justify-between font-extrabold text-slate-900 text-xs">
+                <span>Deducted from Weekly/Monthly Spending:</span>
+                <span className="text-slate-900 tabular-nums">
+                  {netRemainingSpend <= 0.01
+                    ? '£0.00 (Neutral ✓)'
+                    : `−${formatCurrency(netRemainingSpend, baseCurrency)}`}
+                </span>
+              </div>
+              <div className="flex items-center justify-between font-extrabold text-slate-900 text-xs">
+                <span>Added to Earned Income:</span>
+                <span className="text-emerald-700 tabular-nums">
+                  {netExcessIncome <= 0.01
+                    ? '£0.00 (Neutral ✓)'
+                    : `+${formatCurrency(netExcessIncome, baseCurrency)}`}
+                </span>
+              </div>
             </div>
           </div>
         )}
@@ -275,7 +328,7 @@ export default function PaybackLinkDialog({
             disabled={!selectedCandidate || isSubmitting}
             className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-4"
           >
-            {isSubmitting ? 'Linking...' : 'Confirm Payback Link'}
+            {isSubmitting ? 'Pairing...' : 'Confirm Payback Pair'}
           </Button>
         </DialogFooter>
       </DialogContent>

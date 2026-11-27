@@ -170,30 +170,49 @@ export default function FinanceYearly() {
       });
 
       for (const tx of txns) {
+        if (isInternalTransferTx(tx)) continue;
+        if (tx.is_transfer) continue;
+        if (tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') continue;
+        if (tx.is_reimbursable || (tx as any).is_refund) continue;
+
         const cat = catMap.get(tx.category_id || '');
         const rawText = `${tx.merchant || ''} ${tx.description || ''}`.toLowerCase();
-        const isIncomeCat = cat?.type === 'income';
-        const isGabriellaIncome = rawText.includes('gabriella') && tx.amount > 0 && !(tx as any).transfer_group_id && !tx.is_transfer;
-        const isIncomeKeyword = rawText.includes('batchbase') || rawText.includes('batch base') || rawText.includes('payroll') || rawText.includes('salary') || rawText.includes('venture') || rawText.includes('etsy') || isGabriellaIncome;
+        const catNameLower = (cat?.name || '').toLowerCase();
+        const isIncomeCat = cat?.type === 'income' && catNameLower !== 'income';
+        const isIncomeKeyword =
+          rawText.includes('batchbase') ||
+          rawText.includes('batch base') ||
+          rawText.includes('payroll') ||
+          rawText.includes('salary') ||
+          rawText.includes('venture') ||
+          rawText.includes('advisory') ||
+          rawText.includes('back pocket') ||
+          rawText.includes('bpg') ||
+          rawText.includes('eleven') ||
+          rawText.includes('11labs') ||
+          rawText.includes('etsy');
 
         // Income
-        if (tx.amount > 0 && (!tx.is_transfer || isIncomeCat || isIncomeKeyword)) {
-          if (!tx.is_reimbursable && (cat?.type !== 'transfer' || isIncomeKeyword)) {
+        if (tx.amount > 0) {
+          if (cat?.type === 'transfer') continue;
+          const isGammaSalary =
+            (rawText.includes('gamma') && (!rawText.includes('gamma network') || Math.abs(baseAmt(tx)) >= 500)) ||
+            catNameLower.includes('gamma') ||
+            catNameLower.includes('salary');
+
+          if (isIncomeCat || isIncomeKeyword || isGammaSalary) {
             const amt = baseAmt(tx);
-            const isGammaSalary = amt >= 1000 && (rawText.includes('gamma') || rawText.includes('salary'));
-            if (isGammaSalary) {
+            if (isGammaSalary && amt >= 1000) {
               if (gammaCounted) continue;
               gammaCounted = true;
             }
             income += amt;
             continue;
           }
+          continue;
         }
 
         // Outflows
-        if (tx.amount >= 0 || tx.is_transfer) continue;
-        if (tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') continue;
-        if (isInternalTransferTx(tx)) continue;
         if (cat?.exclude_from_reports) continue;
 
         const amt = Math.abs(baseAmt(tx));
@@ -205,7 +224,7 @@ export default function FinanceYearly() {
         }
 
         // Fixed bills
-        const isExplicitFixed = Boolean((tx as any).fixed_expense_id) || cat?.type === 'fixed';
+        const isExplicitFixed = Boolean((tx as any).fixed_expense_id) || (tx as any).is_fixed || cat?.type === 'fixed';
         if (isExplicitFixed) {
           fixed += amt;
         } else if (essentialCatIds.has(tx.category_id || '')) {
@@ -713,7 +732,7 @@ export default function FinanceYearly() {
                 <Layers className="w-4 h-4" />
               </span>
               <CardTitle className="text-lg font-display font-bold text-slate-900">
-                Saving Pot Predictions & Full Budget Stack vs. Projected Income
+                12-Month Cash Flow & Saving Pot Horizon
               </CardTitle>
               <TooltipProvider>
                 <Tooltip>
@@ -721,13 +740,13 @@ export default function FinanceYearly() {
                     <Info className="w-4 h-4 text-slate-400 cursor-pointer" />
                   </TooltipTrigger>
                   <TooltipContent className="max-w-xs text-xs">
-                    Each bar stacks Fixed Bills, Variable Living, and individual Saving Pot Goals (colored segments). The dashed green line represents your Projected Income ceiling for that month. Headroom between the top of the stack and the line is unallocated surplus fun money.
+                    Each bar stacks Fixed Bills, Variable Living, and active Saving Pot Goals. The dashed green line represents your monthly income (actual income for past months, projected income for future months). Headroom between the top of the stack and the line is unallocated surplus.
                   </TooltipContent>
                 </Tooltip>
               </TooltipProvider>
             </div>
             <p className="text-xs text-slate-500 mt-1">
-              Fixed Bills + Variable Living + Each Saving Pot stacked together against monthly income
+              Fixed bills, variable living, and saving pot goals stacked against monthly income
             </p>
           </div>
 
@@ -777,12 +796,12 @@ export default function FinanceYearly() {
         </CardHeader>
 
         <CardContent className="p-6">
-          <div className="h-[420px] w-full">
+          <div className="h-[430px] w-full">
             <ResponsiveContainer width="100%" height="100%">
               {activeChartTab === 'stack' ? (
                 <ComposedChart
                   data={displayedSeries}
-                  margin={{ top: 25, right: 25, left: 0, bottom: 20 }}
+                  margin={{ top: 15, right: 25, left: 0, bottom: 15 }}
                   onClick={(e) => {
                     if (e && e.activePayload && e.activePayload.length > 0) {
                       const clicked = e.activePayload[0].payload;
@@ -825,7 +844,9 @@ export default function FinanceYearly() {
                           {/* Income vs Outflow Header */}
                           <div className="grid grid-cols-2 gap-2 bg-slate-800/60 p-2.5 rounded-xl">
                             <div>
-                              <span className="text-[10px] uppercase font-bold text-emerald-400 block">Projected Income</span>
+                              <span className="text-[10px] uppercase font-bold text-emerald-400 block">
+                                {item.isFuture ? 'Projected Income' : 'Actual Income'}
+                              </span>
                               <span className="text-sm font-display font-black text-emerald-300">{fmt(item.income)}</span>
                             </div>
                             <div className="text-right">
@@ -880,14 +901,40 @@ export default function FinanceYearly() {
                       );
                     }}
                   />
-                  <Legend verticalAlign="top" height={44} iconType="circle" />
+                  <Legend
+                    verticalAlign="top"
+                    content={() => (
+                      <div className="flex flex-wrap items-center justify-between gap-y-2 gap-x-4 text-xs text-slate-600 mb-4 px-1">
+                        <div className="flex flex-wrap items-center gap-4">
+                          <div className="flex items-center gap-1.5">
+                            <span className="w-2.5 h-2.5 rounded-full bg-slate-600 inline-block" />
+                            <span className="font-medium text-slate-700">Fixed Bills</span>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="w-2.5 h-2.5 rounded-full bg-amber-500 inline-block" />
+                            <span className="font-medium text-slate-700">Variable Living</span>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="w-2.5 h-2.5 rounded-full bg-violet-500 inline-block" />
+                            <span className="font-medium text-slate-700">Saving Pots</span>
+                            <span className="text-[10px] text-slate-400">({potSchedule.activeGoalMetas.length} active goals)</span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="w-5 h-0 border-t-2 border-dashed border-emerald-500 inline-block" />
+                          <span className="font-semibold text-emerald-700">Monthly Income</span>
+                          <span className="text-[10px] text-slate-400">(Actual / Projected)</span>
+                        </div>
+                      </div>
+                    )}
+                  />
                   <ReferenceLine x={format(now, 'MMM')} stroke="#8b5cf6" strokeDasharray="3 3" label={{ value: 'TODAY', position: 'top', fill: '#8b5cf6', fontSize: 10, fontWeight: 700 }} />
 
                   {/* 1. Fixed Bills (Base of Stack) */}
-                  <Bar dataKey="fixed" stackId="allocations" name="Fixed Bills" fill="#475569" radius={[0, 0, 0, 0]} />
+                  <Bar dataKey="fixed" stackId="allocations" name="Fixed Bills" legendType="none" fill="#475569" radius={[0, 0, 0, 0]} />
 
                   {/* 2. Variable Living (Middle of Stack) */}
-                  <Bar dataKey="variable" stackId="allocations" name="Variable Living (Essentials + Fun)" fill="#f59e0b" radius={[0, 0, 0, 0]} />
+                  <Bar dataKey="variable" stackId="allocations" name="Variable Living" legendType="none" fill="#f59e0b" radius={[0, 0, 0, 0]} />
 
                   {/* 3. Individual Saving Pot Goals (Top of Stack) */}
                   {potSchedule.activeGoalMetas.map((meta, idx) => (
@@ -896,21 +943,23 @@ export default function FinanceYearly() {
                       dataKey={meta.goal.id}
                       stackId="allocations"
                       name={meta.goal.name}
+                      legendType="none"
                       fill={meta.color || FALLBACK_POT_COLORS[idx % FALLBACK_POT_COLORS.length]}
                       radius={idx === potSchedule.activeGoalMetas.length - 1 ? [4, 4, 0, 0] : [0, 0, 0, 0]}
                     />
                   ))}
 
-                  {/* 4. Projected Income Ceiling Line */}
+                  {/* 4. Monthly Income Ceiling Line */}
                   <Line
                     type="monotone"
                     dataKey="income"
-                    name="Projected Income"
+                    name="Monthly Income"
+                    legendType="none"
                     stroke="#10b981"
-                    strokeWidth={3.5}
+                    strokeWidth={3}
                     strokeDasharray="4 4"
-                    dot={{ r: 5, fill: '#10b981', stroke: '#ffffff', strokeWidth: 2 }}
-                    activeDot={{ r: 7 }}
+                    dot={{ r: 4, fill: '#10b981', stroke: '#ffffff', strokeWidth: 2 }}
+                    activeDot={{ r: 6 }}
                   />
                 </ComposedChart>
               ) : activeChartTab === 'cashflow' ? (
@@ -918,10 +967,20 @@ export default function FinanceYearly() {
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                   <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={{ stroke: '#cbd5e1' }} tickLine={false} />
                   <YAxis tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} tickFormatter={(v) => `£${v >= 1000 ? `${(v/1000).toFixed(1)}k` : v}`} />
-                  <RechartsTooltip />
+                  <RechartsTooltip
+                    formatter={(val: any, name: any, item: any) => {
+                      const isIncome = name?.toString().toLowerCase().includes('income');
+                      const label = isIncome
+                        ? (item?.payload?.isFuture ? 'Projected Income' : 'Actual Income')
+                        : 'Total Outflows';
+                      return [fmt(Number(val)), label];
+                    }}
+                    contentStyle={{ backgroundColor: 'rgba(15, 23, 42, 0.95)', borderRadius: '12px', border: '1px solid #1e293b', color: '#fff', fontSize: '12px' }}
+                    labelStyle={{ color: '#94a3b8', fontWeight: 600, marginBottom: '4px' }}
+                  />
                   <Legend verticalAlign="top" height={36} iconType="circle" />
                   <ReferenceLine x={format(now, 'MMM')} stroke="#8b5cf6" strokeDasharray="3 3" />
-                  <Bar dataKey="income" name="Income" fill="#10b981" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="income" name="Monthly Income" fill="#10b981" radius={[4, 4, 0, 0]} />
                   <Bar dataKey="totalSpend" name="Total Outflows" fill="#64748b" radius={[4, 4, 0, 0]} />
                 </BarChart>
               ) : activeChartTab === 'wealth' ? (

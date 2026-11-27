@@ -175,8 +175,7 @@ export function calculateStreamIncomeEstimates(
     if (text.includes('gamma')) {
       return primaryGammaId;
     }
-    const isGabriellaIncome = text.includes('gabriella') && tx.amount > 0 && !tx.transfer_group_id;
-    if (text.includes('batchbase') || text.includes('batch base') || text.includes('venture') || text.includes('advisory') || isGabriellaIncome) {
+    if (text.includes('batchbase') || text.includes('batch base') || text.includes('venture') || text.includes('advisory')) {
       const v = Object.values(streamMap).find(s => s.name.toLowerCase().includes('venture') || s.name.toLowerCase().includes('batchbase'));
       if (v) return v.id;
       return '__venture_advisory';
@@ -566,8 +565,7 @@ export function calculateSpendingIncomeEstimates(
     if (text.includes('gamma')) {
       return primaryGammaId;
     }
-    const isGabriellaIncome = text.includes('gabriella') && tx.amount > 0 && !tx.transfer_group_id;
-    if (text.includes('batchbase') || text.includes('batch base') || text.includes('venture') || text.includes('advisory') || isGabriellaIncome) {
+    if (text.includes('batchbase') || text.includes('batch base') || text.includes('venture') || text.includes('advisory')) {
       const v = incomeCategories.find(c => c.name.toLowerCase().includes('venture') || c.name.toLowerCase().includes('batchbase'));
       if (v) return v.id;
       if (!streamMap['__venture_advisory']) {
@@ -602,8 +600,7 @@ export function calculateSpendingIncomeEstimates(
   // Filter income transactions in the last 3 months window
   for (const tx of transactions) {
     const text = `${tx.merchant || ''} ${tx.description || ''} ${(tx.raw as any)?.message || ''}`.toLowerCase();
-    const isGabriellaIncome = text.includes('gabriella') && tx.amount > 0 && !tx.transfer_group_id;
-    const isBatchbase = text.includes('batchbase') || text.includes('batch base') || text.includes('venture') || text.includes('advisory') || isGabriellaIncome;
+    const isBatchbase = text.includes('batchbase') || text.includes('batch base') || text.includes('venture') || text.includes('advisory');
     if (tx.amount <= 0 || (!isBatchbase && tx.is_transfer) || tx.is_reimbursable) continue;
 
     const txDate = parseUkDate(tx.posted_at);

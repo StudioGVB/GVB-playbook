@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { format, startOfMonth, endOfMonth, addMonths } from 'date-fns';
-import { ChevronLeft, ChevronRight, TrendingUp, DollarSign, Tag, X, Briefcase, HelpCircle, Home, Download, CheckCircle2, Clock, FileText, Check, ArrowRightLeft, PieChart, Award, Sparkles, MapPin, BarChart3, Globe, UserCheck } from 'lucide-react';
+import { ChevronLeft, ChevronRight, TrendingUp, DollarSign, Tag, X, Briefcase, HelpCircle, Home, Download, CheckCircle2, Clock, FileText, Check, ArrowRightLeft, PieChart, Award, Sparkles, MapPin, BarChart3, Globe, UserCheck, Handshake } from 'lucide-react';
 import { PieChart as RePieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 import { useFinanceData } from '@/hooks/useFinanceData';
 import { useFixedExpenses } from '@/hooks/useFixedExpenses';
@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import PaybackLinkDialog from '@/components/finance/PaybackLinkDialog';
 import { toast } from 'sonner';
 
 // Candy-jar tokens (match Accounts & Settings)
@@ -223,10 +224,11 @@ export default function FinanceIncome() {
     return deduped.filter(tx => {
       if (tx.amount <= 0) return false;
       if (tx.is_reimbursable) return false; // Exclude employer work payback deposits from earned personal income
+      if ((tx as any).is_refund || (tx as any).is_kiri_payback) return false; // Exclude refunds and non-excess paybacks
 
-      // If explicitly assigned to an income category, bypass transfer filter
+      // If explicitly assigned to an income category (or has excess payback over a paired purchase), bypass transfer filter
       const cat = categories.find(c => c.id === tx.category_id);
-      const isExplicitIncome = cat?.type === 'income';
+      const isExplicitIncome = cat?.type === 'income' || Boolean((tx as any).has_payback_excess_income);
       if (!isExplicitIncome && isInternalTransfer(tx)) return false;
 
       const d = getEffectiveTxMonthDate(tx, categories);

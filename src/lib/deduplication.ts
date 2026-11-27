@@ -289,6 +289,12 @@ export function deduplicateTransactions<T extends any>(transactions: T[]): Dedup
           keeper.is_reimbursable = duplicate.is_reimbursable;
           keeper.reimbursement_status = duplicate.reimbursement_status;
         }
+        if (duplicate.reimbursement_payout_id && !keeper.reimbursement_payout_id) {
+          keeper.reimbursement_payout_id = duplicate.reimbursement_payout_id;
+        }
+        if (duplicate.raw?.payback_meta && !keeper.raw?.payback_meta) {
+          keeper.raw = { ...(keeper.raw || {}), payback_meta: duplicate.raw.payback_meta };
+        }
         if (duplicate.merchant && !keeper.merchant) keeper.merchant = duplicate.merchant;
 
         // Preserve API external_transaction_id on keeper
@@ -308,7 +314,8 @@ export function deduplicateTransactions<T extends any>(transactions: T[]): Dedup
     }
   }
 
-  const cleaned = transactions.filter(t => !duplicateIdSet.has(t.id));
+  const rawCleaned = transactions.filter(t => !duplicateIdSet.has(t.id));
+  const cleaned = applyPairedPaybackNetting(rawCleaned);
 
   return {
     cleaned,
@@ -316,4 +323,223 @@ export function deduplicateTransactions<T extends any>(transactions: T[]): Dedup
     categoryTransfers,
     externalIdTransfers,
   };
+}
+
+/**
+ * Nets paired payback transactions against their linked expense transactions:
+ * - Exact match (Payback == Expense): Both expense and payback become £0.00 (neutral — £0 spending, £0 income).
+ * - Partial payback (Payback < Expense): Payback becomes £0.00 (neutral — £0 income), and Expense only deducts the remaining uncovered amount (Expense - Payback) from weekly/monthly spending.
+ * - Excess payback (Payback > Expense): Expense becomes £0.00 (neutral — £0 spending), and Payback only adds the remaining excess amount (Payback - Expense) to income.
+ */
+export function applyPairedPaybackNetting<T extends any>(transactions: T[]): T[] {
+  if (!transactions || transactions.length === 0) return transactions;
+
+  // Clone items and restore original baseline amounts so repeated calls are 100% idempotent
+  const items: any[] = transactions.map(tx => {
+    const origAmt =
+      (tx as any).original_amount !== undefined
+        ? Number((tx as any).original_amount)
+        : Number(tx.amount) || 0;
+    const origBase =
+      (tx as any).original_base_amount !== undefined
+        ? Number((tx as any).original_base_amount)
+        : Number(tx.base_amount ?? tx.amount) || 0;
+
+    return {
+      ...tx,
+      amount: origAmt,
+      base_amount: origBase,
+      original_amount: origAmt,
+      original_base_amount: origBase,
+    };
+  });
+
+  const txById = new Map<string, any>();
+  for (const tx of items) {
+    if (tx.id) txById.set(tx.id, tx);
+  }
+
+  // Discover all unique (expenseId, incomeId) payback pairings
+  const pairKeySet = new Set<string>();
+  const pairs: Array<{ expenseId: string; incomeId: string }> = [];
+
+  const addPair = (expenseId?: string | null, incomeId?: string | null) => {
+    if (!expenseId || !incomeId || expenseId === incomeId) return;
+    const key = `${expenseId}::${incomeId}`;
+    if (pairKeySet.has(key)) return;
+    pairKeySet.add(key);
+    pairs.push({ expenseId, incomeId });
+  };
+
+  for (const tx of items) {
+    const origAmt = Number(tx.original_amount) || 0;
+    const meta = (tx.raw as any)?.payback_meta;
+
+    if (meta) {
+      if (meta.is_payback) {
+        if (meta.linked_expense_id) addPair(meta.linked_expense_id, tx.id);
+        if (Array.isArray(meta.linked_expense_ids)) {
+          meta.linked_expense_ids.forEach((eid: string) => addPair(eid, tx.id));
+        }
+      }
+      if (meta.has_payback) {
+        if (meta.linked_income_id) addPair(tx.id, meta.linked_income_id);
+        if (Array.isArray(meta.linked_income_ids)) {
+          meta.linked_income_ids.forEach((iid: string) => addPair(tx.id, iid));
+        }
+      }
+    }
+
+    // Work Reimbursement paired payout deposit
+    if (origAmt < 0 && tx.reimbursement_payout_id) {
+      addPair(tx.id, tx.reimbursement_payout_id);
+    }
+
+    // Same-account or refund-flagged matched_transaction_id pair
+    if (tx.matched_transaction_id) {
+      const other = txById.get(tx.matched_transaction_id);
+      if (other) {
+        const otherOrigAmt = Number(other.original_amount) || 0;
+        const isPaybackMatch =
+          Boolean(meta || (other.raw as any)?.payback_meta || tx.is_refund || other.is_refund) ||
+          (tx.account_id && tx.account_id === other.account_id && !tx.is_transfer);
+        if (isPaybackMatch) {
+          if (origAmt < 0 && otherOrigAmt > 0) addPair(tx.id, other.id);
+          else if (origAmt > 0 && otherOrigAmt < 0) addPair(other.id, tx.id);
+        }
+      }
+    }
+  }
+
+  // Track remaining uncovered base amount for each paired transaction
+  const remBaseById = new Map<string, number>();
+  const pairedExpenseIds = new Set<string>();
+  const pairedIncomeIds = new Set<string>();
+  const matchedInSliceExpenseIds = new Set<string>();
+  const matchedInSliceIncomeIds = new Set<string>();
+
+  for (const { expenseId, incomeId } of pairs) {
+    const expTx = txById.get(expenseId);
+    const incTx = txById.get(incomeId);
+
+    if (expTx) {
+      pairedExpenseIds.add(expenseId);
+      if (!remBaseById.has(expenseId)) {
+        remBaseById.set(expenseId, Math.abs(Number(expTx.original_base_amount) || 0));
+      }
+    }
+    if (incTx) {
+      pairedIncomeIds.add(incomeId);
+      if (!remBaseById.has(incomeId)) {
+        remBaseById.set(incomeId, Math.abs(Number(incTx.original_base_amount) || 0));
+      }
+    }
+
+    if (expTx && incTx) {
+      matchedInSliceExpenseIds.add(expenseId);
+      matchedInSliceIncomeIds.add(incomeId);
+      const expRem = remBaseById.get(expenseId) || 0;
+      const incRem = remBaseById.get(incomeId) || 0;
+      const offset = Math.min(expRem, incRem);
+      remBaseById.set(expenseId, Math.max(0, Math.round((expRem - offset) * 100) / 100));
+      remBaseById.set(incomeId, Math.max(0, Math.round((incRem - offset) * 100) / 100));
+    }
+  }
+
+  // Fallback when a caller passes a date-filtered subset of transactions where only one side of the pair is in the slice
+  for (const tx of items) {
+    const meta = (tx.raw as any)?.payback_meta;
+    if (!meta) continue;
+    const origBaseAbs = Math.abs(Number(tx.original_base_amount) || 0);
+    const origAmtAbs = Math.abs(Number(tx.original_amount) || 0);
+    const basePerNative = origAmtAbs > 0 ? origBaseAbs / origAmtAbs : 1;
+
+    if (meta.has_payback && !matchedInSliceExpenseIds.has(tx.id)) {
+      pairedExpenseIds.add(tx.id);
+      const recordedPaybackNative = Math.abs(Number(meta.payback_amount) || 0);
+      const recordedPaybackBase =
+        meta.payback_base_amount !== undefined
+          ? Math.abs(Number(meta.payback_base_amount) || 0)
+          : recordedPaybackNative * basePerNative;
+      const offset = Math.min(origBaseAbs, recordedPaybackBase);
+      remBaseById.set(tx.id, Math.max(0, Math.round((origBaseAbs - offset) * 100) / 100));
+    }
+
+    if (meta.is_payback && !matchedInSliceIncomeIds.has(tx.id)) {
+      pairedIncomeIds.add(tx.id);
+      const recordedExpenseNative = Math.abs(Number(meta.expense_amount) || 0);
+      const recordedExpenseBase =
+        meta.expense_base_amount !== undefined
+          ? Math.abs(Number(meta.expense_base_amount) || 0)
+          : recordedExpenseNative > 0
+          ? recordedExpenseNative * basePerNative
+          : origBaseAbs; // If expense_amount wasn't stored, assume full payback covered the expense
+      const offset = Math.min(origBaseAbs, recordedExpenseBase);
+      remBaseById.set(tx.id, Math.max(0, Math.round((origBaseAbs - offset) * 100) / 100));
+    }
+  }
+
+  // Apply netted amounts to paired expense transactions
+  for (const expId of pairedExpenseIds) {
+    const expTx = txById.get(expId);
+    if (!expTx) continue;
+    const origBaseAbs = Math.abs(Number(expTx.original_base_amount) || 0);
+    const origAmtAbs = Math.abs(Number(expTx.original_amount) || 0);
+    const fxRatio = origBaseAbs > 0 ? origAmtAbs / origBaseAbs : 1;
+    const remBase = remBaseById.get(expId) ?? origBaseAbs;
+    const coveredBase = Math.max(0, Math.round((origBaseAbs - remBase) * 100) / 100);
+
+    expTx.is_payback_pair = true;
+    expTx.is_paired_payback_expense = true;
+    expTx.payback_covered_base = coveredBase;
+
+    if (remBase <= 0.01) {
+      // Paid back >= expense cost -> Expense stays 100% neutral (£0 spending)
+      expTx.amount = 0;
+      expTx.base_amount = 0;
+      expTx.is_payback_neutral = true;
+    } else {
+      // Paid back < expense cost -> Only deduct the remaining uncovered amount from weekly/monthly spending
+      expTx.base_amount = -remBase;
+      expTx.amount = -Math.round(remBase * fxRatio * 100) / 100;
+      expTx.is_payback_neutral = false;
+    }
+  }
+
+  // Apply netted amounts to paired payback (income) transactions
+  for (const incId of pairedIncomeIds) {
+    const incTx = txById.get(incId);
+    if (!incTx) continue;
+    const origBaseAbs = Math.abs(Number(incTx.original_base_amount) || 0);
+    const origAmtAbs = Math.abs(Number(incTx.original_amount) || 0);
+    const fxRatio = origBaseAbs > 0 ? origAmtAbs / origBaseAbs : 1;
+    const remBase = remBaseById.get(incId) ?? 0;
+    const usedBase = Math.max(0, Math.round((origBaseAbs - remBase) * 100) / 100);
+
+    incTx.is_payback_pair = true;
+    incTx.is_paired_payback_income = true;
+    incTx.payback_used_base = usedBase;
+    // Clear refund/reimbursable flags because the covered portion has already been netted directly out of the paired expense
+    incTx.is_refund = false;
+    incTx.is_kiri_payback = false;
+    incTx.is_reimbursable = false;
+
+    if (remBase <= 0.01) {
+      // Paid back <= expense cost -> Payback stays 100% neutral (£0 added to income)
+      incTx.amount = 0;
+      incTx.base_amount = 0;
+      incTx.is_payback_neutral = true;
+      incTx.has_payback_excess_income = false;
+    } else {
+      // Paid back > expense cost -> Only add the remaining excess money to income
+      incTx.base_amount = remBase;
+      incTx.amount = Math.round(remBase * fxRatio * 100) / 100;
+      incTx.is_payback_neutral = false;
+      incTx.has_payback_excess_income = true;
+      incTx.is_transfer = false;
+      incTx.transfer_status = null;
+    }
+  }
+
+  return items as T[];
 }

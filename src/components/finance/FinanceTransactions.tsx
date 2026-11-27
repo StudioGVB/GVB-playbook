@@ -80,6 +80,10 @@ function getAccountBadgeStyle(provider?: string) {
 
 // Left-edge accent colour for a transaction row.
 function getRowAccent(tx: any, cat: any): string {
+  // Neutral paired payback → soft emerald/slate neutral
+  if (tx.is_payback_neutral) {
+    return '#10b981';
+  }
   // Cancelled / transfer → yellow
   const tstatus = tx.transfer_status;
   if (tx.is_transfer || tstatus === 'confirmed' || tstatus === 'auto_confirmed' || tstatus === 'suggested') {
@@ -697,21 +701,57 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
     if (!expenseTx || !incomeTx) return;
 
     try {
-      const expenseAbs = Math.abs(expenseTx.amount);
-      const paybackAbs = Math.abs(incomeTx.amount);
-      const netSpend = Math.max(0, Math.round((expenseAbs - paybackAbs) * 100) / 100);
+      const origExpAmt = expenseTx.original_amount !== undefined ? Number(expenseTx.original_amount) : Number(expenseTx.amount) || 0;
+      const origExpBase = expenseTx.original_base_amount !== undefined ? Number(expenseTx.original_base_amount) : Number(expenseTx.base_amount ?? expenseTx.amount) || 0;
+      const origIncAmt = incomeTx.original_amount !== undefined ? Number(incomeTx.original_amount) : Number(incomeTx.amount) || 0;
+      const origIncBase = incomeTx.original_base_amount !== undefined ? Number(incomeTx.original_base_amount) : Number(incomeTx.base_amount ?? incomeTx.amount) || 0;
+
+      const expenseAbs = Math.abs(origExpAmt);
+      const expenseBaseAbs = Math.abs(origExpBase);
+      const paybackAbs = Math.abs(origIncAmt);
+      const paybackBaseAbs = Math.abs(origIncBase);
+
+      const existingExpMeta = (expenseTx.raw as any)?.payback_meta || {};
+      const prevLinkedIds: string[] = Array.isArray(existingExpMeta.linked_income_ids)
+        ? existingExpMeta.linked_income_ids
+        : existingExpMeta.linked_income_id
+        ? [existingExpMeta.linked_income_id]
+        : [];
+      const nextLinkedIncomeIds = Array.from(new Set([...prevLinkedIds, incomeTx.id]));
+
+      // Sum total payback across all linked income transactions for this expense
+      const totalPaybackBase = nextLinkedIncomeIds.reduce((sum, id) => {
+        if (id === incomeTx.id) return sum + paybackBaseAbs;
+        const found = finance.transactions.find(t => t.id === id);
+        if (!found) return sum;
+        const fOrigBase = (found as any).original_base_amount !== undefined ? Number((found as any).original_base_amount) : Number(found.base_amount ?? found.amount) || 0;
+        return sum + Math.abs(fOrigBase);
+      }, 0);
+
+      const netSpendBase = Math.max(0, Math.round((expenseBaseAbs - totalPaybackBase) * 100) / 100);
+      const netExcessIncomeBase = Math.max(0, Math.round((totalPaybackBase - expenseBaseAbs) * 100) / 100);
+
+      const existingIncMeta = (incomeTx.raw as any)?.payback_meta || {};
+      const prevExpIds: string[] = Array.isArray(existingIncMeta.linked_expense_ids)
+        ? existingIncMeta.linked_expense_ids
+        : existingIncMeta.linked_expense_id
+        ? [existingIncMeta.linked_expense_id]
+        : [];
+      const nextLinkedExpenseIds = Array.from(new Set([...prevExpIds, expenseTx.id]));
 
       await updateTransaction(incomeTx.id, {
-        is_refund: true,
-        category_id: expenseTx.category_id || incomeTx.category_id,
+        is_refund: netExcessIncomeBase <= 0.01,
         raw: {
           ...(incomeTx.raw || {}),
           payback_meta: {
             is_payback: true,
             linked_expense_id: expenseTx.id,
+            linked_expense_ids: nextLinkedExpenseIds,
             expense_description: expenseTx.description,
-            expense_amount: expenseTx.amount,
+            expense_amount: origExpAmt,
+            expense_base_amount: origExpBase,
             payback_amount: paybackAbs,
+            payback_base_amount: paybackBaseAbs,
           },
         },
       } as any);
@@ -722,16 +762,27 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
           payback_meta: {
             has_payback: true,
             linked_income_id: incomeTx.id,
+            linked_income_ids: nextLinkedIncomeIds,
             income_description: incomeTx.description,
-            payback_amount: paybackAbs,
-            net_amount: netSpend,
+            payback_amount: totalPaybackBase,
+            payback_base_amount: totalPaybackBase,
+            net_amount: netSpendBase,
           },
         },
       } as any);
 
-      toast.success(
-        `Linked payback! +${formatCurrency(paybackAbs, incomeTx.currency || 'GBP')} offset against "${expenseTx.description}". Net spend: ${formatCurrency(netSpend, expenseTx.currency || 'GBP')}`
-      );
+      const baseCur = finance.settings?.base_currency || 'GBP';
+      if (netSpendBase <= 0.01 && netExcessIncomeBase <= 0.01) {
+        toast.success(`Paired payback! Both "${expenseTx.description}" and the payback are now neutral (£0 spend · £0 income).`);
+      } else if (netSpendBase > 0.01) {
+        toast.success(
+          `Paired payback! Only the remaining −${formatCurrency(netSpendBase, baseCur)} is deducted from spending (£0 added to income).`
+        );
+      } else {
+        toast.success(
+          `Paired payback! "${expenseTx.description}" is neutral (£0 spend) and only the extra +${formatCurrency(netExcessIncomeBase, baseCur)} is added to income.`
+        );
+      }
       await finance.refetch();
     } catch (err) {
       console.error('Error linking payback:', err);
@@ -747,7 +798,11 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
       if (!meta) return;
 
       if (meta.is_payback) {
-        const linkedExpenseId = meta.linked_expense_id;
+        const expIds: string[] = Array.isArray(meta.linked_expense_ids)
+          ? meta.linked_expense_ids
+          : meta.linked_expense_id
+          ? [meta.linked_expense_id]
+          : [];
         const updatedIncomeRaw = { ...(tx.raw || {}) };
         delete updatedIncomeRaw.payback_meta;
 
@@ -756,7 +811,7 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
           raw: updatedIncomeRaw,
         } as any);
 
-        if (linkedExpenseId) {
+        for (const linkedExpenseId of expIds) {
           const expenseTx = finance.transactions.find(t => t.id === linkedExpenseId);
           if (expenseTx) {
             const updatedExpenseRaw = { ...(expenseTx.raw || {}) };
@@ -767,7 +822,11 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
           }
         }
       } else if (meta.has_payback) {
-        const linkedIncomeId = meta.linked_income_id;
+        const incIds: string[] = Array.isArray(meta.linked_income_ids)
+          ? meta.linked_income_ids
+          : meta.linked_income_id
+          ? [meta.linked_income_id]
+          : [];
         const updatedExpenseRaw = { ...(tx.raw || {}) };
         delete updatedExpenseRaw.payback_meta;
 
@@ -775,7 +834,7 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
           raw: updatedExpenseRaw,
         } as any);
 
-        if (linkedIncomeId) {
+        for (const linkedIncomeId of incIds) {
           const incomeTx = finance.transactions.find(t => t.id === linkedIncomeId);
           if (incomeTx) {
             const updatedIncomeRaw = { ...(incomeTx.raw || {}) };
@@ -1217,7 +1276,7 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                             </Badge>
                           )}
                           {/* Payback badges */}
-                          {Boolean((tx.raw as any)?.payback_meta?.has_payback) && (
+                          {Boolean((tx.raw as any)?.payback_meta?.has_payback || (tx as any).is_paired_payback_expense) && (
                             <Badge
                               variant="secondary"
                               onClick={() => {
@@ -1228,10 +1287,12 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                               title="Friend payback linked — click to view or unlink"
                             >
                               <Handshake className="w-2.5 h-2.5 mr-0.5" />
-                              Payback: +{formatCurrency((tx.raw as any).payback_meta.payback_amount, tx.currency || baseCurrency)} (Net: {formatCurrency(-(tx.raw as any).payback_meta.net_amount, tx.currency || baseCurrency)})
+                              {(tx as any).is_payback_neutral
+                                ? 'Paid back · Neutral (£0 spend)'
+                                : `Payback: +${formatCurrency((tx as any).payback_covered_base ?? (tx.raw as any)?.payback_meta?.payback_amount ?? 0, baseCurrency)} · Net: ${formatCurrency(tx.base_amount ?? tx.amount, baseCurrency)}`}
                             </Badge>
                           )}
-                          {Boolean((tx.raw as any)?.payback_meta?.is_payback) && (
+                          {Boolean((tx.raw as any)?.payback_meta?.is_payback || (tx as any).is_paired_payback_income) && (
                             <Badge
                               variant="secondary"
                               onClick={() => {
@@ -1242,7 +1303,9 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                               title="Friend payback linked to purchase — click to view or unlink"
                             >
                               <Handshake className="w-2.5 h-2.5 mr-0.5" />
-                              Payback for: {(tx.raw as any).payback_meta.expense_description}
+                              {(tx as any).is_payback_neutral
+                                ? `Payback for: ${(tx.raw as any)?.payback_meta?.expense_description || 'Purchase'} · Neutral (£0 income)`
+                                : `Covered ${formatCurrency((tx as any).payback_used_base ?? 0, baseCurrency)} · +${formatCurrency(tx.base_amount ?? tx.amount, baseCurrency)} net income`}
                             </Badge>
                           )}
                           {tx.is_reimbursable && (
@@ -1344,13 +1407,33 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                         <div className="flex items-center gap-2.5 sm:gap-6 shrink-0 ml-auto">
                           {/* Amount */}
                           <div className="w-auto sm:w-36 text-right sm:text-left shrink-0">
-                          <p className={`text-xs sm:text-sm font-display font-bold tabular-nums ${isRealIncome ? 'text-[hsl(var(--success))]' : 'text-slate-900'}`}>
+                          <p
+                            className={`text-xs sm:text-sm font-display font-bold tabular-nums ${
+                              (tx as any).is_payback_neutral
+                                ? 'text-slate-400'
+                                : isRealIncome
+                                ? 'text-[hsl(var(--success))]'
+                                : 'text-slate-900'
+                            }`}
+                          >
                             {(() => {
+                              if ((tx as any).is_payback_neutral) {
+                                return `${formatCurrency(0, finance.settings?.base_currency || 'GBP')} (Neutral)`;
+                              }
                               const rawAmt = tx.base_amount !== undefined && tx.base_amount !== null ? tx.base_amount : tx.amount;
                               const formatted = formatCurrency(rawAmt, finance.settings?.base_currency || 'GBP');
                               return isRealIncome && !formatted.startsWith('+') ? `+${formatted}` : formatted;
                             })()}
                           </p>
+                          {(tx as any).is_payback_pair && (tx as any).original_base_amount !== undefined && Math.abs(Number((tx as any).original_base_amount) - Number(tx.base_amount || 0)) > 0.01 && (
+                            <p className="text-[10px] text-slate-400 line-through tabular-nums truncate">
+                              {(() => {
+                                const origB = Number((tx as any).original_base_amount) || 0;
+                                const f = formatCurrency(origB, finance.settings?.base_currency || 'GBP');
+                                return origB > 0 && !f.startsWith('+') ? `+${f}` : f;
+                              })()}
+                            </p>
+                          )}
                           {(() => {
                             const cur = (tx.currency || finance.settings?.base_currency || 'GBP').toUpperCase();
                             const base = (finance.settings?.base_currency || 'GBP').toUpperCase();

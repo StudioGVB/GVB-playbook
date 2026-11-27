@@ -87,13 +87,10 @@ export default function FinanceBalanceSheet() {
       if (isExcludedSpendDate(d)) continue;
       const cat = categories.find(c => c.id === tx.category_id);
       const rawText = `${tx.merchant || ''} ${tx.description || ''} ${cat?.name || ''}`.toLowerCase();
-      const isIncomeCategory = cat?.type === 'income';
-      const isGabriellaIncome = rawText.includes('gabriella') && tx.amount > 0 && !tx.transfer_group_id;
-      const isIncomeKeyword = rawText.includes('batchbase') || rawText.includes('batch base') || rawText.includes('payroll') || rawText.includes('salary') || rawText.includes('venture') || rawText.includes('etsy') || isGabriellaIncome;
+      const isIncomeCategory = cat?.type === 'income' && (cat?.name || '').toLowerCase() !== 'income';
+      const isIncomeKeyword = rawText.includes('batchbase') || rawText.includes('batch base') || rawText.includes('payroll') || rawText.includes('salary') || rawText.includes('venture') || rawText.includes('advisory') || rawText.includes('etsy');
 
-      if (tx.is_transfer && !isIncomeCategory && !isIncomeKeyword) continue;
-      if ((tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') && !isIncomeCategory && !isIncomeKeyword) continue;
-      if (isInternalTransferTx(tx) && !isIncomeCategory && !isIncomeKeyword) continue;
+      if (tx.is_transfer || (tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') || isInternalTransferTx(tx)) continue;
       if ((tx as any).goal_id || (tx as any).is_travel_spend || (tx as any).trip_id) continue;
       if (cat?.exclude_from_reports) continue;
 

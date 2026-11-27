@@ -170,7 +170,6 @@ export function isInternalTransferTx(tx: FinanceTransaction): boolean {
   const detailsType = String((tx as any).raw?.detailsType || '').toUpperCase();
   if (text.includes('batchbase') || text.includes('batch base')) return false;
   if (text.includes('venture') || text.includes('advisory')) return false;
-  if (text.includes('gabriella') && tx.amount > 0 && !(tx as any).transfer_group_id) return false;
 
   if (tx.is_transfer) return true;
   if (tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') return true;
