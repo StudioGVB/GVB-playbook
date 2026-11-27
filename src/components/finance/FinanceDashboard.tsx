@@ -172,58 +172,12 @@ export function FinanceDashboard() {
 
   const isFixedTx = useCallback(
     (tx: typeof finance.transactions[0]): boolean => {
-      if (tx.is_fixed || tx.fixed_expense_id) return true;
+      if (tx.fixed_expense_id || tx.is_fixed) return true;
       const cat = catMap.get(tx.category_id || '');
       if (cat?.type === 'fixed') return true;
-
-      const amt = Math.abs(baseAmt(tx));
-      const catNameLower = String(cat?.name || '').toLowerCase();
-      const desc = `${tx.merchant || ''} ${tx.description || ''} ${catNameLower}`.toLowerCase();
-
-      if (/\b(bills?|fixed|subscriptions?|utilities|rent|housing|phone|mobile|internet|wifi|broadband|meds|medication|medical|clinic|prescription)\b/i.test(catNameLower)) {
-        return true;
-      }
-
-      if (/\b(apple\.com\/bill|itunes|icloud|spotify|netflix|disney\+|amazon prime|prime video|audible|google one|chatgpt|openai|claude|anthropic|canva|adobe|figma|notion|patreon|substack|whoop|strava|puregym|the gym|jd gyms|vodafone|voxi|giffgaff|lyca|lycamobile|lebara|smarty|id mobile|tesco mobile|virgin media|hyperoptic|octopus|british gas|united utilities|council tax|broadway|signature|elvanse|amfexa|adhd|titration|psychiatry|mypace|harley)\b/i.test(desc)) {
-        return true;
-      }
-
-      // Explicit rent check (require word boundary and amt >= 100 so "flat white", "parent", "sorrento" etc. are never misclassified)
-      if (amt >= 100 && /\b(rent|landlord|accommodation|tenancy)\b/i.test(desc)) {
-        return true;
-      }
-
-      const stopWords = new Set(['flat', 'plan', 'bill', 'bills', 'incl', 'the', 'and', 'for', 'monthly']);
-
-      // Match against configured fixed expenses (e.g. UK Flat £720, subscriptions, etc.)
-      for (const fe of fixedExpenses) {
-        const feAmt = finance.convertToBase(fe.amount, fe.currency);
-        const amountClose = Math.abs(amt - feAmt) <= Math.max(2, feAmt * 0.05);
-        const feName = fe.name.toLowerCase();
-        if (feName.includes('amazon')) {
-          if (/\b(amazon|amzn|prime)\b/i.test(desc) && (/\bprime\b/i.test(desc) || Math.abs(amt - feAmt) <= 2.5)) return true;
-          continue;
-        }
-        const feTokens = feName.split(/\s+/).filter(w => w.length >= 3 && !stopWords.has(w));
-        const nameMatches = feTokens.length > 0 && feTokens.some(w => desc.includes(w));
-        if (nameMatches && amt <= Math.max(feAmt * 3.5, feAmt + 150)) return true;
-
-        if (feAmt >= 200 && amountClose && /\b(rent|rental|landlord|tenancy|evans|accommodation)\b/i.test(desc)) {
-          if (fe.due_day) {
-            const d = parseUkDate(tx.posted_at);
-            const day = getDate(d);
-            if (Math.abs(day - fe.due_day) <= 4 || Math.abs(day - (fe.due_day + 30)) <= 4) {
-              return true;
-            }
-          } else {
-            return true;
-          }
-        }
-      }
-
       return false;
     },
-    [catMap, fixedExpenses, finance.convertToBase]
+    [catMap]
   );
 
   // Current week & month windows

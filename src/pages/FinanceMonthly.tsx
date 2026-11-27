@@ -195,59 +195,16 @@ export default function FinanceMonthly() {
   }, [dedupedAllTxns, prevMonthStart, prevMonthEnd, getEffectiveTxMonthDateLocal]);
 
   // Treat transaction as fixed bill if linked to fixed expense, has is_fixed flag, belongs to fixed category, or matches a recurring fixed bill (e.g. rent £720)
+  // Treat transaction as fixed bill ONLY if explicitly tagged in transactions:
+  // - tx.fixed_expense_id is assigned, OR
+  // - tx.is_fixed is true, OR
+  // - transaction belongs to a category of type 'fixed' (cat?.type === 'fixed')
   const isFixedTx = useCallback((tx: any): boolean => {
-    if (tx.is_fixed || tx.fixed_expense_id) return true;
+    if (tx.fixed_expense_id || tx.is_fixed) return true;
     const cat = catMap.get(tx.category_id || '');
     if (cat?.type === 'fixed') return true;
-
-    const amt = Math.abs(baseAmt(tx));
-    const catNameLower = String(cat?.name || '').toLowerCase();
-    const desc = `${tx.merchant || ''} ${tx.description || ''} ${catNameLower}`.toLowerCase();
-
-    if (/\b(bills?|fixed|subscriptions?|utilities|rent|housing|phone|mobile|internet|wifi|broadband|meds|medication|medical|clinic|prescription)\b/i.test(catNameLower)) {
-      return true;
-    }
-
-    if (/\b(apple\.com\/bill|itunes|icloud|spotify|netflix|disney\+|amazon prime|prime video|audible|google one|chatgpt|openai|claude|anthropic|canva|adobe|figma|notion|patreon|substack|whoop|strava|puregym|the gym|jd gyms|vodafone|voxi|giffgaff|lyca|lycamobile|lebara|smarty|id mobile|tesco mobile|virgin media|hyperoptic|octopus|british gas|united utilities|council tax|broadway|signature|elvanse|amfexa|adhd|titration|psychiatry|mypace|harley)\b/i.test(desc)) {
-      return true;
-    }
-
-    // Explicit rent check (require word boundary and amt >= 100 so "flat white", "parent", "sorrento" etc. are never misclassified)
-    if (amt >= 100 && /\b(rent|landlord|accommodation|tenancy)\b/i.test(desc)) {
-      return true;
-    }
-
-    const stopWords = new Set(['flat', 'plan', 'bill', 'bills', 'incl', 'the', 'and', 'for', 'monthly']);
-
-    // Match against configured fixed expenses (e.g. UK Flat £720, subscriptions, etc.)
-    for (const fe of fixedExpenses) {
-      const feAmt = finance.convertToBase(fe.amount, fe.currency);
-      const amountClose = Math.abs(amt - feAmt) <= Math.max(2, feAmt * 0.05);
-      const feName = fe.name.toLowerCase();
-      if (feName.includes('amazon')) {
-        if (/\b(amazon|amzn|prime)\b/i.test(desc) && (/\bprime\b/i.test(desc) || Math.abs(amt - feAmt) <= 2.5)) return true;
-        continue;
-      }
-      const feTokens = feName.split(/\s+/).filter(w => w.length >= 3 && !stopWords.has(w));
-      const nameMatches = feTokens.length > 0 && feTokens.some(w => desc.includes(w));
-      if (nameMatches && amt <= Math.max(feAmt * 3.5, feAmt + 150)) return true;
-
-      // If amount specifically matches rent (£720) or high fixed bill near due day
-      if (feAmt >= 200 && amountClose && /\b(rent|rental|landlord|tenancy|evans|accommodation)\b/i.test(desc)) {
-        if (fe.due_day) {
-          const d = parseUkDate(tx.posted_at);
-          const day = getDate(d);
-          if (Math.abs(day - fe.due_day) <= 4 || Math.abs(day - (fe.due_day + 30)) <= 4) {
-            return true;
-          }
-        } else {
-          return true;
-        }
-      }
-    }
-
     return false;
-  }, [catMap, fixedExpenses, finance.convertToBase]);
+  }, [catMap]);
 
   // Spending breakdown (strictly separating Fixed Bills from Variable Categories)
   const { essentialSpent, funSpent, fixedSpent, incomeTotal, variableCategoryBreakdown, paidFixedTxns, dailyData } = useMemo(() => {
@@ -313,6 +270,7 @@ export default function FinanceMonthly() {
           amount: covered,
           date: parseUkDate(tx.posted_at),
           fixedExpenseId: (tx as any).fixed_expense_id,
+          categoryId: tx.category_id,
         });
         if (overage <= 0) continue;
         const catId = tx.category_id || '__uncategorised';
@@ -851,28 +809,19 @@ export default function FinanceMonthly() {
       explicitMatchesByExpId.set(exp.id, exact);
     }
 
-    // Pass 2: fallback keyword / amount matching for any remaining unlinked fixed transactions
+    // Pass 2: match tagged fixed transactions to configured fixed bills by explicit category or linked bill ID only
     const items = activeExpenses.map(exp => {
       const singleCycleAmt = finance.convertToBase(exp.amount, exp.currency);
       const proratedMonthlyAmt = singleCycleAmt * (FREQ_TO_MONTHLY[exp.frequency] ?? 1);
-      const expLower = exp.name.toLowerCase();
-      const expWords = expLower.split(/\s+/).filter(w => w.length >= 3 && !['flat', 'plan', 'bill', 'bills', 'incl', 'the', 'and', 'for', 'monthly'].includes(w));
+      const expLower = exp.name.toLowerCase().trim();
 
       const matchedTxs = [...(explicitMatchesByExpId.get(exp.id) || [])];
       for (const tx of paidFixedTxns) {
         if (usedTxIds.has(tx.id)) continue;
-        const txLower = tx.name.toLowerCase();
-        const isBusinessMatch = expLower.includes('business') && /\b(google|cloud|workspace|openai|chatgpt|claude|anthropic|canva|figma|vercel|supabase)\b/i.test(txLower);
-        const is11LabsMatch = (expLower.includes('11labs') || expLower.includes('elevenlabs')) && /\b(11labs|elevenlabs)\b/i.test(txLower);
-        const isPhoneMatch = expLower.includes('phone') && (/\b(lyca|lycamobile|vodafone|voxi|ee|o2|three|giffgaff|lebara|smarty|id mobile|tesco mobile)\b/i.test(txLower) || (/\b(phone|mobile)\b/i.test(txLower) && /\b(bill|plan|top up|topup|sim)\b/i.test(txLower)));
-        const isMedsMatch = expLower.includes('meds') && /\b(elvanse|amfexa|adhd|mypace|harley|broadway|signature|titration)\b/i.test(txLower);
-        const isRentMatch = (expLower.includes('rent') || expLower.includes('flat')) && tx.amount >= 100 && /\b(rent|rental|landlord|evans|tenancy|accommodation)\b/i.test(txLower);
-        const isAmazonMatch = expLower.includes('amazon')
-          ? (/\b(amazon|amzn|prime)\b/i.test(txLower) && (/\bprime\b/i.test(txLower) || Math.abs(tx.amount - singleCycleAmt) <= 2.5))
-          : false;
-        const isWordMatch = !expLower.includes('amazon') && expWords.length > 0 && expWords.some(w => txLower.includes(w));
-
-        if (isBusinessMatch || is11LabsMatch || isPhoneMatch || isMedsMatch || isRentMatch || isAmazonMatch || isWordMatch) {
+        const cat = catMap.get((tx as any).categoryId || (tx as any).category_id || '');
+        const catLower = (cat?.name || '').toLowerCase().trim();
+        // Match only if transaction was categorized under a Fixed category matching this bill
+        if (cat?.type === 'fixed' && catLower && (catLower === expLower || expLower.includes(catLower) || catLower.includes(expLower))) {
           usedTxIds.add(tx.id);
           matchedTxs.push(tx);
         }
