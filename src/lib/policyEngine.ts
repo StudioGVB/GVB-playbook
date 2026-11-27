@@ -205,11 +205,15 @@ export function computeActualSpendingIncome(
   const catById = new Map(categories.map(c => [c.id, c]));
 
   const resolveStreamName = (tx: FinanceTransaction): { streamName: string; kind: 'gamma' | 'venture' | 'other' } | null => {
-    if (tx.amount <= 0 || tx.is_reimbursable || (tx as any).is_refund) return null;
+    if (tx.amount <= 0 || tx.is_reimbursable || (tx as any).is_refund || (tx as any).is_kiri_payback) return null;
     const cat = tx.category_id ? catById.get(tx.category_id) : undefined;
-    const isExplicitIncome = cat?.type === 'income';
+    const isExcessPayback = Boolean((tx as any).has_payback_excess_income);
+    const isExplicitIncome = cat?.type === 'income' || isExcessPayback;
     if (!isExplicitIncome && isInternalTransferTx(tx)) return null;
-    if (cat && cat.type !== 'income') return null;
+    if (cat && cat.type !== 'income' && !isExcessPayback) return null;
+    if (isExcessPayback && (!cat || cat.type !== 'income')) {
+      return { streamName: 'Payback Surplus', kind: 'other' };
+    }
 
     const catName = cat?.name?.trim() || '';
     const catLower = catName.toLowerCase();

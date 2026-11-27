@@ -220,7 +220,7 @@ export default function FinanceMonthly() {
       const cat = catMap.get(tx.category_id || '');
       const rawText = `${tx.merchant || ''} ${tx.description || ''}`.toLowerCase();
       const catNameLower = (cat?.name || '').toLowerCase();
-      const isIncomeCategory = cat?.type === 'income' && catNameLower !== 'income';
+      const isIncomeCategory = (cat?.type === 'income' && catNameLower !== 'income') || Boolean((tx as any).has_payback_excess_income);
       const isIncomeKeyword =
         rawText.includes('batchbase') ||
         rawText.includes('batch base') ||
@@ -251,7 +251,7 @@ export default function FinanceMonthly() {
       }
 
       if (tx.amount > 0 && (isIncomeCategory || isIncomeKeyword)) {
-        if (!tx.is_reimbursable && cat?.type !== 'transfer') {
+        if (!tx.is_reimbursable && !(tx as any).is_refund && !(tx as any).is_kiri_payback && cat?.type !== 'transfer') {
           const txAmt = baseAmt(tx);
           const isMonthlyGammaSalary =
             txAmt >= 1000 &&

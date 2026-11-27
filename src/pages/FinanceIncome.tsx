@@ -459,6 +459,123 @@ export default function FinanceIncome() {
     toast.success('Matched payout deposit! Payback excluded from earned income.');
   };
 
+  const [paybackDialogOpen, setPaybackDialogOpen] = useState(false);
+  const [sourceTxForPayback, setSourceTxForPayback] = useState<any | null>(null);
+
+  const handleLinkPayback = async (expenseTx: any, incomeTx: any) => {
+    if (!expenseTx || !incomeTx) return;
+    try {
+      const origExpAmt = expenseTx.original_amount !== undefined ? Number(expenseTx.original_amount) : Number(expenseTx.amount) || 0;
+      const origExpBase = expenseTx.original_base_amount !== undefined ? Number(expenseTx.original_base_amount) : Number(expenseTx.base_amount ?? expenseTx.amount) || 0;
+      const origIncAmt = incomeTx.original_amount !== undefined ? Number(incomeTx.original_amount) : Number(incomeTx.amount) || 0;
+      const origIncBase = incomeTx.original_base_amount !== undefined ? Number(incomeTx.original_base_amount) : Number(incomeTx.base_amount ?? incomeTx.amount) || 0;
+
+      const expenseBaseAbs = Math.abs(origExpBase);
+      const paybackAbs = Math.abs(origIncAmt);
+      const paybackBaseAbs = Math.abs(origIncBase);
+
+      const existingExpMeta = (expenseTx.raw as any)?.payback_meta || {};
+      const prevLinkedIds: string[] = Array.isArray(existingExpMeta.linked_income_ids)
+        ? existingExpMeta.linked_income_ids
+        : existingExpMeta.linked_income_id
+        ? [existingExpMeta.linked_income_id]
+        : [];
+      const nextLinkedIncomeIds = Array.from(new Set([...prevLinkedIds, incomeTx.id]));
+
+      const totalPaybackBase = nextLinkedIncomeIds.reduce((sum, id) => {
+        if (id === incomeTx.id) return sum + paybackBaseAbs;
+        const found = transactions.find(t => t.id === id);
+        if (!found) return sum;
+        const fOrigBase = (found as any).original_base_amount !== undefined ? Number((found as any).original_base_amount) : Number(found.base_amount ?? found.amount) || 0;
+        return sum + Math.abs(fOrigBase);
+      }, 0);
+
+      const netSpendBase = Math.max(0, Math.round((expenseBaseAbs - totalPaybackBase) * 100) / 100);
+      const netExcessIncomeBase = Math.max(0, Math.round((totalPaybackBase - expenseBaseAbs) * 100) / 100);
+
+      const existingIncMeta = (incomeTx.raw as any)?.payback_meta || {};
+      const prevExpIds: string[] = Array.isArray(existingIncMeta.linked_expense_ids)
+        ? existingIncMeta.linked_expense_ids
+        : existingIncMeta.linked_expense_id
+        ? [existingIncMeta.linked_expense_id]
+        : [];
+      const nextLinkedExpenseIds = Array.from(new Set([...prevExpIds, expenseTx.id]));
+
+      await updateTransaction(incomeTx.id, {
+        is_refund: netExcessIncomeBase <= 0.01,
+        raw: {
+          ...(incomeTx.raw || {}),
+          payback_meta: {
+            is_payback: true,
+            linked_expense_id: expenseTx.id,
+            linked_expense_ids: nextLinkedExpenseIds,
+            expense_description: expenseTx.description,
+            expense_amount: origExpAmt,
+            expense_base_amount: origExpBase,
+            payback_amount: paybackAbs,
+            payback_base_amount: paybackBaseAbs,
+          },
+        },
+      } as any);
+
+      await updateTransaction(expenseTx.id, {
+        raw: {
+          ...(expenseTx.raw || {}),
+          payback_meta: {
+            has_payback: true,
+            linked_income_id: incomeTx.id,
+            linked_income_ids: nextLinkedIncomeIds,
+            income_description: incomeTx.description,
+            payback_amount: totalPaybackBase,
+            payback_base_amount: totalPaybackBase,
+            net_amount: netSpendBase,
+          },
+        },
+      } as any);
+
+      if (netSpendBase <= 0.01 && netExcessIncomeBase <= 0.01) {
+        toast.success(`Paired payback! Both "${expenseTx.description}" and the payback are now neutral (£0 spend · £0 income).`);
+      } else if (netSpendBase > 0.01) {
+        toast.success(`Paired payback! Only the remaining −${formatCurrency(netSpendBase, baseCurrency)} is deducted from spending (£0 added to income).`);
+      } else {
+        toast.success(`Paired payback! "${expenseTx.description}" is neutral (£0 spend) and only the extra +${formatCurrency(netExcessIncomeBase, baseCurrency)} is added to income.`);
+      }
+    } catch (err) {
+      console.error('Error linking payback:', err);
+      toast.error('Failed to link payback');
+    }
+  };
+
+  const handleUnlinkPayback = async (tx: any) => {
+    if (!tx) return;
+    try {
+      const meta = (tx.raw as any)?.payback_meta;
+      if (!meta) return;
+      if (meta.is_payback) {
+        const expIds: string[] = Array.isArray(meta.linked_expense_ids)
+          ? meta.linked_expense_ids
+          : meta.linked_expense_id
+          ? [meta.linked_expense_id]
+          : [];
+        const updatedIncomeRaw = { ...(tx.raw || {}) };
+        delete updatedIncomeRaw.payback_meta;
+        await updateTransaction(tx.id, { is_refund: false, raw: updatedIncomeRaw } as any);
+        for (const eid of expIds) {
+          const expenseTx = transactions.find(t => t.id === eid);
+          if (expenseTx) {
+            const updatedExpenseRaw = { ...(expenseTx.raw || {}) };
+            delete updatedExpenseRaw.payback_meta;
+            await updateTransaction(expenseTx.id, { raw: updatedExpenseRaw } as any);
+          }
+        }
+      }
+      toast.success('Payback link removed.');
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to unlink payback');
+    }
+  };
+
   const handleUnflagReimbursement = async (txId: string) => {
     await updateTransaction(txId, {
       is_reimbursable: false,
@@ -894,6 +1011,18 @@ export default function FinanceIncome() {
                                                 </button>
                                               </>
                                             )}
+
+                                            <div className="border-t border-slate-100 my-1" />
+                                            <button
+                                              onClick={() => {
+                                                setAssigningTxId(null);
+                                                setSourceTxForPayback(tx);
+                                                setPaybackDialogOpen(true);
+                                              }}
+                                              className="w-full text-left text-xs px-2 py-1.5 rounded-lg hover:bg-emerald-50 text-emerald-700 flex items-center gap-1.5 font-semibold"
+                                            >
+                                              <Handshake className="h-3.5 w-3.5 text-emerald-600" /> Pair as Payback for Expense
+                                            </button>
                                           </PopoverContent>
                                         </Popover>
                                       )}
@@ -1029,6 +1158,18 @@ export default function FinanceIncome() {
                                                 </button>
                                               </>
                                             )}
+
+                                            <div className="border-t border-slate-100 my-1" />
+                                            <button
+                                              onClick={() => {
+                                                setAssigningTxId(null);
+                                                setSourceTxForPayback(tx);
+                                                setPaybackDialogOpen(true);
+                                              }}
+                                              className="w-full text-left text-xs px-2 py-1.5 rounded-lg hover:bg-emerald-50 text-emerald-700 flex items-center gap-1.5 font-semibold"
+                                            >
+                                              <Handshake className="h-3.5 w-3.5 text-emerald-600" /> Pair as Payback for Expense
+                                            </button>
                                           </PopoverContent>
                                         </Popover>
                                       )}
@@ -1573,6 +1714,16 @@ export default function FinanceIncome() {
           </div>
         )}
       </div>
+
+      <PaybackLinkDialog
+        open={paybackDialogOpen}
+        onOpenChange={setPaybackDialogOpen}
+        sourceTransaction={sourceTxForPayback}
+        allTransactions={transactions}
+        baseCurrency={baseCurrency}
+        onLinkPayback={handleLinkPayback}
+        onUnlinkPayback={handleUnlinkPayback}
+      />
     </div>
   );
 }
