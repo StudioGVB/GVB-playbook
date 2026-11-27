@@ -361,7 +361,7 @@ export function computeActualSpendingIncome(
 
   // Baseline monthly income for the waterfall (Fixed Bills -> Variable Essentials -> Saving Goals -> Base Fun)
   // is strictly Gamma Salary. Other income streams get added to weeks left in month (divided equally by left weeks in month).
-  const total = (gamma > 0 ? gamma : 0) + (venture > 0 ? venture : 0);
+  const total = gamma > 0 ? gamma : 0;
 
   const streams: IncomeStreamBreakdownItem[] = Array.from(streamMap.entries())
     .map(([name, data]) => ({ name, amount: data.amount, count: data.count }))
@@ -604,47 +604,31 @@ export function computePolicySnapshot(
   // Spending income is anchored to weekStart (the Monday of the active week) so that a
   // last-working-day Gamma paycheck for Month M+1 never changes the final week of Month M mid-week.
   const actualIncome = computeActualSpendingIncome(transactions, categories, weekStart);
-  const monthlyIncome = (overrideMonthlyIncome && overrideMonthlyIncome > 0)
-    ? overrideMonthlyIncome
-    : (actualIncome.total > 0
-        ? actualIncome.total
-        : ((assumptions.expected_monthly_income && assumptions.expected_monthly_income > 0)
-            ? assumptions.expected_monthly_income
-            : 2400));
+  const monthlyIncome = (actualIncome.total > 0)
+    ? actualIncome.total
+    : ((assumptions.expected_monthly_income && assumptions.expected_monthly_income > 0)
+        ? assumptions.expected_monthly_income
+        : 2400);
   const isDrawdownMode = monthlyIncome === 0;
 
   // Core pools
   const livingPool = Math.max(0, totalLiquidCash - emergencyFloor - totalGoalAllocations);
   const spendablePool = Math.max(0, livingPool - targetSavings);
 
-  const weeksInMonth = computeWeeksInMonth(weekStart);
-  let weeklyGross = 0;
-  let weeksUntilIncome = 0;
-  let weeklyFixedCosts = fixedMonthly / weeksInMonth;
-  let weeklyEssentialBudget = essentialVariable / weeksInMonth;
-  let baseWeeklyFun = 0;
-  let split: MoneySplit;
+  // Daily rate pacing across month boundaries:
+  // For each of the 7 days in this Monday-Sunday week, determine which month it belongs to,
+  // compute that month's daily rates (Monthly / DaysInMonth), and sum the 7 days.
+  const monthCache = new Map<string, { dailyFixed: number; dailyEssential: number; dailyFun: number; monthSplit: MoneySplit }>();
 
-  if (isDrawdownMode) {
-    // Calculate required goal savings even in drawdown mode so active goals with deadlines are not zeroed out
-    const drawdownGoalSavings = computeRequiredGoalSavingsMonthly(goals, convertToBase, weekStart, 0, transactions);
-    // In drawdown mode (no incoming income), fun money is whatever unallocated spendable pool remains
-    baseWeeklyFun = spendablePool > 0 ? spendablePool / weeksInMonth : 0;
-    // Weekly gross = all weekly costs combined
-    weeklyGross = weeklyFixedCosts + weeklyEssentialBudget + (drawdownGoalSavings / weeksInMonth) + baseWeeklyFun;
-    // Runway-based weeks (how long living pool lasts at this burn rate)
-    weeksUntilIncome = weeklyGross > 0 ? spendablePool / weeklyGross : 0;
+  const getDailyRatesForDate = (date: Date) => {
+    const mKey = format(date, 'yyyy-MM');
+    if (monthCache.has(mKey)) return monthCache.get(mKey)!;
 
-    split = {
-      mandatoryPercent: 0, mandatoryAmount: fixedMonthly,
-      baseSavingsPercent: 0, baseSavingsAmount: 0,
-      goalSavingsPercent: 0, goalSavingsAmount: drawdownGoalSavings,
-      funPercent: 100, funAmount: baseWeeklyFun * weeksInMonth,
-      weeklyFunAmount: baseWeeklyFun,
-      monthlyIncome: 0,
-    };
-  } else {
-    split = computeMoneySplit(
+    const mStart = startOfMonth(date);
+    const mEnd = endOfMonth(date);
+    const daysInMonth = Math.max(1, differenceInCalendarDays(mEnd, mStart) + 1);
+
+    const monthSplit = computeMoneySplit(
       assumptions,
       transactions,
       categories,
@@ -654,11 +638,56 @@ export function computePolicySnapshot(
       monthlyIncome,
       weekTypeMap,
       trips,
-      now,
+      mStart,
     );
-    baseWeeklyFun = split.weeklyFunAmount;
-    weeklyGross = split.monthlyIncome / weeksInMonth;
+
+    const essentialRes = computeEssentialVariableMonthly(transactions, categories, weekTypeMap, trips, mStart);
+    const mEssential = Math.max(
+      assumptions.estimated_essential_variable ?? 0,
+      essentialRes.monthly,
+    );
+
+    const rates = {
+      dailyFixed: monthSplit.mandatoryAmount / daysInMonth,
+      dailyEssential: mEssential / daysInMonth,
+      dailyFun: monthSplit.funAmount / daysInMonth,
+      monthSplit,
+    };
+    monthCache.set(mKey, rates);
+    return rates;
+  };
+
+  let weeklyFixedCosts = 0;
+  let weeklyEssentialBudget = 0;
+  let baseWeeklyFun = 0;
+
+  for (let d = 0; d < 7; d++) {
+    const dayDate = addDays(weekStart, d);
+    const rates = getDailyRatesForDate(dayDate);
+    weeklyFixedCosts += rates.dailyFixed;
+    weeklyEssentialBudget += rates.dailyEssential;
+    baseWeeklyFun += rates.dailyFun;
   }
+
+  let split: MoneySplit;
+  if (isDrawdownMode) {
+    const drawdownGoalSavings = computeRequiredGoalSavingsMonthly(goals, convertToBase, weekStart, 0, transactions);
+    baseWeeklyFun = spendablePool > 0 ? (spendablePool / 30.44) * 7 : 0;
+    split = {
+      mandatoryPercent: 0, mandatoryAmount: fixedMonthly,
+      baseSavingsPercent: 0, baseSavingsAmount: 0,
+      goalSavingsPercent: 0, goalSavingsAmount: drawdownGoalSavings,
+      funPercent: 100, funAmount: baseWeeklyFun * 4.33,
+      weeklyFunAmount: baseWeeklyFun,
+      monthlyIncome: 0,
+    };
+  } else {
+    split = getDailyRatesForDate(weekStart).monthSplit;
+    split.weeklyFunAmount = baseWeeklyFun;
+  }
+
+  let weeklyGross = weeklyFixedCosts + weeklyEssentialBudget + baseWeeklyFun;
+  let weeksUntilIncome = weeklyGross > 0 ? spendablePool / weeklyGross : 0;
 
   // Apply weekly boost
   const boostAmount = weeklyBoostAmount ?? 0;
@@ -701,24 +730,18 @@ export function computePolicySnapshot(
     assumptions.estimated_essential_variable ?? 0,
     lastWeekEssentialResult.monthly,
   );
-  const lastWeekWeeksInMonth = computeWeeksInMonth(lastWeekStart);
-  const lastWeekEssentialBudget = lastWeekEssentialVariable / lastWeekWeeksInMonth;
+  let lastWeekEssentialBudget = 0;
+  let lastWeekBaseFun = 0;
+  for (let d = 0; d < 7; d++) {
+    const dayDate = addDays(lastWeekStart, d);
+    const rates = getDailyRatesForDate(dayDate);
+    lastWeekEssentialBudget += rates.dailyEssential;
+    lastWeekBaseFun += rates.dailyFun;
+  }
   const lastWeekActualIncome = computeActualSpendingIncome(transactions, categories, lastWeekStart);
-  const lastWeekSplit = lastWeekActualIncome.total > 0
-    ? computeMoneySplit(
-        assumptions,
-        transactions,
-        categories,
-        goals,
-        convertToBase,
-        fixedExpensesMonthlyAll ?? fixedMonthly,
-        lastWeekActualIncome.total,
-        weekTypeMap,
-        trips,
-        lastWeekStart,
-      )
-    : split;
-  const lastWeekBaseFun = lastWeekSplit.weeklyFunAmount + (lastWeekActualIncome.total > 0 ? lastWeekActualIncome.otherWeeklyBonus : 0);
+  if (lastWeekActualIncome.total > 0 && lastWeekActualIncome.otherWeeklyBonus > 0) {
+    lastWeekBaseFun += lastWeekActualIncome.otherWeeklyBonus;
+  }
 
   const lastWeekKey = format(lastWeekStart, 'yyyy-MM-dd');
   const stashes = goals.filter(g => (g as any).is_stash === true || (g.name || '').toLowerCase().includes('stash'));
@@ -824,7 +847,7 @@ export function computePolicySnapshot(
   // non-emergency savings pots (Euro pot, Xmas & Gifts, etc.).
   // Uses survival burn (fixed bills + essentials, with travel weeks burning fixed-only).
   const runwayCash = Math.max(0, totalLiquidCash - totalGoalAllocations);
-  const survivalWeeklyBurn = weeklyFixedCosts + (essentialVariable / weeksInMonth);
+  const survivalWeeklyBurn = weeklyFixedCosts + weeklyEssentialBudget;
   let runwayWeeks: number;
   if (travelWeeksRemaining > 0 && survivalWeeklyBurn > 0) {
     const travelPhaseSpend = travelWeeksRemaining * fixedOnlyBurn;
@@ -1214,9 +1237,11 @@ export function computeMoneySplit(
 
   // 5. Fun Money = WHAT IS LEFT OVER after the pots have been filled!
   // Pure dynamic residual: whatever remains after fixed bills, essentials, and pots is fun money.
-  const weeksInMonth = computeWeeksInMonth(referenceDate);
+  const mStart = startOfMonth(referenceDate);
+  const mEnd = endOfMonth(referenceDate);
+  const daysInMonth = Math.max(1, differenceInCalendarDays(mEnd, mStart) + 1);
   const incomeAfterPots = Math.max(0, incomeAfterEssentials - goalSavingsAmount);
-  const weeklyFunAmount = incomeAfterPots / weeksInMonth;
+  const weeklyFunAmount = (incomeAfterPots / daysInMonth) * 7;
   const funAmount = incomeAfterPots;
   const funPercent = effectiveIncome > 0 ? (funAmount / effectiveIncome) * 100 : 0;
 
