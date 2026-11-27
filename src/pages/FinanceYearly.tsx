@@ -33,10 +33,16 @@ import {
 export default function FinanceYearly() {
   const finance = useFinanceData();
   const { assumptions } = useFinanceAssumptions();
-  const { fixedExpenses, monthlyTotalInternal: fixedExpensesMonthly, monthlyTotal: fixedExpensesMonthlyAll } = useFixedExpenses();
+  const { expenses: fixedExpenses = [], monthlyTotalInternal: fixedExpensesMonthly, monthlyTotal: fixedExpensesMonthlyAll } = useFixedExpenses();
   const { trips } = useFinanceTrips();
   const { weekTypeMap: wtMap } = useWeekTypes();
   const { totalBoostThisWeek } = useWeeklyBoosts();
+
+  const categories = useMemo(() => finance.categories || [], [finance.categories]);
+  const transactions = useMemo(() => finance.transactions || [], [finance.transactions]);
+  const goals = useMemo(() => finance.goals || [], [finance.goals]);
+  const accounts = useMemo(() => finance.accounts || [], [finance.accounts]);
+  const tripsList = useMemo(() => trips || [], [trips]);
 
   // Primary chart mode: default to the full waterfall stack
   const [activeChartTab, setActiveChartTab] = useState<'stack' | 'cashflow' | 'wealth' | 'capacity'>('stack');
@@ -56,37 +62,37 @@ export default function FinanceYearly() {
     if (!assumptions) return null;
     return computePolicySnapshot(
       assumptions,
-      finance.accounts,
-      finance.transactions,
-      finance.categories,
-      finance.goals,
+      accounts,
+      transactions,
+      categories,
+      goals,
       finance.convertToBase,
       fixedExpensesMonthly,
       totalBoostThisWeek,
       wtMap(),
-      trips,
+      tripsList,
       fixedExpensesMonthlyAll,
     );
-  }, [assumptions, finance.accounts, finance.transactions, finance.categories, finance.goals, finance.convertToBase, fixedExpensesMonthly, fixedExpensesMonthlyAll, totalBoostThisWeek, wtMap, trips]);
+  }, [assumptions, accounts, transactions, categories, goals, finance.convertToBase, fixedExpensesMonthly, fixedExpensesMonthlyAll, totalBoostThisWeek, wtMap, tripsList]);
 
-  const catMap = useMemo(() => new Map(finance.categories.map(c => [c.id, c])), [finance.categories]);
+  const catMap = useMemo(() => new Map(categories.map(c => [c.id, c])), [categories]);
   const essentialCatIds = useMemo(() => new Set(
-    finance.categories.filter(c => c.is_essential && c.type === 'variable').map(c => c.id)
-  ), [finance.categories]);
+    categories.filter(c => c.is_essential && c.type === 'variable').map(c => c.id)
+  ), [categories]);
 
   // Pot Schedule Engine across future months
   const potSchedule = useMemo(() => {
     return computeMonthlyPotSchedule({
-      goals: finance.goals,
-      transactions: finance.transactions || [],
+      goals,
+      transactions,
       convertToBase: finance.convertToBase,
       referenceDate: now,
     });
-  }, [finance.goals, finance.transactions, finance.convertToBase, now]);
+  }, [goals, transactions, finance.convertToBase, now]);
 
   // Active fixed expenses & total monthly committed
   const activeFixedExpenses = useMemo(() => {
-    return fixedExpenses.filter(e => (e as any).is_active !== false);
+    return (fixedExpenses || []).filter(e => (e as any).is_active !== false);
   }, [fixedExpenses]);
 
   const fixedMonthlyBase = useMemo(() => {
@@ -158,7 +164,7 @@ export default function FinanceYearly() {
       let pots = 0;
       let gammaCounted = false;
 
-      const txns = finance.transactions.filter(tx => {
+      const txns = transactions.filter(tx => {
         const d = getEffectiveTxMonthDate(tx);
         return d >= mStart && d <= mEnd;
       });
@@ -424,7 +430,7 @@ export default function FinanceYearly() {
           const plan = potSchedule.getGoalPlanForMonth(meta.goal.id, mDate);
           amt = Math.round(plan?.monthlyAmount ?? 0);
         } else {
-          const pastSum = finance.transactions
+          const pastSum = transactions
             .filter(tx => (tx as any).goal_id === meta.goal.id)
             .filter(tx => {
               const d = getEffectiveTxMonthDate(tx);
@@ -472,7 +478,7 @@ export default function FinanceYearly() {
 
   // Active Goals Target Completion Timeline
   const goalMilestones = useMemo(() => {
-    const active = finance.goals.filter(g => {
+    const active = goals.filter(g => {
       const name = (g.name || '').toLowerCase();
       if ((g as any).is_stash || name.includes('stash')) return false;
       if ((g as any).is_emergency || name.includes('emergency')) return false;
@@ -531,6 +537,17 @@ export default function FinanceYearly() {
     const raw = Math.round((1 - Math.min(0.5, past6Stats.spendVariance)) * 100);
     return Math.max(70, Math.min(99, raw));
   }, [past6Stats.spendVariance]);
+
+  if (finance.loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh] max-w-7xl mx-auto px-4">
+        <div className="text-center space-y-3">
+          <div className="w-8 h-8 border-3 border-violet-600 border-t-transparent rounded-full animate-spin mx-auto" />
+          <p className="text-sm font-medium text-slate-500">Loading 12-Month Outlook...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8 pb-16 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6">
