@@ -1247,67 +1247,6 @@ export default function FinanceBudget() {
         </div>
       </div>
 
-      {/* === MID-MONTH POT FUNDING & BOOSTS BAR === */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 bg-white/85 backdrop-blur-sm rounded-2xl border-2 border-[#FF7AD1]/35 p-3 sm:px-4 shadow-[3px_3px_0px_0px_rgba(255,46,184,0.1)]">
-        <div className="flex flex-wrap items-center gap-2">
-          {weekBoostEntries.length > 0 ? (
-            weekBoostEntries.map(b => {
-              const g = finance.goals.find(x => x.id === b.goal_id);
-              const isDeduction = b.amount < 0;
-              return (
-                <div
-                  key={b.id}
-                  className={cn(
-                    "inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold border",
-                    isDeduction
-                      ? "bg-pink-50/90 border-pink-200 text-[#FF2EB8]"
-                      : "bg-emerald-50/90 border-emerald-200 text-emerald-700"
-                  )}
-                >
-                  <span>
-                    {isDeduction
-                      ? `🐷 −${fmt(Math.abs(b.amount))} → ${b.note || g?.name || 'Savings Pot'}`
-                      : `⚡ +${fmt(b.amount)} from ${g?.name || 'Goal'}`}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => handleRemoveBoost(b.id)}
-                    className="p-0.5 rounded-md hover:bg-black/10 transition-colors"
-                    title={isDeduction ? "Cancel this week's deduction & return to budget" : "Remove boost"}
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              );
-            })
-          ) : (
-            <span className="text-xs text-slate-600 font-medium">
-              💡 Budget looking healthy? Carve out a mid-month pot (e.g. £33/wk × 3 weeks) straight from your weekly allowance.
-            </span>
-          )}
-        </div>
-        <div className="flex flex-wrap items-center gap-2 shrink-0">
-          <WeeklyPotFundDialog
-            goals={finance.goals}
-            fmt={fmt}
-            currentWeeklyBudget={totalWeeklyBudget}
-            typicalWeeklySpend={computeTypicalWeeklyVariableSpend(
-              dedupedTransactions,
-              finance.categories,
-              typeof wtMap === 'function' ? wtMap() : wtMap,
-              trips,
-              today,
-            )}
-            thisWeekSpentSoFar={totalWeeklySpent}
-            daysLeftThisWeek={daysLeft}
-            onFundPot={handleFundPotFromWeeks}
-          />
-          {finance.goals.length > 0 && (
-            <BoostDialog goals={finance.goals} fmt={fmt} onAddBoost={handleAddBoost} />
-          )}
-        </div>
-      </div>
-
       {/* === WEEK PULSE === */}
       <div>
         <div className="flex items-center justify-between mb-2.5">
