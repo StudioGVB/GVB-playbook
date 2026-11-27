@@ -80,15 +80,15 @@ export default function FinanceYearly() {
     categories.filter(c => c.is_essential && c.type === 'variable').map(c => c.id)
   ), [categories]);
 
-  // Pot Schedule Engine across future months
+  // Pot Schedule Engine across future months (anchored to startOfMonth so full monthly requirements are used)
   const potSchedule = useMemo(() => {
     return computeMonthlyPotSchedule({
       goals,
       transactions,
       convertToBase: finance.convertToBase,
-      referenceDate: now,
+      referenceDate: currentMonthStart,
     });
-  }, [goals, transactions, finance.convertToBase, now]);
+  }, [goals, transactions, finance.convertToBase, currentMonthStart]);
 
   // Active fixed expenses & total monthly committed
   const activeFixedExpenses = useMemo(() => {
@@ -258,12 +258,12 @@ export default function FinanceYearly() {
     const pastMonths = monthWindows.filter(m => m.isPast);
     if (!pastMonths.length) {
       return {
-        avgIncome: 3500,
+        avgIncome: 2700,
         avgFixed: fixedMonthlyBase,
-        avgVariable: 1400,
-        avgEssential: 600,
-        avgFun: 800,
-        avgPots: 400,
+        avgVariable: 600,
+        avgEssential: 300,
+        avgFun: 300,
+        avgPots: 800,
         avgNet: 300,
         spendVariance: 0.08,
       };
@@ -302,41 +302,67 @@ export default function FinanceYearly() {
     };
   }, [monthWindows, historicalDataMap, fixedMonthlyBase]);
 
-  // Predictable Forward Forecast Construction (Next 6 Months)
+  // Detect most recent Gamma base salary deposit (fallback to expected_monthly_income or £2,400)
+  const latestGammaSalary = useMemo(() => {
+    if (assumptions?.expected_monthly_income && assumptions.expected_monthly_income > 0) {
+      return assumptions.expected_monthly_income;
+    }
+    const gammaTxs = transactions
+      .filter(tx => {
+        if (tx.amount < 1000 || tx.is_transfer || tx.is_reimbursable || (tx as any).is_refund) return false;
+        const rawText = `${tx.merchant || ''} ${tx.description || ''}`.toLowerCase();
+        const cat = catMap.get(tx.category_id || '');
+        const catLower = (cat?.name || '').toLowerCase();
+        if (rawText.includes('venture') || rawText.includes('eleven') || rawText.includes('back pocket') || rawText.includes('etsy')) {
+          return false;
+        }
+        return rawText.includes('gamma') || rawText.includes('salary') || catLower.includes('gamma') || catLower.includes('salary');
+      })
+      .sort((a, b) => parseUkDate(b.posted_at).getTime() - parseUkDate(a.posted_at).getTime());
+    return gammaTxs.length > 0 ? baseAmt(gammaTxs[0]) : 2400;
+  }, [assumptions, transactions, catMap]);
+
+  // Predictable Forward Forecast Construction (Next 6 Months) using the 4-Step Gamma Waterfall
   const full12MonthsSeries = useMemo(() => {
     let cumulativeWealth = snapshot?.totalLiquidCash ?? 5000;
     const series: Array<{
       monthKey: string;
       label: string;
       fullLabel: string;
+      daysInMonth: number;
       isPast: boolean;
       isCurrent: boolean;
       isFuture: boolean;
       type: 'Actual' | 'Forecast';
+      expectedGamma: number;
+      expectedSideIncome: number;
+      weeklySideIncome: number;
       income: number;
       fixed: number;
       essential: number;
-      fun: number;
+      rawScheduledPots: number;
       pots: number;
+      baseFunFromGamma: number;
+      fun: number;
+      potShortfallFromGamma: number;
+      baseCardSpendCap: number;
+      baseDailyAllowance: number;
+      baseWeeklyAllowance: number;
+      predictedWeeklyAllowance: number;
+      predictedDailyAllowance: number;
+      baseWeeklyFun: number;
+      predictedWeeklyFun: number;
       totalSpend: number;
       netSurplus: number;
       wealth: number;
       weeklyLivingCapacity: number;
     }> = [];
 
-    // Predictable income assumptions for future:
-    const baselineGamma = (snapshot?.split?.monthlyIncome && snapshot.split.monthlyIncome > 0)
-      ? snapshot.split.monthlyIncome
-      : (assumptions?.expected_monthly_income || 3200);
-    const predictableSide = forecastScenario === 'expected' ? 303 : 0; // ~£70/wk Venture Advisory retainer
-    const forecastIncome = baselineGamma + predictableSide;
-
-    const forecastEssential = assumptions?.estimated_essential_variable && assumptions.estimated_essential_variable > 0
-      ? assumptions.estimated_essential_variable
-      : (past6Stats.avgEssential || 600);
-    const forecastFun = (snapshot?.split?.funAmount && snapshot.split.funAmount > 0)
-      ? snapshot.split.funAmount
-      : (past6Stats.avgFun || 700);
+    const baselineGamma = latestGammaSalary;
+    const forecastEssential = Math.max(
+      assumptions?.estimated_essential_variable ?? 0,
+      snapshot?.computedEssentialVariable ?? 0,
+    ) || (past6Stats.avgEssential || 300);
 
     for (const m of monthWindows) {
       if (m.isPast || m.isCurrent) {
@@ -344,20 +370,35 @@ export default function FinanceYearly() {
           income: 0, fixed: 0, essential: 0, fun: 0, variable: 0, pots: 0, totalSpend: 0, netSurplus: 0,
         };
         const weeklyCap = (hist.variable / m.daysInMonth) * 7;
+        const dailyCap = hist.variable / m.daysInMonth;
 
         series.push({
           monthKey: m.monthKey,
           label: m.label,
           fullLabel: m.fullLabel,
+          daysInMonth: m.daysInMonth,
           isPast: m.isPast,
           isCurrent: m.isCurrent,
           isFuture: m.isFuture,
           type: 'Actual',
+          expectedGamma: Math.round(baselineGamma),
+          expectedSideIncome: Math.max(0, Math.round(hist.income - baselineGamma)),
+          weeklySideIncome: 0,
           income: Math.round(hist.income),
           fixed: Math.round(hist.fixed || fixedMonthlyBase),
           essential: Math.round(hist.essential),
-          fun: Math.round(hist.fun),
+          rawScheduledPots: Math.round(hist.pots),
           pots: Math.round(hist.pots),
+          baseFunFromGamma: Math.round(hist.fun),
+          fun: Math.round(hist.fun),
+          potShortfallFromGamma: 0,
+          baseCardSpendCap: Math.round(hist.variable),
+          baseDailyAllowance: dailyCap,
+          baseWeeklyAllowance: weeklyCap,
+          predictedWeeklyAllowance: weeklyCap,
+          predictedDailyAllowance: dailyCap,
+          baseWeeklyFun: (hist.fun / m.daysInMonth) * 7,
+          predictedWeeklyFun: (hist.fun / m.daysInMonth) * 7,
           totalSpend: Math.round(hist.totalSpend),
           netSurplus: Math.round(hist.netSurplus),
           wealth: 0,
@@ -369,7 +410,7 @@ export default function FinanceYearly() {
         const potPlan = typeof potSchedule?.getScheduleForMonth === 'function'
           ? potSchedule.getScheduleForMonth(mStart)
           : potSchedule?.months?.find((s: any) => s.monthKey === targetMonthKey);
-        const scheduledPots = potPlan?.totalScheduledMonthly ?? (potPlan as any)?.total ?? past6Stats.avgPots;
+        const rawScheduledPots = potPlan?.totalScheduledMonthly ?? (potPlan as any)?.total ?? 0;
 
         const hasTrip = trips.some(t => {
           const tStart = parseUkDate(t.start_date);
@@ -377,29 +418,76 @@ export default function FinanceYearly() {
           return (tStart <= endOfMonth(mStart) && tEnd >= mStart);
         });
 
+        // 4-Step Gamma Waterfall for Month M:
+        // 1. Fixed Bills [x]
+        const monthFixed = fixedMonthlyBase;
+        // 2. Variable Essentials [y]
         const monthEssential = hasTrip ? forecastEssential * 0.7 : forecastEssential;
-        const monthFun = hasTrip ? forecastFun * 0.8 : forecastFun;
-        const monthSpend = fixedMonthlyBase + monthEssential + monthFun + scheduledPots;
-        const monthNet = forecastIncome - monthSpend;
-        const weeklyCap = ((monthEssential + monthFun) / m.daysInMonth) * 7;
+        // 3. Savings Pots [z]
+        const availableForPotsFromGamma = Math.max(0, baselineGamma - monthFixed - monthEssential);
+        const fundedPotsFromGamma = Math.min(rawScheduledPots, availableForPotsFromGamma);
+        const potShortfallFromGamma = Math.max(0, rawScheduledPots - availableForPotsFromGamma);
+        // 4. Base Fun Money [a] = Leftover from Gamma
+        const baseFunFromGamma = Math.max(0, baselineGamma - monthFixed - monthEssential - fundedPotsFromGamma);
+
+        // Weekly Venture Advisory (£70/wk in 'expected' mode, £0 in 'conservative' mode)
+        const weeklySideIncome = forecastScenario === 'expected' ? 70 : 0;
+        const expectedSideIncome = forecastScenario === 'expected' ? Math.round((m.daysInMonth / 7) * 70) : 0;
+        const totalProjectedIncome = baselineGamma + expectedSideIncome;
+
+        // If Gamma wasn't enough to cover all scheduled pots, side income can cover the remaining pot shortfall first
+        const extraPotCoverFromSide = Math.min(expectedSideIncome, potShortfallFromGamma);
+        const effectivePotsFunded = fundedPotsFromGamma + extraPotCoverFromSide;
+        const remainingSideForFun = Math.max(0, expectedSideIncome - extraPotCoverFromSide);
+
+        const totalFunCapacity = baseFunFromGamma + remainingSideForFun;
+
+        // Daily & Weekly Allowance Math:
+        // Base Card Spend Cap = Variable Essentials [y] + Base Fun Money [a]
+        const baseCardSpendCap = monthEssential + baseFunFromGamma;
+        const baseDailyAllowance = m.daysInMonth > 0 ? baseCardSpendCap / m.daysInMonth : 0;
+        const baseWeeklyAllowance = baseDailyAllowance * 7;
+        const predictedWeeklyAllowance = baseWeeklyAllowance + (remainingSideForFun > 0 ? weeklySideIncome : 0);
+        const predictedDailyAllowance = predictedWeeklyAllowance / 7;
+
+        const baseWeeklyFun = m.daysInMonth > 0 ? (baseFunFromGamma / m.daysInMonth) * 7 : 0;
+        const predictedWeeklyFun = baseWeeklyFun + (remainingSideForFun > 0 ? weeklySideIncome : 0);
+
+        const monthTotalAllocated = monthFixed + monthEssential + totalFunCapacity + effectivePotsFunded;
+        // Wealth accumulates from the ring-fenced savings pots funded each month
+        const monthWealthGain = effectivePotsFunded;
 
         series.push({
           monthKey: m.monthKey,
           label: m.label,
           fullLabel: m.fullLabel,
+          daysInMonth: m.daysInMonth,
           isPast: false,
           isCurrent: false,
           isFuture: true,
           type: 'Forecast',
-          income: Math.round(forecastIncome),
-          fixed: Math.round(fixedMonthlyBase),
+          expectedGamma: Math.round(baselineGamma),
+          expectedSideIncome: Math.round(expectedSideIncome),
+          weeklySideIncome,
+          income: Math.round(totalProjectedIncome),
+          fixed: Math.round(monthFixed),
           essential: Math.round(monthEssential),
-          fun: Math.round(monthFun),
-          pots: Math.round(scheduledPots),
-          totalSpend: Math.round(monthSpend),
-          netSurplus: Math.round(monthNet),
+          rawScheduledPots: Math.round(rawScheduledPots),
+          pots: Math.round(effectivePotsFunded),
+          baseFunFromGamma: Math.round(baseFunFromGamma),
+          fun: Math.round(totalFunCapacity),
+          potShortfallFromGamma: Math.round(potShortfallFromGamma),
+          baseCardSpendCap: Math.round(baseCardSpendCap),
+          baseDailyAllowance,
+          baseWeeklyAllowance,
+          predictedWeeklyAllowance,
+          predictedDailyAllowance,
+          baseWeeklyFun,
+          predictedWeeklyFun,
+          totalSpend: Math.round(monthTotalAllocated),
+          netSurplus: Math.round(monthWealthGain),
           wealth: 0,
-          weeklyLivingCapacity: Math.round(weeklyCap),
+          weeklyLivingCapacity: Math.round(predictedWeeklyAllowance),
         });
       }
     }
@@ -425,6 +513,7 @@ export default function FinanceYearly() {
     historicalDataMap,
     snapshot,
     assumptions,
+    latestGammaSalary,
     fixedMonthlyBase,
     forecastScenario,
     past6Stats,
@@ -446,6 +535,7 @@ export default function FinanceYearly() {
       };
 
       let totalPots = 0;
+      const monthPotBreakdowns: Array<{ id: string; name: string; color: string; amount: number; targetBase: number }> = [];
       for (const meta of potSchedule.activeGoalMetas) {
         let amt = 0;
         if (s.isFuture || s.isCurrent) {
@@ -463,11 +553,21 @@ export default function FinanceYearly() {
         }
         point[meta.goal.id] = amt;
         totalPots += amt;
+        if (amt > 0) {
+          monthPotBreakdowns.push({
+            id: meta.goal.id,
+            name: meta.goal.name,
+            color: meta.color,
+            amount: amt,
+            targetBase: meta.targetBase,
+          });
+        }
       }
 
       point.totalPots = totalPots;
+      point.monthPotBreakdowns = monthPotBreakdowns;
       point.totalAllocated = point.fixed + point.variable + totalPots;
-      point.surplusHeadroom = point.income - point.totalAllocated;
+      point.surplusHeadroom = point.income - (point.fixed + s.essential + totalPots);
 
       return point;
     });
@@ -1357,19 +1457,24 @@ export default function FinanceYearly() {
               <p className="text-xs text-slate-400 py-3 text-center">No upcoming trips scheduled in this window.</p>
             ) : (
               <div className="space-y-2">
-                {trips.slice(0, 3).map((t, idx) => (
-                  <div key={idx} className="flex items-center justify-between p-3 rounded-xl bg-amber-50/50 border border-amber-100/70 text-xs">
-                    <div>
-                      <p className="font-semibold text-slate-900">{t.destination || 'Planned Trip'}</p>
-                      <p className="text-[11px] text-slate-500">
-                        {t.start_date} – {t.end_date}
-                      </p>
+                {trips.map((t, idx) => {
+                  const linkedGoal = t.goal_id ? goals.find(g => g.id === t.goal_id) : null;
+                  const tripTitle = t.name?.trim() || (t as any).destination?.trim() || linkedGoal?.name || 'Planned Trip';
+                  return (
+                    <div key={t.id || idx} className="flex items-center justify-between p-3 rounded-xl bg-amber-50/50 border border-amber-100/70 text-xs">
+                      <div>
+                        <p className="font-semibold text-slate-900">{tripTitle}</p>
+                        <p className="text-[11px] text-slate-500">
+                          {t.start_date} – {t.end_date}
+                          {linkedGoal && linkedGoal.name !== tripTitle ? ` · ${linkedGoal.name}` : ''}
+                        </p>
+                      </div>
+                      <Badge variant="outline" className="border-amber-300 text-amber-800 text-[10px]">
+                        Travel Mode
+                      </Badge>
                     </div>
-                    <Badge variant="outline" className="border-amber-300 text-amber-800 text-[10px]">
-                      Travel Mode
-                    </Badge>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </Card>
