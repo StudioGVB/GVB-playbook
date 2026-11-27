@@ -596,14 +596,15 @@ export function computeWeekAllowanceFromDays(params: {
   }
 
   // Venture Advisory weekly payments: added directly to the week they land (never stacked across the whole month)
-  const weeklyVentureItems: VentureWeeklyDepositItem[] = [];
+  const weeklyVentureMap = new Map<string, VentureWeeklyDepositItem>();
   for (const plan of monthPlans.values()) {
     for (const vItem of plan.ventureDepositsInMonth) {
       if (vItem.postedDate >= startOfDay(ws) && vItem.postedDate <= we) {
-        weeklyVentureItems.push(vItem);
+        weeklyVentureMap.set(vItem.txId, vItem);
       }
     }
   }
+  const weeklyVentureItems = Array.from(weeklyVentureMap.values());
   const weeklyVentureBoost = weeklyVentureItems.reduce((sum, item) => sum + item.amount, 0);
 
   const segments: WeekMonthSegment[] = Array.from(segmentMap.values()).map(seg => ({
@@ -652,7 +653,7 @@ export function computeWeekAllowanceFromDays(params: {
  * Savings Stash from completed weeks, so that:
  * 1. Past weeks' unspent allowance NEVER shows as "left to spend" in the Monthly total.
  * 2. Remaining spendable money in the month strictly reflects the active week's remaining allowance
- *    plus any future days in the month after the active week.
+ *    (for the days of the active week that fall in this month) plus any future weeks' days in this month.
  */
 export function computeMonthStashSweepSummary(params: {
   monthPlan: MonthDailyAllowancePlan;
@@ -695,6 +696,7 @@ export function computeMonthStashSweepSummary(params: {
   let sweptToStashTotal = 0;
   let activeAndFutureAllowanceInMonth = 0;
   let activeWeekSpentInMonth = 0;
+  let remainingSpendableInMonth = 0;
   const closedWeeksInMonth: MonthStashSweepSummary['closedWeeksInMonth'] = [];
 
   for (const [wkKey, grp] of daysByWeek.entries()) {
@@ -706,6 +708,7 @@ export function computeMonthStashSweepSummary(params: {
     const allowanceInMonth =
       grp.days.reduce((s, d) => s + d.totalDailyAllowance, 0) + ventureInThisWeekPortion;
     const isPastClosedWeek = grp.weekStart < currentWeekStart;
+    const isActiveWeek = format(grp.weekStart, 'yyyy-MM-dd') === format(currentWeekStart, 'yyyy-MM-dd');
 
     if (isPastClosedWeek) {
       const weekSummary = computeWeekVariableSpend(transactions, categories, grp.weekStart, trips);
@@ -734,22 +737,22 @@ export function computeMonthStashSweepSummary(params: {
         spentInMonth,
         sweptToStash: sweptForMonthPortion,
       });
-    } else {
+    } else if (isActiveWeek) {
       activeAndFutureAllowanceInMonth += allowanceInMonth;
-      if (format(grp.weekStart, 'yyyy-MM-dd') === format(currentWeekStart, 'yyyy-MM-dd')) {
-        const weekSummary = computeWeekVariableSpend(transactions, categories, grp.weekStart, trips);
-        activeWeekSpentInMonth = grp.days.reduce((sum, d) => {
-          const dayIdx = Math.min(6, Math.max(0, differenceInCalendarDays(d.date, grp.weekStart)));
-          return sum + (weekSummary.daily[dayIdx]?.total || 0);
-        }, 0);
-      }
+      const weekSummary = computeWeekVariableSpend(transactions, categories, grp.weekStart, trips);
+      activeWeekSpentInMonth = grp.days.reduce((sum, d) => {
+        const dayIdx = Math.min(6, Math.max(0, differenceInCalendarDays(d.date, grp.weekStart)));
+        return sum + (weekSummary.daily[dayIdx]?.total || 0);
+      }, 0);
+      // In the active week, remaining spendable for this month's portion is clamped to >= 0
+      // so an overspend in the active week doesn't create negative remaining spendable
+      remainingSpendableInMonth += Math.max(0, allowanceInMonth - activeWeekSpentInMonth);
+    } else {
+      // Future week in this month
+      activeAndFutureAllowanceInMonth += allowanceInMonth;
+      remainingSpendableInMonth += allowanceInMonth;
     }
   }
-
-  const remainingSpendableInMonth = Math.max(
-    0,
-    activeAndFutureAllowanceInMonth - activeWeekSpentInMonth,
-  );
 
   return {
     sweptToStashTotal,

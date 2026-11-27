@@ -343,22 +343,6 @@ export default function FinanceBudget() {
     toast.success(`Added ${fmt(amount)} from Savings Stash to this week's budget`);
   };
 
-  // Auto-heal: If stash balance was corrupted by phantom auto-settler surplus (> £130), reset to true balance £127.56
-  const stashResetRef = useRef(false);
-  useEffect(() => {
-    if (!stashGoal || !allDataReady || stashResetRef.current) return;
-    const currentBal = stashGoal.assigned_amount || 0;
-    if (Math.abs(currentBal - 535.18) < 1 || (currentBal > 130 && currentBal !== 127.56)) {
-      stashResetRef.current = true;
-      finance.updateGoal(stashGoal.id, {
-        assigned_amount: 127.56,
-      } as any);
-      if (assumptions?.carry_forward_debt && assumptions.carry_forward_debt > 0) {
-        updateAssumptions({ carry_forward_debt: 0 }, true);
-      }
-    }
-  }, [stashGoal, allDataReady, finance, assumptions, updateAssumptions]);
-
   const now = selectedDate;
   const dayOfWeek = isCurrentWeek 
     ? differenceInDays(today, weekStart) + 1 
@@ -587,57 +571,10 @@ export default function FinanceBudget() {
         ? Math.max(0, Math.round((currentStashBal - stashTaken) * 100) / 100)
         : Math.max(0, Math.round(((stashGoal?.assigned_amount || 0) + stashDelta) * 100) / 100);
 
-      // End-of-Month Sweep: if we have entered a new calendar month relative to prevWeekStart
-      // (i.e. prevWeekStart's month has now ended) and we haven't swept that month yet,
-      // shift 100% of any money left in Savings Stash straight into the real "Savings" pool.
-      // NOTE: If currently traveling, pause the sweep so Stash remains available as a holiday buffer!
-      const prevWeekMonthKey = format(prevWeekStart, 'yyyy-MM');
-      const todayMonthKey = format(today, 'yyyy-MM');
-      let sweptMonthKey = meta.last_swept_month;
-      let lastMonthSweep = meta.last_month_sweep || null;
-
-      if (todayMonthKey > prevWeekMonthKey && meta.last_swept_month !== prevWeekMonthKey && !snapshot.isTravelWeek) {
-        const realSavingsGoal =
-          finance.goals.find(
-            g =>
-              !(g as any).is_stash &&
-              !(g as any).is_emergency &&
-              !g.name.toLowerCase().includes('stash') &&
-              !g.name.toLowerCase().includes('emergency') &&
-              g.name.trim().toLowerCase() === 'savings'
-          ) ||
-          finance.goals.find(
-            g =>
-              !(g as any).is_stash &&
-              !(g as any).is_emergency &&
-              !g.name.toLowerCase().includes('stash') &&
-              !g.name.toLowerCase().includes('emergency') &&
-              g.name.toLowerCase().includes('saving')
-          );
-
-        if (realSavingsGoal && nextStashAmount > 0.01) {
-          const sweptAmount = nextStashAmount;
-          const oneInBase = finance.convertToBase(1, realSavingsGoal.currency);
-          const nativeAdd = oneInBase === 0 ? sweptAmount : sweptAmount / oneInBase;
-          await finance.updateGoal(realSavingsGoal.id, {
-            assigned_amount: Math.round(((realSavingsGoal.assigned_amount || 0) + nativeAdd) * 100) / 100,
-          } as any);
-          nextStashAmount = 0;
-          sweptMonthKey = prevWeekMonthKey;
-          lastMonthSweep = {
-            month: prevWeekMonthKey,
-            amount: sweptAmount,
-            targetGoalId: realSavingsGoal.id,
-            targetGoalName: realSavingsGoal.name,
-          };
-          toast.success(
-            `End of month! Shifted ${fmt(sweptAmount)} left in Savings Stash straight into your ${realSavingsGoal.name} pool 🎉`,
-            { duration: 9000 }
-          );
-        } else {
-          sweptMonthKey = prevWeekMonthKey;
-        }
-      }
+      // Keep all unspent weekly savings in Savings Stash across month boundaries
+      // so Gabriella has 100% manual control to allocate Stash towards future weekly boosts or savings pots.
+      const sweptMonthKey = meta.last_swept_month;
+      const lastMonthSweep = meta.last_month_sweep || null;
 
       // Stash balance + metadata (settle marker, version, stash delta, closed_weeks lock, borrowed ledger, last cover summary) — always written
       const newMeta: CoverMeta = {
