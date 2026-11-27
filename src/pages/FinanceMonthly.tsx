@@ -213,7 +213,7 @@ export default function FinanceMonthly() {
     let fixedSpent = 0;
     let incomeTotal = 0;
     const catTotals = new Map<string, number>();
-    const paidFixedTxns: Array<{ id: string; name: string; amount: number; date: Date; fixedExpenseId?: string | null }> = [];
+    const paidFixedTxns: Array<{ id: string; name: string; amount: number; date: Date; fixedExpenseId?: string | null; categoryId?: string | null }> = [];
 
     let gammaSalaryCounted = false;
     for (const tx of monthTxns) {
