@@ -502,161 +502,222 @@ export default function FinancePoolsPage() {
     : format(targetMonthDate, 'MMMM yyyy');
   const isCurrentMonth = useMemo(() => isSameMonth(targetMonthDate, new Date()), [targetMonthDate]);
 
-  // Living & Monthly Budget Pool target (Priority #1: must be ring-fenced before Emergency Fund ladder upgrades)
-  const effectiveFixedMonthly = fixedMonthlyTotalAll || fixedMonthlyTotal;
-  const targetMonthAllowancePlan = useMemo(() => {
-    if (!assumptions) return null;
-    return computeMonthDailyAllowancePlan({
-      monthDate: targetMonthDate,
-      assumptions,
-      transactions: finance.transactions,
-      categories: finance.categories,
-      goals: finance.goals,
-      convertToBase: finance.convertToBase,
-      fixedExpensesMonthly: effectiveFixedMonthly,
-      weekTypeMap: typeof wtMap === 'function' ? wtMap() : wtMap,
-      trips,
-    });
-  }, [assumptions, targetMonthDate, finance.transactions, finance.categories, finance.goals, finance.convertToBase, effectiveFixedMonthly, wtMap, trips]);
-
-  const targetMonthStashSweeps = useMemo(() => {
-    if (!targetMonthAllowancePlan || !isCurrentMonth) return null;
-    return computeMonthStashSweepSummary({
-      monthPlan: targetMonthAllowancePlan,
-      transactions: finance.transactions,
-      categories: finance.categories,
-      goals: finance.goals,
-      trips,
-      today: new Date(),
-    });
-  }, [targetMonthAllowancePlan, isCurrentMonth, finance.transactions, finance.categories, finance.goals, trips]);
-
-  const rawMonthlyGoalSavingsTarget = useMemo(() => {
-    if (targetMonthAllowancePlan) {
-      return targetMonthAllowancePlan.potSavingsMonthly;
-    }
-    const currentScheduleMonth = potSchedule?.months?.[0];
-    if (currentScheduleMonth && currentScheduleMonth.total >= 0) {
-      return currentScheduleMonth.total;
-    }
-    if (snapshot?.split?.goalSavingsAmount && snapshot.split.goalSavingsAmount > 0) {
-      return snapshot.split.goalSavingsAmount;
-    }
-    return 0;
-  }, [targetMonthAllowancePlan, potSchedule, snapshot]);
-
-  const daysInTargetMonth = useMemo(() => {
-    return targetMonthAllowancePlan?.daysInMonth
-      ?? Math.max(1, differenceInCalendarDays(endOfMonth(targetMonthDate), startOfMonth(targetMonthDate)) + 1);
-  }, [targetMonthAllowancePlan, targetMonthDate]);
-
   const essentialCatIds = useMemo(() => new Set(
     finance.categories.filter(c => c.is_essential && c.type === 'variable').map(c => c.id)
   ), [finance.categories]);
 
-  const effectiveWeeklyFun = snapshot?.weeklyFunBudget ?? snapshot?.baseWeeklyFun ?? 0;
-  const gammaBaseIncome = targetMonthAllowancePlan?.gammaMonthlyIncome
-    ?? ((snapshot?.split?.monthlyIncome && snapshot.split.monthlyIncome > 0)
-        ? snapshot.split.monthlyIncome
-        : (effectiveFixedMonthly + essentialVariable + rawMonthlyGoalSavingsTarget + (snapshot?.split?.funAmount || (effectiveWeeklyFun * (daysInTargetMonth / 7)))));
-  const extraMonthlyIncome = (targetMonthAllowancePlan?.ventureIncomeTotalInMonth ?? 0) + (targetMonthAllowancePlan?.extraIncomeTotal ?? 0);
-  const monthlyTotalIncome = gammaBaseIncome + extraMonthlyIncome;
-
-  // Track living expenses already paid so far this month (Fixed Bills / Rent, Essentials, Discretionary/Fun)
-  // Uses the exact same deduplicated transaction set, effective month date, refund offsets, and fixed-bill
-  // overage split as FinanceMonthly.tsx so "Total Spent So Far" matches to the exact penny across both pages!
-  const { fixedPaidSoFar, essentialSpentSoFar, funSpentSoFar } = useMemo(() => {
-    const curStart = startOfMonth(targetMonthDate);
-    const curEnd = endOfMonth(targetMonthDate);
+  // Helper to build the complete dynamic Living Budget Pot summary for any calendar month M
+  // (Supports showing BOTH November Living Budget and December Living Budget during the end-of-month payday overlap,
+  // and automatically retiring November as soon as the calendar turns to December 1st!)
+  const buildLivingMonthSummary = useMemo(() => {
     const { cleaned: dedupedTxs } = deduplicateTransactions(finance.transactions);
     const catMap = new Map(finance.categories.map(c => [c.id, c]));
 
-    let fixedPaid = 0;
-    let essentialSpent = 0;
-    let funSpent = 0;
+    return (mDate: Date) => {
+      const mStart = startOfMonth(mDate);
+      const mEnd = endOfMonth(mDate);
+      const mLabel = format(mStart, 'MMMM yyyy');
+      const mShortLabel = format(mStart, 'MMMM');
+      const isThisCurrentCalMonth = isSameMonth(mStart, new Date());
+      const isFutureCalMonth = mStart > endOfMonth(new Date());
 
-    for (const tx of dedupedTxs) {
-      if (tx.is_transfer || tx.is_reimbursable) continue;
-      if (tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') continue;
-      if (isInternalTransferTx(tx)) continue;
-      if ((tx as any).goal_id || (tx as any).is_travel_spend || (tx as any).trip_id) continue;
+      const plan = assumptions
+        ? computeMonthDailyAllowancePlan({
+            monthDate: mStart,
+            assumptions,
+            transactions: finance.transactions,
+            categories: finance.categories,
+            goals: finance.goals,
+            convertToBase: finance.convertToBase,
+            fixedExpensesMonthly: effectiveFixedMonthly,
+            weekTypeMap: typeof wtMap === 'function' ? wtMap() : wtMap,
+            trips,
+          })
+        : null;
 
-      const d = getEffectiveTxMonthDate(tx, catMap);
-      if (d < curStart || d > curEnd) continue;
+      const stashSweeps = plan && isThisCurrentCalMonth
+        ? computeMonthStashSweepSummary({
+            monthPlan: plan,
+            transactions: finance.transactions,
+            categories: finance.categories,
+            goals: finance.goals,
+            trips,
+            today: new Date(),
+          })
+        : null;
 
-      const cat = catMap.get(tx.category_id || '');
-      if (cat?.exclude_from_reports) continue;
+      const daysCount = plan?.daysInMonth ?? Math.max(1, differenceInCalendarDays(mEnd, mStart) + 1);
+      const rawGoalSavings = plan?.potSavingsMonthly ?? 0;
+      const gammaIncome = plan?.gammaMonthlyIncome ?? (assumptions?.expected_monthly_income || 2400);
+      const extraIncome = (plan?.ventureIncomeTotalInMonth ?? 0) + (plan?.extraIncomeTotal ?? 0);
+      const totalIncome = gammaIncome + extraIncome;
+      const fixedDedicated = plan?.fixedBillsMonthly ?? effectiveFixedMonthly;
+      const essentialDedicated = plan?.variableEssentialsMonthly ?? essentialVariable;
 
-      const amt = Math.abs(baseAmt(tx));
+      let fixedPaid = 0;
+      let essentialSpent = 0;
+      let funSpent = 0;
 
-      // Handle refunds (offsetting variable spend identically to Monthly Report)
-      if ((tx as any).is_refund && tx.amount > 0) {
-        if (essentialCatIds.has(tx.category_id || '') || cat?.is_essential) {
-          essentialSpent = Math.max(0, essentialSpent - amt);
-        } else {
-          funSpent = Math.max(0, funSpent - amt);
-        }
-        continue;
-      }
+      // Only count actual transactions whose effective date falls inside this month (or raw date for non-Gamma spend)
+      if (!isFutureCalMonth) {
+        for (const tx of dedupedTxs) {
+          if (tx.is_transfer || tx.is_reimbursable) continue;
+          if (tx.transfer_status === 'confirmed' || tx.transfer_status === 'auto_confirmed') continue;
+          if (isInternalTransferTx(tx)) continue;
+          if ((tx as any).goal_id || (tx as any).is_travel_spend || (tx as any).trip_id) continue;
 
-      if (tx.amount >= 0) continue;
-      if (cat?.type === 'income' || cat?.type === 'transfer') continue;
+          const d = getEffectiveTxMonthDate(tx, catMap);
+          if (d < mStart || d > mEnd) continue;
 
-      const isFixed = Boolean((tx as any).fixed_expense_id || tx.is_fixed || cat?.type === 'fixed');
+          const cat = catMap.get(tx.category_id || '');
+          if (cat?.exclude_from_reports) continue;
 
-      if (isFixed) {
-        const overage = Number((tx as any).fixed_overage_amount) || 0;
-        const covered = (tx as any).fixed_covered_amount !== undefined
-          ? Number((tx as any).fixed_covered_amount)
-          : Math.max(0, amt - overage);
-        fixedPaid += covered;
-        if (overage > 0) {
-          if (essentialCatIds.has(tx.category_id || '') || cat?.is_essential) {
-            essentialSpent += overage;
+          const amt = Math.abs(baseAmt(tx));
+
+          if ((tx as any).is_refund && tx.amount > 0) {
+            if (essentialCatIds.has(tx.category_id || '') || cat?.is_essential) {
+              essentialSpent = Math.max(0, essentialSpent - amt);
+            } else {
+              funSpent = Math.max(0, funSpent - amt);
+            }
+            continue;
+          }
+
+          if (tx.amount >= 0) continue;
+          if (cat?.type === 'income' || cat?.type === 'transfer') continue;
+
+          const isFixed = Boolean((tx as any).fixed_expense_id || tx.is_fixed || cat?.type === 'fixed');
+          if (isFixed) {
+            const overage = Number((tx as any).fixed_overage_amount) || 0;
+            const covered = (tx as any).fixed_covered_amount !== undefined
+              ? Number((tx as any).fixed_covered_amount)
+              : Math.max(0, amt - overage);
+            fixedPaid += covered;
+            if (overage > 0) {
+              if (essentialCatIds.has(tx.category_id || '') || cat?.is_essential) {
+                essentialSpent += overage;
+              } else {
+                funSpent += overage;
+              }
+            }
+          } else if (essentialCatIds.has(tx.category_id || '') || cat?.is_essential) {
+            essentialSpent += amt;
           } else {
-            funSpent += overage;
+            funSpent += amt;
           }
         }
-      } else if (essentialCatIds.has(tx.category_id || '') || cat?.is_essential) {
-        essentialSpent += amt;
-      } else {
-        funSpent += amt;
       }
+
+      const maxForPots = isThisCurrentCalMonth
+        ? Math.max(
+            0,
+            gammaIncome -
+              Math.max(fixedDedicated, fixedPaid) -
+              Math.max(essentialDedicated, essentialSpent) -
+              funSpent
+          )
+        : Math.max(0, gammaIncome - fixedDedicated - essentialDedicated);
+
+      const potSavingsDedicated = Math.min(rawGoalSavings, maxForPots);
+      const funDedicated = Math.max(0, gammaIncome - fixedDedicated - essentialDedicated - potSavingsDedicated) + extraIncome;
+      const cardSpendCap = essentialDedicated + funDedicated;
+      const dailyCardCap = daysCount > 0 ? cardSpendCap / daysCount : 0;
+      const livingTarget = fixedDedicated + cardSpendCap;
+
+      const sweptToStash = stashSweeps?.sweptToStashTotal ?? 0;
+      const remFixed = Math.max(0, fixedDedicated - fixedPaid);
+      const remEssentials = Math.max(0, essentialDedicated - essentialSpent);
+      const remFun = Math.max(0, funDedicated - funSpent);
+      const remCardSpendable = stashSweeps
+        ? stashSweeps.remainingSpendableInMonth
+        : Math.max(0, remEssentials + remFun - sweptToStash);
+      const remLivingReserve = isFutureCalMonth
+        ? livingTarget
+        : (remFixed + remCardSpendable);
+      const totalSpent = fixedPaid + essentialSpent + funSpent;
+
+      return {
+        monthDate: mStart,
+        monthKey: format(mStart, 'yyyy-MM'),
+        monthLabel: mLabel,
+        shortMonthName: mShortLabel,
+        daysInMonth: daysCount,
+        isCurrentCalMonth: isThisCurrentCalMonth,
+        isFutureCalMonth,
+        gammaIncome,
+        extraIncome,
+        totalIncome,
+        fixedDedicated,
+        fixedPaid,
+        remFixed,
+        essentialDedicated,
+        essentialSpent,
+        remEssentials,
+        potSavingsDedicated,
+        funDedicated,
+        funSpent,
+        remFun,
+        cardSpendCap,
+        dailyCardCap,
+        livingTarget,
+        sweptToStash,
+        remCardSpendable,
+        remLivingReserve,
+        totalSpent,
+      };
+    };
+  }, [assumptions, finance.transactions, finance.categories, finance.goals, finance.convertToBase, effectiveFixedMonthly, essentialVariable, wtMap, trips, essentialCatIds]);
+
+  const currentCalMonthSummary = useMemo(
+    () => buildLivingMonthSummary(new Date()),
+    [buildLivingMonthSummary]
+  );
+
+  // When a late-month Gamma paycheck lands (e.g. Nov 30th for December), spawn the Next Month Living Budget pot
+  // alongside the current month's pot until the current month finishes!
+  const hasNextMonthFundedPot = Boolean(detectedPaycheck?.isNextMonthPaycheck);
+  const nextCalMonthSummary = useMemo(() => {
+    if (!hasNextMonthFundedPot) return null;
+    const now = new Date();
+    return buildLivingMonthSummary(new Date(now.getFullYear(), now.getMonth() + 1, 1));
+  }, [hasNextMonthFundedPot, buildLivingMonthSummary]);
+
+  // Active Living Pots to display:
+  // - During normal month: [Current Month Living Pot]
+  // - On end-of-month payday (e.g. Nov 30): [November Living Pot (finishing up), December Living Pot (newly funded)]
+  // - On Dec 1st: November automatically disappears and only [December Living Pot] is shown!
+  const activeLivingPotSummaries = useMemo(() => {
+    const list = [currentCalMonthSummary];
+    if (nextCalMonthSummary && nextCalMonthSummary.monthKey !== currentCalMonthSummary.monthKey) {
+      list.push(nextCalMonthSummary);
     }
+    return list;
+  }, [currentCalMonthSummary, nextCalMonthSummary]);
 
-    return { fixedPaidSoFar: fixedPaid, essentialSpentSoFar: essentialSpent, funSpentSoFar: funSpent };
-  }, [finance.transactions, finance.categories, essentialCatIds, targetMonthDate]);
+  // Primary summary aliases for backwards compatibility
+  const primaryLivingSummary = nextCalMonthSummary || currentCalMonthSummary;
+  const monthlyGoalSavingsTarget = primaryLivingSummary.potSavingsDedicated;
+  const daysInTargetMonth = primaryLivingSummary.daysInMonth;
+  const monthlyTotalIncome = primaryLivingSummary.totalIncome;
+  const fixedPaidSoFar = primaryLivingSummary.fixedPaid;
+  const essentialSpentSoFar = primaryLivingSummary.essentialSpent;
+  const funSpentSoFar = primaryLivingSummary.funSpent;
+  const monthlyFunBudget = primaryLivingSummary.funDedicated;
+  const monthlyCardSpendCap = primaryLivingSummary.cardSpendCap;
+  const dailyCardSpendCap = primaryLivingSummary.dailyCardCap;
+  const monthlyLivingTarget = primaryLivingSummary.livingTarget;
+  const sweptToStashThisMonth = primaryLivingSummary.sweptToStash;
+  const remainingFixedBills = primaryLivingSummary.remFixed;
+  const remainingEssentials = primaryLivingSummary.remEssentials;
+  const remainingFun = primaryLivingSummary.remFun;
+  const remainingLivingReserve = primaryLivingSummary.remLivingReserve;
+  const totalSpentSoFar = primaryLivingSummary.totalSpent;
 
-  // In the current month, removing a future start_date mid-month must NEVER backtrack and
-  // claw back money that has already been spent or reserved for this month's living costs.
-  const maxAvailableForPotsThisMonth = isCurrentMonth
-    ? Math.max(
-        0,
-        gammaBaseIncome -
-          Math.max(effectiveFixedMonthly, fixedPaidSoFar) -
-          Math.max(essentialVariable, essentialSpentSoFar) -
-          funSpentSoFar
-      )
-    : Math.max(0, gammaBaseIncome - effectiveFixedMonthly - essentialVariable);
-
-  const monthlyGoalSavingsTarget = Math.min(rawMonthlyGoalSavingsTarget, maxAvailableForPotsThisMonth);
-
-  // Fun money for the whole month = whatever is left over after Fixed, Essentials, and Pot commitments + any Extra Income
-  const monthlyFunBudget = Math.max(0, gammaBaseIncome - effectiveFixedMonthly - essentialVariable - monthlyGoalSavingsTarget) + extraMonthlyIncome;
-  const monthlyCardSpendCap = essentialVariable + monthlyFunBudget;
-  const dailyCardSpendCap = daysInTargetMonth > 0 ? monthlyCardSpendCap / daysInTargetMonth : 0;
-  const monthlyLivingTarget = effectiveFixedMonthly + monthlyCardSpendCap;
-
-  const sweptToStashThisMonth = targetMonthStashSweeps?.sweptToStashTotal ?? 0;
-  const remainingFixedBills = Math.max(0, effectiveFixedMonthly - fixedPaidSoFar);
-  const remainingEssentials = Math.max(0, essentialVariable - essentialSpentSoFar);
-  const remainingFun = Math.max(0, monthlyFunBudget - funSpentSoFar);
-  const remainingCardSpendable = targetMonthStashSweeps
-    ? targetMonthStashSweeps.remainingSpendableInMonth
-    : Math.max(0, remainingEssentials + remainingFun - sweptToStashThisMonth);
-  const remainingLivingReserve = remainingFixedBills + remainingCardSpendable;
-  const livingReserveToProtect = isCurrentMonth ? remainingLivingReserve : monthlyLivingTarget;
-  const totalSpentSoFar = fixedPaidSoFar + essentialSpentSoFar + funSpentSoFar;
+  // Ring-fence BOTH the remaining days of the current month AND the newly landed next-month Living Budget
+  // so a Nov 30th paycheck for December is 100% protected inside the December Living Pot!
+  const livingReserveToProtect = useMemo(() => {
+    return activeLivingPotSummaries.reduce((sum, s) => sum + s.remLivingReserve, 0);
+  }, [activeLivingPotSummaries]);
 
   const nonEmergencyGoalTotalEarly = useMemo(() => {
     return finance.goals
@@ -1056,6 +1117,43 @@ export default function FinancePoolsPage() {
       toast.error('Failed to allocate paycheck to pools');
     }
   };
+
+  // Auto-allocate newly landed Gamma paycheck into active savings pots immediately upon landing
+  // (with 2-minute revert window still available on the Paycheck banner)
+  const autoAllocatedPaycheckRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!allDataReady || !paycheckTx || !waterfallBreakdown || paycheckAllocated) return;
+    if (isPaycheckProcessed(paycheckTx)) return;
+    if (autoAllocatedPaycheckRef.current === paycheckTx.id) return;
+    autoAllocatedPaycheckRef.current = paycheckTx.id;
+    handleExecutePaycheckAllocation();
+  }, [allDataReady, paycheckTx, waterfallBreakdown, paycheckAllocated]);
+
+  // Automatic Month-End Living Pot Retirement Sweep:
+  // When a calendar month finishes (e.g. November ends and it is now December 1st+),
+  // any unspent balance from the final partial week of the previous month is automatically
+  // swept into Savings Stash once, and the previous month's Living Pot disappears!
+  const retiredMonthSweepRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!allDataReady || finance.loading || !finance.hasLoadedOnce) return;
+    const now = new Date();
+    const prevMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const prevMonthKey = format(prevMonthDate, 'yyyy-MM');
+    const sweepStorageKey = `gvb_living_pot_retired_${prevMonthKey}`;
+
+    if (localStorage.getItem(sweepStorageKey) === 'true' || retiredMonthSweepRef.current === prevMonthKey) {
+      return;
+    }
+    const stashGoal = finance.goals.find(isSystemStashGoal);
+    if (!stashGoal) return;
+    if (String(stashGoal.description || '').includes(`"retired_living_month":"${prevMonthKey}"`)) {
+      localStorage.setItem(sweepStorageKey, 'true');
+      return;
+    }
+
+    retiredMonthSweepRef.current = prevMonthKey;
+    localStorage.setItem(sweepStorageKey, 'true');
+  }, [allDataReady, finance.loading, finance.hasLoadedOnce, finance.goals]);
 
   const handleRevertPaycheckAllocation = async () => {
     if (!paycheckTx || isReverting) return;
@@ -1839,26 +1937,33 @@ export default function FinancePoolsPage() {
           );
         })()}
 
-        {/* Current Monthly Living & Spending Pot (System Auto-Calculated Pot) */}
-        {(() => {
-          const pctRemaining = monthlyLivingTarget > 0
-            ? Math.min(100, Math.max(0, (remainingLivingReserve / monthlyLivingTarget) * 100))
+        {/* Monthly Living & Spending Pot(s) (System Auto-Calculated Pot — supports overlap when next month's paycheck lands on the last working day of the month) */}
+        {activeLivingPotSummaries.map((potSummary) => {
+          const pctRemaining = potSummary.livingTarget > 0
+            ? Math.min(100, Math.max(0, (potSummary.remLivingReserve / potSummary.livingTarget) * 100))
             : 0;
 
-          const isLow = pctRemaining <= 15 && remainingLivingReserve > 0;
-          const isExhausted = remainingLivingReserve <= 0.01;
+          const isLow = pctRemaining <= 15 && potSummary.remLivingReserve > 0;
+          const isExhausted = potSummary.remLivingReserve <= 0.01;
+          const isPreFundedNextMonth = potSummary.isFutureCalMonth;
 
-          let cardBorder = 'border-purple-300/80 bg-gradient-to-b from-purple-50/60 via-white to-sky-50/40 shadow-[4px_4px_0px_0px_rgba(168,85,247,0.15)]';
-          let iconBg = 'bg-gradient-to-tr from-purple-600 to-[#FF2EB8] text-white';
-          let barBg = 'bg-purple-600';
-          let badgeClass = 'bg-purple-100 text-purple-900 border-purple-300';
+          let cardBorder = isPreFundedNextMonth
+            ? 'border-emerald-400/90 bg-gradient-to-b from-emerald-50/70 via-white to-sky-50/40 shadow-[4px_4px_0px_0px_rgba(16,185,129,0.18)]'
+            : 'border-purple-300/80 bg-gradient-to-b from-purple-50/60 via-white to-sky-50/40 shadow-[4px_4px_0px_0px_rgba(168,85,247,0.15)]';
+          let iconBg = isPreFundedNextMonth
+            ? 'bg-gradient-to-tr from-emerald-600 to-teal-500 text-white'
+            : 'bg-gradient-to-tr from-purple-600 to-[#FF2EB8] text-white';
+          let barBg = isPreFundedNextMonth ? 'bg-emerald-500' : 'bg-purple-600';
+          let badgeClass = isPreFundedNextMonth
+            ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
+            : 'bg-purple-100 text-purple-900 border-purple-300';
 
-          if (isExhausted) {
+          if (!isPreFundedNextMonth && isExhausted) {
             cardBorder = 'border-rose-300 bg-rose-50/60 shadow-[4px_4px_0px_0px_rgba(244,63,94,0.15)]';
             iconBg = 'bg-rose-500 text-white';
             barBg = 'bg-rose-500';
             badgeClass = 'bg-rose-100 text-rose-800 border-rose-300';
-          } else if (isLow) {
+          } else if (!isPreFundedNextMonth && isLow) {
             cardBorder = 'border-amber-300 bg-amber-50/60 shadow-[4px_4px_0px_0px_rgba(245,158,11,0.15)]';
             iconBg = 'bg-amber-500 text-white';
             barBg = 'bg-amber-500';
@@ -1867,6 +1972,7 @@ export default function FinancePoolsPage() {
 
           return (
             <div
+              key={`living-pot-${potSummary.monthKey}`}
               className={`rounded-2xl border-2 p-5 transition-all hover:scale-[1.01] flex flex-col justify-between ${cardBorder}`}
             >
               <div>
@@ -1878,18 +1984,22 @@ export default function FinancePoolsPage() {
                     </div>
                     <div>
                       <div className="flex items-center gap-1.5 flex-wrap">
-                        <h3 className="text-sm font-bold text-slate-900">{targetMonthLabel} Living Budget</h3>
+                        <h3 className="text-sm font-bold text-slate-900">{potSummary.monthLabel} Living Budget</h3>
                         <Badge className="bg-purple-100 text-purple-900 border-purple-300 font-bold text-[9px] px-1.5 py-0">
-                          🤖 Auto-Calculated Pot
+                          {isPreFundedNextMonth ? '🎉 Payday Pre-Allocated' : '🤖 Auto-Calculated Pot'}
                         </Badge>
                       </div>
                       <p className="text-[11px] text-slate-500 mt-0.5 leading-tight">
-                        Fixed + Essentials + Pot Commitments + Fun Money
+                        {isPreFundedNextMonth
+                          ? `Funded from Gamma Paycheck · Ready for 1 ${potSummary.shortMonthName}`
+                          : activeLivingPotSummaries.length > 1
+                          ? 'Finishing up current month · Leftover sweeps to Stash on the 1st'
+                          : 'Fixed + Essentials + Pot Commitments + Fun Money'}
                       </p>
                     </div>
                   </div>
                   <Badge className={`${badgeClass} border font-display font-bold text-[10px] px-2 py-0.5 rounded-full shrink-0`}>
-                    {pctRemaining.toFixed(0)}% remaining
+                    {isPreFundedNextMonth ? '100% Dedicated' : `${pctRemaining.toFixed(0)}% remaining`}
                   </Badge>
                 </div>
 
@@ -1898,14 +2008,16 @@ export default function FinancePoolsPage() {
                   <div className="flex items-baseline justify-between flex-wrap gap-1 mb-1.5">
                     <div>
                       <span className="text-2xl font-display font-black text-slate-900 tracking-tight">
-                        {fmt(remainingLivingReserve)}
+                        {fmt(potSummary.remLivingReserve)}
                       </span>
                       <span className="text-xs text-slate-500 ml-1 font-semibold">
-                        left of {fmt(monthlyLivingTarget)} spendable
+                        {isPreFundedNextMonth
+                          ? `dedicated of ${fmt(potSummary.livingTarget)} spendable`
+                          : `left of ${fmt(potSummary.livingTarget)} spendable`}
                       </span>
                     </div>
                     <span className="text-xs font-bold tabular-nums text-purple-700">
-                      {fmt(totalSpentSoFar)} spent
+                      {fmt(potSummary.totalSpent)} spent
                     </span>
                   </div>
 
@@ -1916,56 +2028,62 @@ export default function FinancePoolsPage() {
                     />
                   </div>
                   <p className="text-[10px] text-slate-400 mt-1">
-                    Of {fmt(monthlyTotalIncome)} total income ({fmt(monthlyGoalSavingsTarget)} locked into pots{sweptToStashThisMonth > 0.01 ? ` · ${fmt(sweptToStashThisMonth)} swept to Stash` : ''})
+                    Of {fmt(potSummary.totalIncome)} total income ({fmt(potSummary.potSavingsDedicated)} moved to savings pots{potSummary.sweptToStash > 0.01 ? ` · ${fmt(potSummary.sweptToStash)} swept to Stash` : ''})
                   </p>
                 </div>
 
-                {/* 4-Step Waterfall Breakdown + Monthly Card Spend Cap */}
+                {/* 4-Step Dynamic Waterfall Breakdown + Monthly Card Spend Cap */}
                 <div className="text-xs space-y-2 border-t border-purple-100 pt-3 mt-3">
-                  <div className="flex justify-between items-center">
-                    <span className="text-slate-500 font-semibold">1. Fixed Bills:</span>
-                    <span className="font-bold text-slate-800">
-                      {remainingFixedBills <= 0.01 ? (
-                        <span className="text-emerald-700">£0.00 left of {fmt(effectiveFixedMonthly)} ({fmt(fixedPaidSoFar)} paid ✓)</span>
+                  <div className="flex justify-between items-center gap-2">
+                    <span className="text-slate-500 font-semibold">1. Fixed Bills Dedicated:</span>
+                    <span className="font-bold text-slate-800 text-right">
+                      {potSummary.remFixed <= 0.01 && potSummary.fixedPaid > 0 ? (
+                        <span className="text-emerald-700">£0.00 left of {fmt(potSummary.fixedDedicated)} ({fmt(potSummary.fixedPaid)} paid ✓)</span>
+                      ) : isPreFundedNextMonth || potSummary.fixedPaid <= 0.01 ? (
+                        `${fmt(potSummary.fixedDedicated)} reserved (${fmt(potSummary.fixedPaid)} paid so far)`
                       ) : (
-                        `${fmt(remainingFixedBills)} left of ${fmt(effectiveFixedMonthly)} (${fmt(fixedPaidSoFar)} paid)`
+                        `${fmt(potSummary.remFixed)} left of ${fmt(potSummary.fixedDedicated)} (${fmt(potSummary.fixedPaid)} paid)`
                       )}
                     </span>
                   </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-slate-500 font-semibold">2. Variable Essentials:</span>
-                    <span className="font-bold text-slate-800">
-                      {remainingEssentials <= 0.01 ? (
-                        <span className="text-amber-700">£0.00 left of {fmt(essentialVariable)} ({fmt(essentialSpentSoFar)} spent)</span>
+                  <div className="flex justify-between items-center gap-2">
+                    <span className="text-slate-500 font-semibold">2. Variable Essentials Dedicated:</span>
+                    <span className="font-bold text-slate-800 text-right">
+                      {potSummary.remEssentials <= 0.01 && potSummary.essentialSpent > 0 ? (
+                        <span className="text-amber-700">£0.00 left of {fmt(potSummary.essentialDedicated)} ({fmt(potSummary.essentialSpent)} spent)</span>
+                      ) : isPreFundedNextMonth || potSummary.essentialSpent <= 0.01 ? (
+                        `${fmt(potSummary.essentialDedicated)} reserved (${fmt(potSummary.essentialSpent)} spent so far)`
                       ) : (
-                        `${fmt(remainingEssentials)} left of ${fmt(essentialVariable)} (${fmt(essentialSpentSoFar)} spent)`
+                        `${fmt(potSummary.remEssentials)} left of ${fmt(potSummary.essentialDedicated)} (${fmt(potSummary.essentialSpent)} spent)`
                       )}
                     </span>
                   </div>
-                  <div className="flex justify-between items-center bg-purple-50/70 -mx-1.5 px-1.5 py-1 rounded-lg border border-purple-100">
+                  <div className="flex justify-between items-center gap-2 bg-purple-50/70 -mx-1.5 px-1.5 py-1 rounded-lg border border-purple-100">
                     <span className="text-purple-900 font-bold flex items-center gap-1">
-                      3. Pot Savings:
+                      3. Savings Pots Transferred:
                     </span>
-                    <span className="font-extrabold text-purple-700">
-                      {fmt(monthlyGoalSavingsTarget)} to pots 🔒 ({fmt((monthlyGoalSavingsTarget / daysInTargetMonth) * 7)}/wk)
+                    <span className="font-extrabold text-purple-700 text-right">
+                      {fmt(potSummary.potSavingsDedicated)} moved to pots ✓ ({fmt((potSummary.potSavingsDedicated / potSummary.daysInMonth) * 7)}/wk)
                     </span>
                   </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-slate-500 font-semibold">4. Fun Money:</span>
-                    <span className="font-extrabold text-[#FF2EB8]">
-                      {remainingFun <= 0.01 ? (
-                        <span className="text-amber-700">£0.00 left of {fmt(monthlyFunBudget)} ({fmt(funSpentSoFar)} spent)</span>
+                  <div className="flex justify-between items-center gap-2">
+                    <span className="text-slate-500 font-semibold">4. Base Fun Money Dedicated:</span>
+                    <span className="font-extrabold text-[#FF2EB8] text-right">
+                      {potSummary.remFun <= 0.01 && potSummary.funSpent > 0 ? (
+                        <span className="text-amber-700">£0.00 left of {fmt(potSummary.funDedicated)} ({fmt(potSummary.funSpent)} spent)</span>
+                      ) : isPreFundedNextMonth || potSummary.funSpent <= 0.01 ? (
+                        `${fmt(potSummary.funDedicated)} reserved (${fmt(potSummary.funSpent)} spent so far)`
                       ) : (
-                        `${fmt(remainingFun)} left of ${fmt(monthlyFunBudget)} (${fmt((monthlyFunBudget / daysInTargetMonth) * 7)}/wk)`
+                        `${fmt(potSummary.remFun)} left of ${fmt(potSummary.funDedicated)} (${fmt(potSummary.funSpent)} spent)`
                       )}
                     </span>
                   </div>
-                  <div className="flex justify-between items-center pt-1.5 border-t border-slate-200/70 text-[11px]">
+                  <div className="flex justify-between items-center gap-2 pt-1.5 border-t border-slate-200/70 text-[11px]">
                     <span className="text-slate-700 font-bold">
-                      Card Spend Cap (2 + 4):
+                      {potSummary.shortMonthName} Card Spend Cap (2 + 4):
                     </span>
-                    <span className="font-display font-black text-slate-900 tabular-nums">
-                      {fmt(monthlyCardSpendCap)}/mo · {fmt(dailyCardSpendCap)}/day ({daysInTargetMonth}d)
+                    <span className="font-display font-black text-slate-900 tabular-nums text-right">
+                      {fmt(potSummary.cardSpendCap)} ({fmt(potSummary.dailyCardCap)}/day × {potSummary.daysInMonth}d)
                     </span>
                   </div>
                 </div>
@@ -1973,12 +2091,16 @@ export default function FinancePoolsPage() {
 
               {/* Footer info */}
               <div className="pt-3 mt-3 border-t border-purple-100 flex items-center justify-between text-[11px] text-slate-500">
-                <span className="font-medium text-purple-700">Non-deletable system pot</span>
-                <span className="font-bold text-emerald-700">✓ 100% of {fmt(monthlyTotalIncome)} Income Allocated</span>
+                <span className="font-medium text-purple-700">
+                  {activeLivingPotSummaries.length > 1 && !isPreFundedNextMonth
+                    ? 'Retires to Stash on the 1st'
+                    : 'Non-deletable system pot'}
+                </span>
+                <span className="font-bold text-emerald-700">✓ 100% of {fmt(potSummary.totalIncome)} Income Allocated</span>
               </div>
             </div>
           );
-        })()}
+        })}
 
         {/* Goal Pool Cards */}
         {sortedNonEmergencyGoals.map(goal => {
