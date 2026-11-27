@@ -1159,13 +1159,40 @@ export default function FinanceBudget() {
       {/* === KPI STRIP (3 colorful bento tiles) === */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
         <div className="bg-white rounded-2xl border-2 border-[#FF7AD1]/40 p-4 sm:p-5 shadow-[4px_4px_0px_0px_rgba(255,46,184,0.15)]">
-          <p className="text-[#FF2EB8] text-[10px] font-display font-bold uppercase tracking-[0.15em] mb-2">Weekly Budget</p>
+          <div className="flex items-center justify-between gap-1 mb-2">
+            <p className="text-[#FF2EB8] text-[10px] font-display font-bold uppercase tracking-[0.15em]">Weekly Budget</p>
+            {snapshot.weekAllowancePlan?.isCrossMonthWeek && (
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-pink-50 text-[#FF2EB8] border border-pink-200">
+                Split Month Week
+              </span>
+            )}
+          </div>
           <p className="text-slate-900 font-display font-black tabular-nums text-2xl sm:text-3xl leading-none">{fmt(totalWeeklyBudget)}</p>
           <p className="text-[11px] text-slate-500 mt-1.5 font-medium">
             {fmt(essentialWeeklyBudget)} essentials · {fmt(snapshot.weeklyFunBudget)} fun
             {boostAmount < 0 && ` (−${fmt(Math.abs(boostAmount))} pot save)`}
             {boostAmount > 0 && ` (+${fmt(boostAmount)} boost)`}
           </p>
+          {snapshot.weekAllowancePlan && (
+            <div className="mt-2 pt-2 border-t border-slate-100 space-y-1 text-[10px] text-slate-500">
+              {snapshot.weekAllowancePlan.isCrossMonthWeek ? (
+                <p className="font-semibold text-slate-700">
+                  {snapshot.weekAllowancePlan.segments
+                    .map(seg => `${seg.daysCount}d ${seg.shortMonthLabel} (${fmt(seg.totalDailyAvg)}/d)`)
+                    .join(' + ')}
+                </p>
+              ) : (
+                <p className="font-medium text-slate-600">
+                  7 days × <strong className="text-slate-800">{fmt(snapshot.weekAllowancePlan.weeklyTotalSpendCap / 7)}/day</strong> from {snapshot.weekAllowancePlan.segments[0]?.shortMonthLabel} spend cap
+                </p>
+              )}
+              {snapshot.weekAllowancePlan.weeklyExtraIncomeBoost > 0.01 && (
+                <p className="text-emerald-700 font-semibold">
+                  +{fmt(snapshot.weekAllowancePlan.weeklyExtraIncomeBoost)} extra income boost ({snapshot.weekAllowancePlan.activeExtraIncomeItems.map(item => `${item.streamName} +${fmt(item.dailyBoostAmount)}/d`).join(', ')})
+                </p>
+              )}
+            </div>
+          )}
         </div>
         <div className={cn(
           "bg-white rounded-2xl border-2 p-4 sm:p-5",

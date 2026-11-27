@@ -36,6 +36,10 @@ import FeasibilityBreakdownDialog from '@/components/finance/FeasibilityBreakdow
 import PurchaseTimingEvaluator from '@/components/finance/PurchaseTimingEvaluator';
 import { useWeeklyBoosts } from '@/hooks/useWeeklyBoosts';
 import { computeMonthlyPotSchedule, getGoalPacingMode } from '@/lib/potPacingEngine';
+import {
+  computeMonthDailyAllowancePlan,
+  computeMonthStashSweepSummary,
+} from '@/lib/dailyAllowanceEngine';
 import { useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 
@@ -482,7 +486,37 @@ export default function FinancePoolsPage() {
 
   // Living & Monthly Budget Pool target (Priority #1: must be ring-fenced before Emergency Fund ladder upgrades)
   const effectiveFixedMonthly = fixedMonthlyTotalAll || fixedMonthlyTotal;
+  const targetMonthAllowancePlan = useMemo(() => {
+    if (!assumptions) return null;
+    return computeMonthDailyAllowancePlan({
+      monthDate: targetMonthDate,
+      assumptions,
+      transactions: finance.transactions,
+      categories: finance.categories,
+      goals: finance.goals,
+      convertToBase: finance.convertToBase,
+      fixedExpensesMonthly: effectiveFixedMonthly,
+      weekTypeMap: typeof wtMap === 'function' ? wtMap() : wtMap,
+      trips,
+    });
+  }, [assumptions, targetMonthDate, finance.transactions, finance.categories, finance.goals, finance.convertToBase, effectiveFixedMonthly, wtMap, trips]);
+
+  const targetMonthStashSweeps = useMemo(() => {
+    if (!targetMonthAllowancePlan || !isCurrentMonth) return null;
+    return computeMonthStashSweepSummary({
+      monthPlan: targetMonthAllowancePlan,
+      transactions: finance.transactions,
+      categories: finance.categories,
+      goals: finance.goals,
+      trips,
+      today: new Date(),
+    });
+  }, [targetMonthAllowancePlan, isCurrentMonth, finance.transactions, finance.categories, finance.goals, trips]);
+
   const rawMonthlyGoalSavingsTarget = useMemo(() => {
+    if (targetMonthAllowancePlan) {
+      return targetMonthAllowancePlan.potSavingsMonthly;
+    }
     const currentScheduleMonth = potSchedule?.months?.[0];
     if (currentScheduleMonth && currentScheduleMonth.total >= 0) {
       return currentScheduleMonth.total;
@@ -491,20 +525,24 @@ export default function FinancePoolsPage() {
       return snapshot.split.goalSavingsAmount;
     }
     return 0;
-  }, [potSchedule, snapshot]);
+  }, [targetMonthAllowancePlan, potSchedule, snapshot]);
 
   const daysInTargetMonth = useMemo(() => {
-    return Math.max(1, differenceInCalendarDays(endOfMonth(targetMonthDate), startOfMonth(targetMonthDate)) + 1);
-  }, [targetMonthDate]);
+    return targetMonthAllowancePlan?.daysInMonth
+      ?? Math.max(1, differenceInCalendarDays(endOfMonth(targetMonthDate), startOfMonth(targetMonthDate)) + 1);
+  }, [targetMonthAllowancePlan, targetMonthDate]);
 
   const essentialCatIds = useMemo(() => new Set(
     finance.categories.filter(c => c.is_essential && c.type === 'variable').map(c => c.id)
   ), [finance.categories]);
 
   const effectiveWeeklyFun = snapshot?.weeklyFunBudget ?? snapshot?.baseWeeklyFun ?? 0;
-  const monthlyTotalIncome = (snapshot?.split?.monthlyIncome && snapshot.split.monthlyIncome > 0)
-    ? snapshot.split.monthlyIncome
-    : (effectiveFixedMonthly + essentialVariable + rawMonthlyGoalSavingsTarget + (snapshot?.split?.funAmount || (effectiveWeeklyFun * (daysInTargetMonth / 7))));
+  const gammaBaseIncome = targetMonthAllowancePlan?.gammaMonthlyIncome
+    ?? ((snapshot?.split?.monthlyIncome && snapshot.split.monthlyIncome > 0)
+        ? snapshot.split.monthlyIncome
+        : (effectiveFixedMonthly + essentialVariable + rawMonthlyGoalSavingsTarget + (snapshot?.split?.funAmount || (effectiveWeeklyFun * (daysInTargetMonth / 7)))));
+  const extraMonthlyIncome = targetMonthAllowancePlan?.extraIncomeTotal ?? 0;
+  const monthlyTotalIncome = gammaBaseIncome + extraMonthlyIncome;
 
   // Track living expenses already paid so far this month (Fixed Bills / Rent, Essentials, Discretionary/Fun)
   // When bills like rent are paid on the 1st, they are paid OUT OF this month's living reserve.
@@ -562,23 +600,29 @@ export default function FinancePoolsPage() {
   const maxAvailableForPotsThisMonth = isCurrentMonth
     ? Math.max(
         0,
-        monthlyTotalIncome -
+        gammaBaseIncome -
           Math.max(effectiveFixedMonthly, fixedPaidSoFar) -
           Math.max(essentialVariable, essentialSpentSoFar) -
           funSpentSoFar
       )
-    : Math.max(0, monthlyTotalIncome - effectiveFixedMonthly - essentialVariable);
+    : Math.max(0, gammaBaseIncome - effectiveFixedMonthly - essentialVariable);
 
   const monthlyGoalSavingsTarget = Math.min(rawMonthlyGoalSavingsTarget, maxAvailableForPotsThisMonth);
 
-  // Fun money for the whole month = whatever is left over after Fixed, Essentials, and Pot commitments
-  const monthlyFunBudget = Math.max(0, monthlyTotalIncome - effectiveFixedMonthly - essentialVariable - monthlyGoalSavingsTarget);
-  const monthlyLivingTarget = effectiveFixedMonthly + essentialVariable + monthlyFunBudget;
+  // Fun money for the whole month = whatever is left over after Fixed, Essentials, and Pot commitments + any Extra Income
+  const monthlyFunBudget = Math.max(0, gammaBaseIncome - effectiveFixedMonthly - essentialVariable - monthlyGoalSavingsTarget) + extraMonthlyIncome;
+  const monthlyCardSpendCap = essentialVariable + monthlyFunBudget;
+  const dailyCardSpendCap = daysInTargetMonth > 0 ? monthlyCardSpendCap / daysInTargetMonth : 0;
+  const monthlyLivingTarget = effectiveFixedMonthly + monthlyCardSpendCap;
 
+  const sweptToStashThisMonth = targetMonthStashSweeps?.sweptToStashTotal ?? 0;
   const remainingFixedBills = Math.max(0, effectiveFixedMonthly - fixedPaidSoFar);
   const remainingEssentials = Math.max(0, essentialVariable - essentialSpentSoFar);
   const remainingFun = Math.max(0, monthlyFunBudget - funSpentSoFar);
-  const remainingLivingReserve = remainingFixedBills + remainingEssentials + remainingFun;
+  const remainingCardSpendable = targetMonthStashSweeps
+    ? targetMonthStashSweeps.remainingSpendableInMonth
+    : Math.max(0, remainingEssentials + remainingFun - sweptToStashThisMonth);
+  const remainingLivingReserve = remainingFixedBills + remainingCardSpendable;
   const livingReserveToProtect = isCurrentMonth ? remainingLivingReserve : monthlyLivingTarget;
   const totalSpentSoFar = fixedPaidSoFar + essentialSpentSoFar + funSpentSoFar;
 
@@ -1840,11 +1884,11 @@ export default function FinancePoolsPage() {
                     />
                   </div>
                   <p className="text-[10px] text-slate-400 mt-1">
-                    Of {fmt(monthlyTotalIncome)} total income ({fmt(monthlyGoalSavingsTarget)} locked into pots)
+                    Of {fmt(monthlyTotalIncome)} total income ({fmt(monthlyGoalSavingsTarget)} locked into pots{sweptToStashThisMonth > 0.01 ? ` · ${fmt(sweptToStashThisMonth)} swept to Stash` : ''})
                   </p>
                 </div>
 
-                {/* 4-Step Waterfall Breakdown */}
+                {/* 4-Step Waterfall Breakdown + Monthly Card Spend Cap */}
                 <div className="text-xs space-y-2 border-t border-purple-100 pt-3 mt-3">
                   <div className="flex justify-between items-center">
                     <span className="text-slate-500 font-semibold">1. Fixed Bills:</span>
@@ -1882,6 +1926,14 @@ export default function FinancePoolsPage() {
                       ) : (
                         `${fmt(remainingFun)} left of ${fmt(monthlyFunBudget)} (${fmt((monthlyFunBudget / daysInTargetMonth) * 7)}/wk)`
                       )}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center pt-1.5 border-t border-slate-200/70 text-[11px]">
+                    <span className="text-slate-700 font-bold">
+                      Card Spend Cap (2 + 4):
+                    </span>
+                    <span className="font-display font-black text-slate-900 tabular-nums">
+                      {fmt(monthlyCardSpendCap)}/mo · {fmt(dailyCardSpendCap)}/day ({daysInTargetMonth}d)
                     </span>
                   </div>
                 </div>
