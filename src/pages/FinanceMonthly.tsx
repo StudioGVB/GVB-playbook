@@ -2782,7 +2782,7 @@ export default function FinanceMonthly() {
             accounts={finance.accounts}
             trips={trips}
             boosts={boosts}
-            emergencyFloor={snapshot?.emergencyFloor ?? assumptions?.emergency_floor ?? 1000}
+            emergencyFloor={snapshot?.emergencyFloor ?? (assumptions as any)?.emergency_floor ?? 1000}
             totalLiquidCash={snapshot?.totalLiquidCash ?? 0}
             stashBalance={stashBalance}
             convertToBase={finance.convertToBase}
@@ -3145,11 +3145,11 @@ export default function FinanceMonthly() {
                     <div className="min-w-0 pr-3">
                       <p className="font-semibold text-slate-900 truncate">{tx.name}</p>
                       <p className="text-[11px] text-slate-400 mt-0.5">
-                        {format(parseISO(tx.date), 'EEE, d MMM yyyy')}
+                        {format(tx.date instanceof Date ? tx.date : new Date(tx.date), 'EEE, d MMM yyyy')}
                       </p>
                     </div>
                     <span className="font-display font-bold tabular-nums text-slate-900 shrink-0">
-                      {fmt(toDisplayAmount(tx))}
+                      {fmt(tx.amount)}
                     </span>
                   </div>
                 ))

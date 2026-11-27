@@ -25,7 +25,7 @@ import MonthlyPotBreakdownCard from '@/components/finance/MonthlyPotBreakdownCar
 import FinanceBalanceSheet from '@/pages/FinanceBalanceSheet';
 import WeeklyPoolSavingsCard from '@/components/finance/WeeklyPoolSavingsCard';
 import PotLinkedExpensesDialog from '@/components/finance/PotLinkedExpensesDialog';
-import { format, startOfMonth, endOfMonth, parseISO, isSameMonth, startOfWeek, addWeeks } from 'date-fns';
+import { format, startOfMonth, endOfMonth, parseISO, isSameMonth, startOfWeek, addWeeks, differenceInCalendarDays } from 'date-fns';
 import { detectPaycheck, calculatePaycheckWaterfall, isPaycheckProcessed, markPaycheckProcessed, unmarkPaycheckProcessed, savePaycheckAllocationMeta, getPaycheckAllocationMeta } from '@/lib/paycheckEngine';
 import { baseAmt, parseUkDate } from '@/lib/financeUtils';
 import { evaluatePoolFeasibility } from '@/lib/feasibilityEngine';

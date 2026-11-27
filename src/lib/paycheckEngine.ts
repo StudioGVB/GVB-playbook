@@ -192,6 +192,7 @@ export function calculatePaycheckWaterfall(
   remaining -= totalLivingCostReserve;
 
   // Step 2: Emergency Reserve (tracked via goals; no forced deduction before active pots)
+  const emergencyShortfall = Math.max(0, emergencyFloor - currentEmergencyFunded);
   const emergencyTopUp = 0;
 
   // Compute linked spend per goal in base currency
