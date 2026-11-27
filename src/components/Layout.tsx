@@ -22,6 +22,7 @@ const mainNavItems = [
 
 const financeSubItems = [
   { to: '/finance/monthly', icon: CalendarDays, label: 'Monthly Report' },
+  { to: '/finance/yearly', icon: TrendingUp, label: '12-Month Outlook' },
   { to: '/finance/budget', icon: Wallet, label: 'Weekly Budget' },
   { to: '/finance/income', icon: DollarSign, label: 'Income' },
   { to: '/finance/pools', icon: Coins, label: 'Money Pools' },

@@ -30,6 +30,7 @@ import FinanceAccountsPage from "./pages/FinanceAccounts";
 
 import FinanceHistoryPage from "./pages/FinanceHistory";
 import FinanceMonthlyPage from "./pages/FinanceMonthly";
+import FinanceYearlyPage from "./pages/FinanceYearly";
 import FinanceTravelPage from "./pages/FinanceTravel";
 import TravelOverview from "./pages/TravelOverview";
 import FinanceCostOfLivingPage from "./pages/FinanceCostOfLiving";
@@ -65,6 +66,7 @@ const App = () => (
               <Route path="/finance" element={<Navigate to="/finance/budget" replace />} />
               <Route path="/finance/budget" element={<FinanceBudget />} />
               <Route path="/finance/monthly" element={<FinanceMonthlyPage />} />
+              <Route path="/finance/yearly" element={<FinanceYearlyPage />} />
               <Route path="/finance/income" element={<FinanceIncomePage />} />
               <Route path="/finance/balance-sheet" element={<FinanceBalanceSheetPage />} />
               <Route path="/finance/travel" element={<Navigate to="/travel/trips" replace />} />

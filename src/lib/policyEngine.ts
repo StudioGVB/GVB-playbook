@@ -8,6 +8,10 @@ import { calcTakeHome } from './ukTakeHome';
 import { deduplicateTransactions } from './deduplication';
 import { parseCoverMeta, planOverspendCover } from './overspendCover';
 import { computeMonthlyPotSchedule } from './potPacingEngine';
+import {
+  computeWeekAllowanceFromDays,
+  type WeekAllowanceFromDaysResult,
+} from './dailyAllowanceEngine';
 
 
 // ---- Trip helpers ----
@@ -448,6 +452,7 @@ export interface PolicySnapshot {
   weeklyFunBudget: number;
   baseBudgetBeforeRollover: number;
   split: MoneySplit;
+  weekAllowancePlan?: WeekAllowanceFromDaysResult;
 }
 
 /** @deprecated single-trip helper kept for backwards compat — always returns false */
@@ -617,57 +622,56 @@ export function computePolicySnapshot(
 
   // Daily rate pacing across month boundaries:
   // For each of the 7 days in this Monday-Sunday week, determine which month it belongs to,
-  // compute that month's daily rates (Monthly / DaysInMonth), and sum the 7 days.
-  const monthCache = new Map<string, { dailyFixed: number; dailyEssential: number; dailyFun: number; monthSplit: MoneySplit }>();
+  // compute that month's daily rates (Monthly / DaysInMonth), plus any extra non-Gamma income
+  // distributed across the remaining days left in that month, and sum the 7 days.
+  const effectiveFixedMonthly = fixedExpensesMonthlyAll ?? (fixedExpensesMonthly ?? 0);
+  const weekAllowancePlan = computeWeekAllowanceFromDays({
+    weekStartInput: weekStart,
+    assumptions,
+    transactions,
+    categories,
+    goals,
+    convertToBase,
+    fixedExpensesMonthly: effectiveFixedMonthly,
+    weekTypeMap,
+    trips,
+  });
 
-  const getDailyRatesForDate = (date: Date) => {
+  const monthCache = new Map<string, { dailyFixed: number; monthSplit: MoneySplit }>();
+  const getDailyFixedForDate = (date: Date) => {
     const mKey = format(date, 'yyyy-MM');
     if (monthCache.has(mKey)) return monthCache.get(mKey)!;
-
     const mStart = startOfMonth(date);
     const mEnd = endOfMonth(date);
     const daysInMonth = Math.max(1, differenceInCalendarDays(mEnd, mStart) + 1);
-
     const monthSplit = computeMoneySplit(
       assumptions,
       transactions,
       categories,
       goals,
       convertToBase,
-      fixedExpensesMonthlyAll ?? (fixedExpensesMonthly ?? 0),
+      effectiveFixedMonthly,
       monthlyIncome,
       weekTypeMap,
       trips,
       mStart,
     );
-
-    const essentialRes = computeEssentialVariableMonthly(transactions, categories, weekTypeMap, trips, mStart);
-    const mEssential = Math.max(
-      assumptions.estimated_essential_variable ?? 0,
-      essentialRes.monthly,
-    );
-
-    const rates = {
+    const entry = {
       dailyFixed: monthSplit.mandatoryAmount / daysInMonth,
-      dailyEssential: mEssential / daysInMonth,
-      dailyFun: monthSplit.funAmount / daysInMonth,
       monthSplit,
     };
-    monthCache.set(mKey, rates);
-    return rates;
+    monthCache.set(mKey, entry);
+    return entry;
   };
 
   let weeklyFixedCosts = 0;
-  let weeklyEssentialBudget = 0;
-  let baseWeeklyFun = 0;
-
   for (let d = 0; d < 7; d++) {
     const dayDate = addDays(weekStart, d);
-    const rates = getDailyRatesForDate(dayDate);
-    weeklyFixedCosts += rates.dailyFixed;
-    weeklyEssentialBudget += rates.dailyEssential;
-    baseWeeklyFun += rates.dailyFun;
+    weeklyFixedCosts += getDailyFixedForDate(dayDate).dailyFixed;
   }
+
+  let weeklyEssentialBudget = weekAllowancePlan.weeklyEssentialAllowance;
+  let baseWeeklyFun = weekAllowancePlan.weeklyBaseFunAllowance;
 
   let split: MoneySplit;
   if (isDrawdownMode) {
@@ -682,16 +686,19 @@ export function computePolicySnapshot(
       monthlyIncome: 0,
     };
   } else {
-    split = getDailyRatesForDate(weekStart).monthSplit;
+    split = getDailyFixedForDate(now).monthSplit;
     split.weeklyFunAmount = baseWeeklyFun;
   }
 
   let weeklyGross = weeklyFixedCosts + weeklyEssentialBudget + baseWeeklyFun;
   let weeksUntilIncome = weeklyGross > 0 ? spendablePool / weeklyGross : 0;
 
-  // Apply weekly boost
+  // Apply weekly boost + extra income distributed across the remaining days of the month
   const boostAmount = weeklyBoostAmount ?? 0;
-  let weeklyFunBudget = baseWeeklyFun + boostAmount + (!isDrawdownMode ? actualIncome.otherWeeklyBonus : 0);
+  let weeklyFunBudget =
+    baseWeeklyFun +
+    boostAmount +
+    (!isDrawdownMode ? weekAllowancePlan.weeklyExtraIncomeBoost : 0);
 
   const spentThisWeek = computeWeeklyFunSpend(transactions, categories, weekStart, undefined, trips);
 
@@ -718,30 +725,25 @@ export function computePolicySnapshot(
   }
 
   // Last week performance & overspend deduction:
-  // Evaluate last week's budget at lastWeekStart so entering a new month or changing this week's
-  // essential average never distorts last week's actual budget & overspend!
+  // Evaluate last week's budget at lastWeekStart using the same 7-day daily sum
   const lastWeekStart = subWeeks(weekStart, 1);
   const lastWeekSpendSummary = computeWeekVariableSpend(transactions, categories, lastWeekStart, trips);
   const lastWeekFunSpent = lastWeekSpendSummary.funSpent;
   const lastWeekEssentialSpent = lastWeekSpendSummary.essentialSpent;
 
-  const lastWeekEssentialResult = computeEssentialVariableMonthly(transactions, categories, weekTypeMap, trips, lastWeekStart);
-  const lastWeekEssentialVariable = Math.max(
-    assumptions.estimated_essential_variable ?? 0,
-    lastWeekEssentialResult.monthly,
-  );
-  let lastWeekEssentialBudget = 0;
-  let lastWeekBaseFun = 0;
-  for (let d = 0; d < 7; d++) {
-    const dayDate = addDays(lastWeekStart, d);
-    const rates = getDailyRatesForDate(dayDate);
-    lastWeekEssentialBudget += rates.dailyEssential;
-    lastWeekBaseFun += rates.dailyFun;
-  }
-  const lastWeekActualIncome = computeActualSpendingIncome(transactions, categories, lastWeekStart);
-  if (lastWeekActualIncome.total > 0 && lastWeekActualIncome.otherWeeklyBonus > 0) {
-    lastWeekBaseFun += lastWeekActualIncome.otherWeeklyBonus;
-  }
+  const lastWeekAllowancePlan = computeWeekAllowanceFromDays({
+    weekStartInput: lastWeekStart,
+    assumptions,
+    transactions,
+    categories,
+    goals,
+    convertToBase,
+    fixedExpensesMonthly: effectiveFixedMonthly,
+    weekTypeMap,
+    trips,
+  });
+  const lastWeekEssentialBudget = lastWeekAllowancePlan.weeklyEssentialAllowance;
+  const lastWeekBaseFun = lastWeekAllowancePlan.weeklyTotalFunAllowance;
 
   const lastWeekKey = format(lastWeekStart, 'yyyy-MM-dd');
   const stashes = goals.filter(g => (g as any).is_stash === true || (g.name || '').toLowerCase().includes('stash'));
@@ -914,6 +916,7 @@ export function computePolicySnapshot(
     weeklyFunBudget,
     baseBudgetBeforeRollover: baseWeeklyFun + boostAmount,
     split,
+    weekAllowancePlan,
   };
 }
 

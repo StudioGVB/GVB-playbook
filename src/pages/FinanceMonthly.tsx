@@ -23,6 +23,10 @@ import { useWeeklyBoosts } from '@/hooks/useWeeklyBoosts';
 import { useFinanceTrips } from '@/hooks/useFinanceTrips';
 import { useWeekTypes } from '@/hooks/useWeekTypes';
 import { computePolicySnapshot, computeRequiredGoalSavingsMonthly, computeWeekVariableSpend, isInternalTransferTx } from '@/lib/policyEngine';
+import {
+  computeMonthDailyAllowancePlan,
+  computeMonthStashSweepSummary,
+} from '@/lib/dailyAllowanceEngine';
 import { formatCurrency, baseAmt, parseUkDate, getEffectiveTxMonthDate } from '@/lib/financeUtils';
 import { deduplicateTransactions } from '@/lib/deduplication';
 import MonthlyCashFlowBreakdown from '@/components/finance/MonthlyCashFlowBreakdown';
@@ -147,18 +151,37 @@ export default function FinanceMonthly() {
   // Monthly overview shows every committed fixed bill plus any extra bills that hit this month
   const fixedMonthly = fixedExpensesMonthlyAll + extraFixedBillsMonth;
 
-  // Monthly budgets
-  const monthlyEssentialBudget = snapshot
-    ? snapshot.weeklyEssentialBudget * 4.33
+  // Monthly daily allowance plan (Gamma Salary -> - Fixed Bills -> - Essentials -> - Pot Savings -> Fun Money,
+  // plus any extra non-Gamma income distributed across the remaining days of the month)
+  const monthAllowancePlan = useMemo(() => {
+    if (!assumptions) return null;
+    return computeMonthDailyAllowancePlan({
+      monthDate: selectedMonth,
+      assumptions,
+      transactions: dedupedAllTxns,
+      categories: finance.categories,
+      goals: finance.goals,
+      convertToBase: finance.convertToBase,
+      fixedExpensesMonthly: fixedExpensesMonthlyAll,
+      weekTypeMap: typeof wtMap === 'function' ? wtMap() : wtMap,
+      trips,
+    });
+  }, [assumptions, selectedMonth, dedupedAllTxns, finance.categories, finance.goals, finance.convertToBase, fixedExpensesMonthlyAll, wtMap, trips]);
+
+  // Monthly budgets (Spend Cap = Variable Essentials + Base Fun Money + Extra Non-Gamma Income)
+  const monthlyEssentialBudget = monthAllowancePlan
+    ? monthAllowancePlan.variableEssentialsMonthly
     : (assumptions?.estimated_essential_variable || 400);
-  const monthlyFunBudget = snapshot
-    ? Math.max(snapshot.baseWeeklyFun, snapshot.weeklyFunBudget) * 4.33
+  const monthlyFunBudget = monthAllowancePlan
+    ? (monthAllowancePlan.baseFunMonthly + monthAllowancePlan.extraIncomeTotal)
     : 0;
-  const monthlyVariableBudget = monthlyEssentialBudget + monthlyFunBudget;
+  const monthlyVariableBudget = monthAllowancePlan
+    ? monthAllowancePlan.totalMonthlySpendCap
+    : (monthlyEssentialBudget + monthlyFunBudget);
   const autoTotalBudget = monthlyVariableBudget + fixedMonthly;
   const budgetOverride = (assumptions as any)?.monthly_budget_override;
   const monthlyTotalBudget = (budgetOverride != null && budgetOverride !== '') ? Number(budgetOverride) : autoTotalBudget;
-  const expectedIncomeVal = snapshot?.split.monthlyIncome ?? (assumptions?.expected_monthly_income || 0);
+  const expectedIncomeVal = monthAllowancePlan?.gammaMonthlyIncome ?? snapshot?.split.monthlyIncome ?? (assumptions?.expected_monthly_income || 0);
 
   // Previous month transactions for comparison
   const prevMonthStart = startOfMonth(subMonths(selectedMonth, 1));
@@ -405,35 +428,56 @@ export default function FinanceMonthly() {
 
   // Weekly allowance & active week remaining budget
   // Past closed weeks automatically sweep their underspend into Savings Stash (untouchable for reporting).
-  // Therefore, real daily safe-to-spend is strictly governed by the active week's remaining allowance,
-  // not by dumping all past weeks' saved money onto the final few days of the month!
+  // Therefore, money swept to Stash is already committed/allocated and MUST NOT appear as monthly underspend
+  // or inflate the remaining allowance for the final weeks of the month.
+  const stashSweepSummary = useMemo(() => {
+    if (!monthAllowancePlan) return null;
+    return computeMonthStashSweepSummary({
+      monthPlan: monthAllowancePlan,
+      transactions: dedupedAllTxns,
+      categories: finance.categories,
+      goals: finance.goals,
+      trips,
+      today,
+    });
+  }, [monthAllowancePlan, dedupedAllTxns, finance.categories, finance.goals, trips]);
+
   const weeklyVariableAllowance = snapshot
     ? (snapshot.weeklyEssentialBudget + snapshot.weeklyFunBudget)
-    : (monthlyVariableBudget / 4.33);
+    : (monthlyVariableBudget / (daysInMonth / 7));
   const activeWeekSpent = currentWeekSummary.totalSpent;
   const activeWeekRemaining = Math.max(0, weeklyVariableAllowance - activeWeekSpent);
   const activeWeekDailyPace = activeWeekRemaining / daysLeftInActiveWeek;
 
+  // Swept to Stash from past closed weeks in this month (not spendable, not counted as monthly underspend)
+  const unspentSavedSurplus = stashSweepSummary
+    ? stashSweepSummary.sweptToStashTotal
+    : Math.max(0, variableRemaining - activeWeekRemaining);
+  const effectiveVariableAllocatedOrSpent = variableSpent + unspentSavedSurplus;
+  const trueSpendableRemainingInMonth = isCurrentMonth && stashSweepSummary
+    ? stashSweepSummary.remainingSpendableInMonth
+    : Math.max(0, monthlyVariableBudget - effectiveVariableAllocatedOrSpent);
+
   // Safe daily spend: anchored to active weekly allowance so past underspend is protected
   const safeDailyRemaining = isCurrentMonth
     ? activeWeekDailyPace
-    : (daysRemaining > 0 ? variableRemaining / daysRemaining : 0);
-  const unspentSavedSurplus = Math.max(0, variableRemaining - activeWeekRemaining);
+    : (daysRemaining > 0 ? trueSpendableRemainingInMonth / daysRemaining : 0);
 
   const futureDailyVariablePace = Math.min(dailyVariablePace, thisWeekDailyVariablePace);
   const isUnderspendingWeeklyAllowance = currentWeekSummary.totalSpent <= weeklyVariableAllowance;
-  const rawProjectedVariableSpend = variableSpent + futureDailyVariablePace * daysRemaining;
+  // Projected variable spend + closed-week Stash sweeps (since closed-week underspend is already swept to Stash)
+  const rawProjectedVariableSpend = effectiveVariableAllocatedOrSpent + futureDailyVariablePace * daysRemaining;
   const projectedVariableSpend = isCurrentMonth
-    ? (isUnderspendingWeeklyAllowance && variableSpent <= monthlyVariableBudget
-        ? Math.min(rawProjectedVariableSpend, thisWeekDailyVariablePace * daysInMonth)
+    ? (isUnderspendingWeeklyAllowance && effectiveVariableAllocatedOrSpent <= monthlyVariableBudget
+        ? Math.min(rawProjectedVariableSpend, monthlyVariableBudget)
         : rawProjectedVariableSpend)
-    : variableSpent;
+    : effectiveVariableAllocatedOrSpent;
   const effectiveFixedMonthly = Math.max(fixedMonthly, fixedSpent);
   const projectedSpend = projectedVariableSpend + effectiveFixedMonthly;
   const projectedDiff = projectedSpend - (monthlyVariableBudget + effectiveFixedMonthly); // positive => over
 
   const timePct = (daysElapsed / daysInMonth) * 100;
-  const variableUsedPct = monthlyVariableBudget > 0 ? (variableSpent / monthlyVariableBudget) * 100 : 0;
+  const variableUsedPct = monthlyVariableBudget > 0 ? (effectiveVariableAllocatedOrSpent / monthlyVariableBudget) * 100 : 0;
 
   // Previous month totals for comparison
   const prevTotals = useMemo(() => {
@@ -1310,21 +1354,35 @@ export default function FinanceMonthly() {
                   {fmt(variableSpent)}
                 </div>
                 <p className="text-xs font-semibold text-slate-600 mt-1.5">
-                  of {fmt(monthlyVariableBudget)} combined budget
+                  of {fmt(monthlyVariableBudget)} monthly spend cap ({fmt(targetDailyVariable)}/d)
                 </p>
-                <div className="mt-2 h-1.5 w-full rounded-full bg-slate-100 overflow-hidden">
+                <div className="mt-2 h-1.5 w-full rounded-full bg-slate-100 overflow-hidden flex">
                   <div
-                    className={cn("h-full rounded-full", variableSpent > monthlyVariableBudget ? "bg-rose-500" : "bg-purple-600")}
+                    className={cn("h-full", variableSpent > monthlyVariableBudget ? "bg-rose-500" : "bg-purple-600")}
                     style={{ width: `${Math.min(100, monthlyVariableBudget > 0 ? (variableSpent / monthlyVariableBudget) * 100 : 0)}%` }}
+                    title={`Spent: ${fmt(variableSpent)}`}
                   />
+                  {unspentSavedSurplus > 0.01 && (
+                    <div
+                      className="h-full bg-amber-400"
+                      style={{
+                        width: `${Math.min(
+                          Math.max(0, 100 - (monthlyVariableBudget > 0 ? (variableSpent / monthlyVariableBudget) * 100 : 0)),
+                          monthlyVariableBudget > 0 ? (unspentSavedSurplus / monthlyVariableBudget) * 100 : 0
+                        )}%`,
+                      }}
+                      title={`Swept to Stash from closed weeks: ${fmt(unspentSavedSurplus)}`}
+                    />
+                  )}
                 </div>
-                <div className="text-[10px] font-medium text-slate-500 mt-1.5 flex items-center justify-between">
-                  <span>
+                <div className="text-[10px] font-medium text-slate-500 mt-1.5 flex items-center justify-between gap-1">
+                  <span className="truncate">
                     Ess {fmt(essentialSpent)} · Fun {fmt(funSpent)}
+                    {unspentSavedSurplus > 0.01 ? ` · Stash ${fmt(unspentSavedSurplus)}` : ''}
                   </span>
-                  <span className="tabular-nums">
+                  <span className="tabular-nums shrink-0 font-semibold text-slate-700">
                     {variableSpent <= monthlyVariableBudget
-                      ? `${fmt(monthlyVariableBudget - variableSpent)} under budget`
+                      ? `${fmt(trueSpendableRemainingInMonth)} left`
                       : `${fmt(variableSpent - monthlyVariableBudget)} over`}
                   </span>
                 </div>
@@ -1480,16 +1538,16 @@ export default function FinanceMonthly() {
                     </p>
                     <div className="flex items-baseline gap-2 mt-1">
                       <span className="text-2xl font-display font-black tabular-nums" style={{ color: paceColor }}>
-                        {isCurrentMonth ? `${fmt(safeDailyRemaining)}/day` : fmt(variableRemaining)}
+                        {isCurrentMonth ? `${fmt(safeDailyRemaining)}/day` : fmt(trueSpendableRemainingInMonth)}
                       </span>
                     </div>
                     <p className="text-[11px] font-medium mt-1 leading-snug" style={{ color: paceColor }}>
                       {isCurrentMonth ? (
                         <>
-                          <strong className="text-slate-800">{fmt(activeWeekRemaining)}</strong> in active week · <span className="text-slate-500">{fmt(unspentSavedSurplus)} swept to Stash / buffer</span>
+                          <strong className="text-slate-800">{fmt(activeWeekRemaining)}</strong> left this week · <span className="text-slate-500">{fmt(unspentSavedSurplus)} swept to Stash</span>
                         </>
                       ) : (
-                        `${fmt(variableRemaining)} unspent variable budget`
+                        `${fmt(trueSpendableRemainingInMonth)} unspent · ${fmt(unspentSavedSurplus)} swept to Stash`
                       )}
                     </p>
                   </div>
@@ -1508,26 +1566,26 @@ export default function FinanceMonthly() {
                       </span>
                     </div>
                     <p className="text-[11px] text-slate-600 mt-1 font-medium">
-                      {fmt(fixedMonthly)} fixed + {fmt(projectedVariableSpend)} est. variable
+                      {fmt(fixedMonthly)} fixed + {fmt(projectedVariableSpend)} var &amp; Stash sweeps
                     </p>
                   </div>
 
-                  {/* Pillar 4: Expected Over / Under Budget */}
+                  {/* Pillar 4: Expected Over / On Target */}
                   {(() => {
-                    const overBudget = projectedDiff > 0;
+                    const overBudget = projectedDiff > 0.5;
                     const diffColor = overBudget ? '#DC2626' : '#16A34A';
                     const diffBg = overBudget ? 'bg-rose-50/70 border-rose-200' : 'bg-emerald-50/70 border-emerald-200';
                     return (
                       <div className={cn("rounded-xl border p-3.5", diffBg)}>
                         <p className="text-[10px] font-bold uppercase tracking-wider" style={{ color: diffColor }}>
-                          {overBudget ? 'Projected Over By' : 'Projected Under By'}
+                          {overBudget ? 'Projected Over By' : 'Swept to Stash This Month'}
                         </p>
                         <div className="flex items-baseline gap-1.5 mt-1">
                           <span className="text-2xl font-display font-black tabular-nums" style={{ color: diffColor }}>
-                            {fmt(Math.abs(projectedDiff))}
+                            {overBudget ? fmt(Math.abs(projectedDiff)) : fmt(unspentSavedSurplus)}
                           </span>
                           <span className="text-xs font-bold" style={{ color: diffColor }}>
-                            {overBudget ? 'over' : 'saved'}
+                            {overBudget ? 'over' : 'in Stash'}
                           </span>
                         </div>
                         <p className="text-[11px] font-medium mt-1" style={{ color: diffColor }}>
@@ -1535,33 +1593,44 @@ export default function FinanceMonthly() {
                             ? (daysRemaining > 0
                                 ? `Cut ${fmt(projectedDiff / daysRemaining)}/day to stay on budget`
                                 : `Finished ${fmt(projectedDiff)} over budget`)
-                            : (daysRemaining > 0
-                                ? `Saving ${fmt(Math.abs(projectedDiff))} (${fmt(Math.abs(projectedDiff) / daysRemaining)}/d buffer)`
-                                : `Saved ${fmt(Math.abs(projectedDiff))} under budget`)}
+                            : `${fmt(trueSpendableRemainingInMonth)} remaining for rest of month`}
                         </p>
                       </div>
                     );
                   })()}
                 </div>
 
-                {/* Single Unified Bar: Variable Budget Used vs. Calendar Time Elapsed */}
+                {/* Single Unified Bar: Variable Budget Used + Swept to Stash vs. Calendar Time Elapsed */}
                 <div className="space-y-1.5 pt-1">
-                  <div className="flex items-center justify-between text-xs">
+                  <div className="flex items-center justify-between text-xs flex-wrap gap-2">
                     <span className="font-semibold text-slate-700">
-                      Variable Budget Used: <strong className="tabular-nums">{variableUsedPct.toFixed(0)}%</strong> ({fmt(variableSpent)} of {fmt(monthlyVariableBudget)})
+                      Card Cap Used: <strong className="tabular-nums">{variableUsedPct.toFixed(0)}%</strong> ({fmt(variableSpent)} spent{unspentSavedSurplus > 0.01 ? ` + ${fmt(unspentSavedSurplus)} swept to Stash` : ''} of {fmt(monthlyVariableBudget)})
                     </span>
                     <span className="text-slate-500 font-medium tabular-nums">
                       Month Elapsed: <strong>{timePct.toFixed(0)}%</strong> (Day {daysElapsed}/{daysInMonth})
                     </span>
                   </div>
-                  <div className="relative h-3 rounded-full bg-slate-100 overflow-hidden">
+                  <div className="relative h-3 rounded-full bg-slate-100 overflow-hidden flex">
                     <div
                       className={cn(
-                        "h-full rounded-full transition-all duration-500",
+                        "h-full transition-all duration-500",
                         isOverVariablePace ? "bg-rose-500" : "bg-emerald-500"
                       )}
-                      style={{ width: `${Math.min(100, variableUsedPct)}%` }}
+                      style={{ width: `${Math.min(100, monthlyVariableBudget > 0 ? (variableSpent / monthlyVariableBudget) * 100 : 0)}%` }}
+                      title={`Spent on card: ${fmt(variableSpent)}`}
                     />
+                    {unspentSavedSurplus > 0.01 && (
+                      <div
+                        className="h-full bg-amber-400 transition-all duration-500"
+                        style={{
+                          width: `${Math.min(
+                            Math.max(0, 100 - (monthlyVariableBudget > 0 ? (variableSpent / monthlyVariableBudget) * 100 : 0)),
+                            monthlyVariableBudget > 0 ? (unspentSavedSurplus / monthlyVariableBudget) * 100 : 0
+                          )}%`,
+                        }}
+                        title={`Swept to Savings Stash from closed weeks: ${fmt(unspentSavedSurplus)}`}
+                      />
+                    )}
                     {/* Calendar marker line */}
                     {isCurrentMonth && (
                       <div
