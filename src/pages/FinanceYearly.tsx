@@ -764,34 +764,34 @@ export default function FinanceYearly() {
   }
 
   return (
-    <div className="space-y-8 pb-16 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6">
+    <div className="space-y-6 sm:space-y-8 pb-16 max-w-7xl mx-auto">
       {/* ========================================================= */}
       {/* HEADER BAR                                                */}
       {/* ========================================================= */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200/80 pb-6">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200/80 pb-5">
         <div>
-          <div className="flex items-center gap-2.5">
-            <span className="p-2 rounded-xl bg-violet-100 text-violet-700">
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <span className="p-2 rounded-xl bg-violet-100 text-violet-700 shrink-0">
               <TrendingUp className="w-5 h-5" />
             </span>
-            <h1 className="text-2xl sm:text-3xl font-display font-black tracking-tight text-slate-900">
+            <h1 className="text-xl sm:text-3xl font-display font-black tracking-tight text-slate-900">
               12-Month Outlook
             </h1>
-            <Badge variant="outline" className="ml-2 font-mono text-xs bg-slate-50 text-slate-600 border-slate-200">
+            <Badge variant="outline" className="font-mono text-xs bg-slate-50 text-slate-600 border-slate-200">
               Rolling Horizon
             </Badge>
           </div>
-          <p className="text-sm text-slate-500 mt-1">
+          <p className="text-xs sm:text-sm text-slate-500 mt-1">
             Reflecting on the last 6 months of actual cash flow & predictable forecast for the next 6 months.
           </p>
         </div>
 
         {/* Forecast Scenario Selector */}
-        <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-xl self-start md:self-auto text-xs font-medium">
-          <span className="px-2 text-slate-500 font-semibold">Forecast:</span>
+        <div className="flex flex-wrap sm:flex-nowrap items-center gap-1.5 bg-slate-100 p-1 rounded-xl w-full sm:w-auto text-xs font-medium">
+          <span className="px-2 text-slate-500 font-semibold text-[11px] sm:text-xs">Forecast:</span>
           <button
             onClick={() => setForecastScenario('conservative')}
-            className={`px-3 py-1.5 rounded-lg transition-all ${
+            className={`flex-1 sm:flex-initial px-3 py-1.5 rounded-lg transition-all text-center ${
               forecastScenario === 'conservative'
                 ? 'bg-white text-slate-900 shadow-sm font-semibold'
                 : 'text-slate-600 hover:text-slate-900'
@@ -801,7 +801,7 @@ export default function FinanceYearly() {
           </button>
           <button
             onClick={() => setForecastScenario('expected')}
-            className={`px-3 py-1.5 rounded-lg transition-all ${
+            className={`flex-1 sm:flex-initial px-3 py-1.5 rounded-lg transition-all text-center ${
               forecastScenario === 'expected'
                 ? 'bg-white text-violet-700 shadow-sm font-semibold'
                 : 'text-slate-600 hover:text-slate-900'
@@ -973,16 +973,16 @@ export default function FinanceYearly() {
                   </Badge>
                 </div>
 
-                <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto">
                   {futureSeries.length > 1 && (
-                    <div className="flex items-center gap-1 bg-slate-100/90 p-1 rounded-xl">
+                    <div className="flex items-center gap-1 bg-slate-100/90 p-1 rounded-xl overflow-x-auto touch-scroll max-w-full">
                       {futureSeries.map((fm: any, idx: number) => {
                         const isSel = fm.monthKey === predMonth.monthKey;
                         return (
                           <button
                             key={fm.monthKey}
                             onClick={() => setSelectedMonthKey(fm.monthKey)}
-                            className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
+                            className={`px-2.5 py-1 rounded-lg text-xs font-semibold whitespace-nowrap transition-all shrink-0 ${
                               isSel
                                 ? 'bg-violet-600 text-white shadow-2xs'
                                 : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
@@ -1325,12 +1325,12 @@ export default function FinanceYearly() {
             </p>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 sm:gap-3 w-full sm:w-auto">
             {/* View Horizon Toggle */}
-            <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs font-medium">
+            <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs font-medium w-full sm:w-auto justify-between sm:justify-start">
               <button
                 onClick={() => setTimeHorizonView('future6')}
-                className={`px-2.5 py-1 rounded-lg transition-all ${
+                className={`flex-1 sm:flex-initial px-2.5 py-1 rounded-lg transition-all text-center ${
                   timeHorizonView === 'future6'
                     ? 'bg-white text-slate-900 shadow-sm font-semibold'
                     : 'text-slate-500 hover:text-slate-800'
@@ -1340,7 +1340,7 @@ export default function FinanceYearly() {
               </button>
               <button
                 onClick={() => setTimeHorizonView('all12')}
-                className={`px-2.5 py-1 rounded-lg transition-all ${
+                className={`flex-1 sm:flex-initial px-2.5 py-1 rounded-lg transition-all text-center ${
                   timeHorizonView === 'all12'
                     ? 'bg-white text-slate-900 shadow-sm font-semibold'
                     : 'text-slate-500 hover:text-slate-800'
@@ -1351,26 +1351,26 @@ export default function FinanceYearly() {
             </div>
 
             {/* Main Tabs */}
-            <Tabs value={activeChartTab} onValueChange={(v) => setActiveChartTab(v as any)} className="w-auto">
-              <TabsList className="bg-slate-100 p-1 rounded-xl">
-                <TabsTrigger value="stack" className="text-xs rounded-lg px-3 py-1.5 font-medium">
-                  Full Stack vs Income
+            <Tabs value={activeChartTab} onValueChange={(v) => setActiveChartTab(v as any)} className="w-full sm:w-auto">
+              <TabsList className="bg-slate-100 p-1 rounded-xl w-full sm:w-auto grid grid-cols-2 sm:flex">
+                <TabsTrigger value="stack" className="text-xs rounded-lg px-2.5 sm:px-3 py-1.5 font-medium text-center">
+                  Full Stack
                 </TabsTrigger>
-                <TabsTrigger value="cashflow" className="text-xs rounded-lg px-3 py-1.5 font-medium">
-                  Inflow vs Outflow
+                <TabsTrigger value="cashflow" className="text-xs rounded-lg px-2.5 sm:px-3 py-1.5 font-medium text-center">
+                  Cash Flow
                 </TabsTrigger>
               </TabsList>
             </Tabs>
           </div>
         </CardHeader>
 
-        <CardContent className="p-6">
-          <div className="h-[430px] w-full">
+        <CardContent className="p-3 sm:p-6">
+          <div className="h-[320px] sm:h-[430px] w-full">
             <ResponsiveContainer width="100%" height="100%">
               {activeChartTab === 'stack' ? (
                 <ComposedChart
                   data={displayedSeries}
-                  margin={{ top: 15, right: 25, left: 0, bottom: 15 }}
+                  margin={{ top: 15, right: 10, left: -18, bottom: 10 }}
                   onClick={(e) => {
                     if (e && e.activePayload && e.activePayload.length > 0) {
                       const clicked = e.activePayload[0].payload;
@@ -1381,12 +1381,12 @@ export default function FinanceYearly() {
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                   <XAxis
                     dataKey="label"
-                    tick={{ fontSize: 12, fill: '#64748b' }}
+                    tick={{ fontSize: 10, fill: '#64748b' }}
                     axisLine={{ stroke: '#cbd5e1' }}
                     tickLine={false}
                   />
                   <YAxis
-                    tick={{ fontSize: 11, fill: '#64748b' }}
+                    tick={{ fontSize: 10, fill: '#64748b' }}
                     axisLine={false}
                     tickLine={false}
                     tickFormatter={(v) => `£${v >= 1000 ? `${(v/1000).toFixed(1)}k` : v}`}
@@ -1399,7 +1399,7 @@ export default function FinanceYearly() {
                       const surplus = item.income - totalAlloc;
 
                       return (
-                        <div className="bg-slate-900/95 backdrop-blur-md text-white p-4 rounded-2xl shadow-2xl border border-slate-800 text-xs space-y-2 min-w-[280px]">
+                        <div className="bg-slate-900/95 backdrop-blur-md text-white p-3.5 sm:p-4 rounded-2xl shadow-2xl border border-slate-800 text-xs space-y-2 min-w-[260px] max-w-[calc(100vw-32px)]">
                           <div className="flex items-center justify-between border-b border-slate-800 pb-2">
                             <div>
                               <span className="font-bold font-display text-sm block">{item.fullLabel}</span>
@@ -1552,7 +1552,7 @@ export default function FinanceYearly() {
               ) : (
                 <BarChart
                   data={displayedSeries}
-                  margin={{ top: 20, right: 20, left: 0, bottom: 20 }}
+                  margin={{ top: 15, right: 10, left: -18, bottom: 10 }}
                   onClick={(e) => {
                     if (e && e.activePayload && e.activePayload.length > 0) {
                       const clicked = e.activePayload[0].payload;
@@ -1561,8 +1561,8 @@ export default function FinanceYearly() {
                   }}
                 >
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                  <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={{ stroke: '#cbd5e1' }} tickLine={false} />
-                  <YAxis tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} tickFormatter={(v) => `£${v >= 1000 ? `${(v/1000).toFixed(1)}k` : v}`} />
+                  <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#64748b' }} axisLine={{ stroke: '#cbd5e1' }} tickLine={false} />
+                  <YAxis tick={{ fontSize: 10, fill: '#64748b' }} axisLine={false} tickLine={false} tickFormatter={(v) => `£${v >= 1000 ? `${(v/1000).toFixed(1)}k` : v}`} />
                   <RechartsTooltip
                     content={({ active, payload }) => {
                       if (!active || !payload?.length) return null;
@@ -1572,7 +1572,7 @@ export default function FinanceYearly() {
                       const netDiff = (item.income || 0) - totalOutflow;
 
                       return (
-                        <div className="bg-slate-900/95 backdrop-blur-md text-white p-4 rounded-2xl shadow-2xl border border-slate-800 text-xs space-y-2 min-w-[270px]">
+                        <div className="bg-slate-900/95 backdrop-blur-md text-white p-3.5 sm:p-4 rounded-2xl shadow-2xl border border-slate-800 text-xs space-y-2 min-w-[260px] max-w-[calc(100vw-32px)]">
                           <div className="flex items-center justify-between border-b border-slate-800 pb-2">
                             <span className="font-bold font-display text-sm">{item.fullLabel}</span>
                             <Badge variant="outline" className={`text-[10px] ${item.isFuture ? 'text-violet-400 border-violet-800' : 'text-emerald-400 border-emerald-800'}`}>
@@ -1673,12 +1673,12 @@ export default function FinanceYearly() {
                 </div>
 
                 {/* Quick month pills */}
-                <div className="flex flex-wrap gap-1">
+                <div className="flex gap-1 overflow-x-auto touch-scroll max-w-full pb-1 -mx-1 px-1">
                   {displayedSeries.map(s => (
                     <button
                       key={s.monthKey}
                       onClick={() => setSelectedMonthKey(s.monthKey)}
-                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
+                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold whitespace-nowrap transition-all shrink-0 ${
                         activeSpotlightMonth.monthKey === s.monthKey
                           ? 'bg-slate-900 text-white shadow-sm'
                           : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'

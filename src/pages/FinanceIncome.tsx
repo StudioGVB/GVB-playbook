@@ -756,18 +756,17 @@ export default function FinanceIncome() {
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             {/* Total earned hero */}
             <div
-              className="md:col-span-2 bg-white rounded-[2rem] p-6 border-2 border-[#FF2EB8] relative overflow-hidden flex flex-col justify-between min-h-[140px]"
-              style={{ boxShadow: `6px 6px 0px 0px ${PINK}` }}
+              className="md:col-span-2 bg-white rounded-2xl sm:rounded-[2rem] p-4 sm:p-6 border-2 border-[#FF2EB8] relative overflow-hidden flex flex-col justify-between min-h-[135px] sm:min-h-[140px] shadow-[4px_4px_0px_0px_#FF2EB8] sm:shadow-[6px_6px_0px_0px_#FF2EB8]"
             >
               <div className="relative z-10">
-                <p className="text-[#FF2EB8] font-display font-bold uppercase tracking-widest text-xs mb-1">
+                <p className="text-[#FF2EB8] font-display font-bold uppercase tracking-widest text-[11px] sm:text-xs mb-1">
                   Total earned · {monthLabel}
                 </p>
-                <h2 className="text-3xl sm:text-4xl font-display font-black text-slate-900 tabular-nums leading-none">
+                <h2 className="text-2xl sm:text-4xl font-display font-black text-slate-900 tabular-nums leading-none">
                   {formatCurrency(grandTotalWithReimbursements, baseCurrency)}
                 </h2>
-                <div className="mt-3 flex flex-wrap items-center gap-2">
-                  <div className="inline-flex items-center gap-1.5 bg-[#86EFAC] px-3 py-1 rounded-full text-[#166534] text-xs font-bold">
+                <div className="mt-3 flex flex-wrap items-center gap-1.5 sm:gap-2">
+                  <div className="inline-flex items-center gap-1.5 bg-[#86EFAC] px-2.5 sm:px-3 py-1 rounded-full text-[#166534] text-[11px] sm:text-xs font-bold">
                     <TrendingUp className="w-3.5 h-3.5" />
                     {incomeTxs.length} payment{incomeTxs.length === 1 ? '' : 's'} · {BUCKETS.length} sources
                     {reimbursementTotal > 0 && <span className="ml-1 opacity-80">· incl. {formatCurrency(reimbursementTotal, baseCurrency)} reimb.</span>}
@@ -776,7 +775,7 @@ export default function FinanceIncome() {
                     <button
                       type="button"
                       onClick={() => document.getElementById('bucket-other')?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
-                      className="inline-flex items-center gap-1 bg-[#FF7AD1] text-white px-3 py-1 rounded-full text-xs font-bold hover:bg-[#FF2EB8] transition-colors"
+                      className="inline-flex items-center gap-1 bg-[#FF7AD1] text-white px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-bold hover:bg-[#FF2EB8] transition-colors"
                     >
                       <HelpCircle className="w-3.5 h-3.5" />
                       {bucketed.other?.count} in Other · Tap to tag
@@ -789,24 +788,24 @@ export default function FinanceIncome() {
             </div>
 
             {/* Top source tile */}
-            <div className="md:col-span-2 bg-[#86EFAC] rounded-[2rem] p-6 border-2 border-[#22C55E] flex flex-col justify-between min-h-[140px]">
+            <div className="md:col-span-2 bg-[#86EFAC] rounded-2xl sm:rounded-[2rem] p-4 sm:p-6 border-2 border-[#22C55E] flex flex-col justify-between min-h-[135px] sm:min-h-[140px]">
               <div className="flex justify-between items-start">
-                <div className="bg-white/50 p-2.5 rounded-xl">
-                  <TrendingUp className="w-5 h-5 text-[#166534]" />
+                <div className="bg-white/50 p-2 sm:p-2.5 rounded-xl">
+                  <TrendingUp className="w-4 h-4 sm:w-5 sm:h-5 text-[#166534]" />
                 </div>
-                <span className="bg-white px-3 py-1 rounded-full text-[#166534] text-xs font-bold uppercase font-display tracking-wide">
+                <span className="bg-white px-2.5 sm:px-3 py-0.5 sm:py-1 rounded-full text-[#166534] text-[11px] sm:text-xs font-bold uppercase font-display tracking-wide">
                   Top source
                 </span>
               </div>
               <div>
-                <h3 className="text-lg font-display font-bold text-[#166534]">{topBucket?.label || '—'}</h3>
-                <div className="mt-2 w-full bg-white/50 rounded-full h-2.5 overflow-hidden">
+                <h3 className="text-base sm:text-lg font-display font-bold text-[#166534]">{topBucket?.label || '—'}</h3>
+                <div className="mt-1.5 sm:mt-2 w-full bg-white/50 rounded-full h-2.5 overflow-hidden">
                   <div
                     className="h-full transition-all duration-500"
                     style={{ width: `${topShare}%`, backgroundColor: GREEN }}
                   />
                 </div>
-                <p className="mt-1.5 text-xs text-[#166534]/90 font-semibold tabular-nums">
+                <p className="mt-1 sm:mt-1.5 text-xs text-[#166534]/90 font-semibold tabular-nums">
                   {formatCurrency(topBucket ? bucketed[topBucket.key]?.total || 0 : 0, baseCurrency)} · {topShare.toFixed(0)}% of month
                 </p>
               </div>
@@ -814,7 +813,7 @@ export default function FinanceIncome() {
           </div>
 
             {/* Income Breakdown Pie Chart Card */}
-            <div className="bg-white rounded-[2rem] p-6 sm:p-7 border-2 border-[#FF7AD1]/30 shadow-sm relative overflow-hidden">
+            <div className="bg-white rounded-2xl sm:rounded-[2rem] p-4 sm:p-7 border-2 border-[#FF7AD1]/30 shadow-sm relative overflow-hidden">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-2xl bg-[#FFF5FA] flex items-center justify-center text-[#FF2EB8] border border-[#FF7AD1]/30 shrink-0">

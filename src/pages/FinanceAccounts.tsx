@@ -154,23 +154,22 @@ export default function FinanceAccountsPage({ defaultTab }: { defaultTab?: strin
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 {/* Total Liquidity hero */}
                 <div
-                  className="md:col-span-2 md:row-span-2 bg-white rounded-[2rem] p-7 border-2 border-[#FF2EB8] relative overflow-hidden flex flex-col justify-between min-h-[220px]"
-                  style={{ boxShadow: `8px 8px 0px 0px ${PINK}` }}
+                  className="md:col-span-2 md:row-span-2 bg-white rounded-2xl sm:rounded-[2rem] p-4 sm:p-7 border-2 border-[#FF2EB8] relative overflow-hidden flex flex-col justify-between min-h-[190px] sm:min-h-[220px] shadow-[4px_4px_0px_0px_#FF2EB8] sm:shadow-[8px_8px_0px_0px_#FF2EB8]"
                 >
                   <div className="relative z-10">
-                    <p className="text-[#FF2EB8] font-display font-bold uppercase tracking-widest text-xs mb-2">
+                    <p className="text-[#FF2EB8] font-display font-bold uppercase tracking-widest text-[11px] sm:text-xs mb-1.5 sm:mb-2">
                       Total Liquidity
                     </p>
-                    <h2 className="text-4xl sm:text-5xl font-display font-black text-slate-900 tabular-nums leading-none">
+                    <h2 className="text-3xl sm:text-5xl font-display font-black text-slate-900 tabular-nums leading-none">
                       {formatCurrency(totalLiquidity, baseCurrency)}
                     </h2>
-                    <div className="mt-4 inline-flex items-center gap-1.5 bg-[#86EFAC] px-3 py-1 rounded-full text-[#166534] text-sm font-bold">
-                      <Wallet className="w-4 h-4" />
+                    <div className="mt-3 sm:mt-4 inline-flex items-center gap-1.5 bg-[#86EFAC] px-3 py-1 rounded-full text-[#166534] text-xs sm:text-sm font-bold">
+                      <Wallet className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                       {activeCount} account{activeCount !== 1 ? 's' : ''} tracked
                     </div>
                   </div>
                   {/* Sparkline-ish bars from top account balances */}
-                  <div className="mt-8 flex items-end gap-1.5 h-20">
+                  <div className="mt-6 sm:mt-8 flex items-end gap-1.5 h-16 sm:h-20">
                     {(() => {
                       const bars = includedAccounts
                         .map(a => Math.abs(finance.convertToBase(a.balance || 0, a.currency || 'GBP')))
@@ -197,12 +196,12 @@ export default function FinanceAccountsPage({ defaultTab }: { defaultTab?: strin
                 </div>
 
               {/* Cost of Living / Runway summary tile */}
-              <div className="md:col-span-2 bg-[#86EFAC] rounded-[2rem] p-6 border-2 border-[#22C55E] flex flex-col justify-between min-h-[160px]">
+              <div className="md:col-span-2 bg-[#86EFAC] rounded-2xl sm:rounded-[2rem] p-4 sm:p-6 border-2 border-[#22C55E] flex flex-col justify-between min-h-[150px] sm:min-h-[160px]">
                 <div className="flex justify-between items-start">
-                  <div className="bg-white/50 p-3 rounded-2xl">
-                    <TrendingUp className="w-6 h-6 text-[#166534]" />
+                  <div className="bg-white/50 p-2.5 sm:p-3 rounded-2xl">
+                    <TrendingUp className="w-5 h-5 sm:w-6 sm:h-6 text-[#166534]" />
                   </div>
-                  <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase font-display tracking-wide ${
+                  <span className={`px-2.5 sm:px-3 py-0.5 sm:py-1 rounded-full text-[11px] sm:text-xs font-bold uppercase font-display tracking-wide ${
                     runwayOnTrack ? 'bg-[#166534] text-white' : 'bg-amber-600 text-white'
                   }`}>
                     {runwayOnTrack ? 'On Track' : 'Watch'}
@@ -210,18 +209,18 @@ export default function FinanceAccountsPage({ defaultTab }: { defaultTab?: strin
                 </div>
                 <div>
                   <div className="flex items-baseline justify-between flex-wrap gap-1">
-                    <h3 className="text-xl font-display font-bold text-[#166534]">Runway</h3>
+                    <h3 className="text-lg sm:text-xl font-display font-bold text-[#166534]">Runway</h3>
                     <span className="text-xs font-semibold text-[#166534]/90">
                       {formatCurrency(survivalMonthly, baseCurrency)}/mo survival
                     </span>
                   </div>
-                  <div className="mt-2.5 w-full bg-white/50 rounded-full h-3 overflow-hidden">
+                  <div className="mt-2 w-full bg-white/50 rounded-full h-2.5 sm:h-3 overflow-hidden">
                     <div
                       className="h-full transition-all duration-500"
                       style={{ width: `${Math.max(runwayPct > 0 ? runwayPct : 0, 4)}%`, backgroundColor: runwayOnTrack ? GREEN : '#f59e0b' }}
                     />
                   </div>
-                  <p className="mt-2 text-sm text-[#166534]/90 font-medium tabular-nums">
+                  <p className="mt-1.5 sm:mt-2 text-xs sm:text-sm text-[#166534]/90 font-medium tabular-nums">
                     {runwayMonths.toFixed(1)} of {bufferMonths} months buffer
                   </p>
                 </div>
@@ -234,7 +233,7 @@ export default function FinanceAccountsPage({ defaultTab }: { defaultTab?: strin
                   const btn = document.querySelector<HTMLButtonElement>('[data-add-account-trigger]');
                   btn?.click();
                 }}
-                className="bg-[#FF7AD1] rounded-[2rem] p-6 border-2 border-[#FF2EB8] text-white flex flex-col items-center justify-center gap-2 group cursor-pointer hover:scale-[1.02] active:scale-[0.98] transition-transform min-h-[160px]"
+                className="bg-[#FF7AD1] rounded-2xl sm:rounded-[2rem] p-4 sm:p-6 border-2 border-[#FF2EB8] text-white flex flex-col items-center justify-center gap-2 group cursor-pointer hover:scale-[1.02] active:scale-[0.98] transition-transform min-h-[140px] sm:min-h-[160px]"
               >
                 <div className="w-12 h-12 rounded-2xl bg-white/25 flex items-center justify-center group-hover:rotate-12 transition-transform">
                   <Sparkles className="w-6 h-6" />
