@@ -204,6 +204,63 @@ export function computeMonthlyPotSchedule(params: {
   const spentByGoalTotal = computeSpentByGoalBase(goals, transactions, categories, convertToBase);
   const eligibleGoals = goals.filter(g => !isProtectedSystemPot(g));
 
+  // Detect any months that have ALREADY been pre-allocated by a Gamma paycheck (persisted in tx.raw.paycheck_allocation_breakdown
+  // or localStorage). For example, when the Dec 2026 paycheck lands on Nov 28th and auto-allocates £846.64 into the 7 pots,
+  // each pot's `assigned_amount` in the database ALREADY includes December's contribution!
+  // If we didn't lock December to its payday breakdown, the chart would think `Europe winter` & `Xmas & Gifts` needed £0 in Dec
+  // and would try to schedule Jan–Apr's remaining balances back into Dec!
+  const preAllocatedByMonthKey = new Map<string, Map<string, number>>();
+  for (const tx of transactions) {
+    if (!tx || tx.amount < 1000 || tx.is_transfer) continue;
+    const rawObj = (tx.raw as any) || {};
+    let breakdownObj = rawObj.paycheck_allocation_breakdown;
+    if (!breakdownObj && typeof localStorage !== 'undefined' && tx.id) {
+      try {
+        const s = localStorage.getItem(`paycheck_allocation_snapshot_${tx.id}`);
+        if (s) breakdownObj = JSON.parse(s);
+      } catch {
+        breakdownObj = null;
+      }
+    }
+    if (!breakdownObj || !Array.isArray(breakdownObj.goalAllocations) || !(breakdownObj.totalGoalAllocations > 0)) {
+      continue;
+    }
+
+    // Determine effective month of this Gamma paycheck (paychecks landing on 20th+ fund the next month)
+    const rawDateStr = String(tx.posted_at || '').split('T')[0];
+    const parts = rawDateStr.split('-').map(Number);
+    if (parts.length !== 3 || isNaN(parts[0])) continue;
+    const txDate = new Date(parts[0], parts[1] - 1, parts[2]);
+    const effMonthDate = txDate.getDate() >= 20
+      ? new Date(txDate.getFullYear(), txDate.getMonth() + 1, 1)
+      : new Date(txDate.getFullYear(), txDate.getMonth(), 1);
+    const effMonthKey = format(effMonthDate, 'yyyy-MM');
+
+    if (!preAllocatedByMonthKey.has(effMonthKey)) {
+      const goalMap = new Map<string, number>();
+      for (const item of breakdownObj.goalAllocations) {
+        if (item.goalId && Number(item.allocatedAmount) > 0.01) {
+          goalMap.set(item.goalId, Number(item.allocatedAmount));
+        }
+      }
+      if (goalMap.size > 0) {
+        preAllocatedByMonthKey.set(effMonthKey, goalMap);
+      }
+    }
+  }
+
+  // Build a lookup of all pre-allocated amounts in months >= currentMonthStart for each goal
+  const preAllocatedFutureSumByGoal = new Map<string, number>();
+  preAllocatedByMonthKey.forEach((goalMap, mKey) => {
+    const [y, m] = mKey.split('-').map(Number);
+    const mStart = new Date(y, m - 1, 1);
+    if (mStart >= currentMonthStart) {
+      goalMap.forEach((amt, gId) => {
+        preAllocatedFutureSumByGoal.set(gId, (preAllocatedFutureSumByGoal.get(gId) || 0) + amt);
+      });
+    }
+  });
+
   const metas: ActiveGoalMeta[] = [];
   let maxMonthDate = addMonths(currentMonthStart, 5);
 
@@ -213,7 +270,11 @@ export function computeMonthlyPotSchedule(params: {
     const spentBase = spentByGoalTotal.get(g.id) || 0;
     const refillWhenSpent = Boolean(g.refill_when_spent);
     const effectiveFundedBase = refillWhenSpent ? assignedBase : assignedBase + spentBase;
-    const remainingToSaveBase = Math.max(0, targetBase - effectiveFundedBase);
+    // Future remaining after any already-allocated payday transfers
+    const remainingAfterPreAllocBase = Math.max(0, targetBase - effectiveFundedBase);
+    const preAllocForGoal = preAllocatedFutureSumByGoal.get(g.id) || 0;
+    // Total remaining to display across the schedule (includes the pre-allocated payday month so Dec 26 shows Europe winter & Xmas & Gifts!)
+    const remainingToSaveBase = remainingAfterPreAllocBase + preAllocForGoal;
 
     if (remainingToSaveBase <= 0.01) return;
 
@@ -272,6 +333,9 @@ export function computeMonthlyPotSchedule(params: {
     cursor = addMonths(cursor, 1);
   }
 
+  const monthKeys = monthDates.map(mDate => format(mDate, 'yyyy-MM'));
+  const isMonthPreAllocated = monthKeys.map(mKey => preAllocatedByMonthKey.has(mKey));
+
   const monthAvailableDays = monthDates.map((mDate, mIdx) => {
     const mStart = startOfMonth(mDate);
     const mEnd = endOfMonth(mDate);
@@ -286,28 +350,61 @@ export function computeMonthlyPotSchedule(params: {
   for (const meta of metas) {
     const daysPerMonth: number[] = [];
     const evenPerMonth: number[] = [];
+    let unallocatedActiveDays = 0;
 
     monthDates.forEach((mDate, mIdx) => {
+      const mKey = monthKeys[mIdx];
+      const preMap = preAllocatedByMonthKey.get(mKey);
       const mStart = startOfMonth(mDate);
       const mEnd = endOfMonth(mDate);
       const windowStart = meta.effectiveStart > mStart ? meta.effectiveStart : mStart;
       const windowEnd = meta.effectiveDeadline < mEnd ? meta.effectiveDeadline : mEnd;
 
-      if (windowEnd >= windowStart) {
-        const activeDays = differenceInCalendarDays(windowEnd, windowStart) + 1;
-        daysPerMonth[mIdx] = activeDays;
-        evenPerMonth[mIdx] = (meta.remainingToSaveBase * activeDays) / meta.totalActiveDays;
+      if (preMap) {
+        // This month's payday allocation already happened!
+        const lockedAmt = preMap.get(meta.goal.id) || 0;
+        const activeDays = windowEnd >= windowStart
+          ? Math.max(1, differenceInCalendarDays(windowEnd, windowStart) + 1)
+          : (lockedAmt > 0 ? differenceInCalendarDays(mEnd, mStart) + 1 : 0);
+        daysPerMonth[mIdx] = lockedAmt > 0 ? activeDays : 0;
+        evenPerMonth[mIdx] = lockedAmt;
+      } else if (windowEnd >= windowStart) {
+        // If today's current month (mIdx === 0) is already in its final payday week (20th+) and next month is pre-allocated,
+        // don't schedule extra savings into the remaining few days of currentMonth
+        const isCurrentMonthAlreadyPastPayday =
+          mIdx === 0 &&
+          monthDates.length > 1 &&
+          isMonthPreAllocated[1];
+        if (isCurrentMonthAlreadyPastPayday) {
+          daysPerMonth[mIdx] = 0;
+          evenPerMonth[mIdx] = 0;
+        } else {
+          const activeDays = differenceInCalendarDays(windowEnd, windowStart) + 1;
+          daysPerMonth[mIdx] = activeDays;
+          evenPerMonth[mIdx] = 0;
+          unallocatedActiveDays += activeDays;
+        }
       } else {
         daysPerMonth[mIdx] = 0;
         evenPerMonth[mIdx] = 0;
       }
     });
 
+    // Distribute only the REMAINING post-payday balance (`targetBase - effectiveFundedBase`) across non-pre-allocated active months
+    const remainingForUnallocatedMonths = Math.max(0, meta.targetBase - meta.effectiveFundedBase);
+    if (unallocatedActiveDays > 0 && remainingForUnallocatedMonths > 0) {
+      monthDates.forEach((_, mIdx) => {
+        if (!isMonthPreAllocated[mIdx] && daysPerMonth[mIdx] > 0) {
+          evenPerMonth[mIdx] = (remainingForUnallocatedMonths * daysPerMonth[mIdx]) / unallocatedActiveDays;
+        }
+      });
+    }
+
     activeDaysMatrix.set(meta.goal.id, daysPerMonth);
     evenAllocMatrix.set(meta.goal.id, evenPerMonth);
   }
 
-  // PASS 1: Lock in all 'fixed' pots first as the foundation layer
+  // PASS 1: Lock in all 'fixed' pots first (and all pre-allocated months) as the foundation layer
   const monthCommittedLoad = new Array(monthDates.length).fill(0);
 
   for (const meta of metas) {
@@ -319,42 +416,57 @@ export function computeMonthlyPotSchedule(params: {
     });
   }
 
-  // PASS 2: Calculate all 'dynamic' pots OVER THE TOP of the fixed pots (in deadline order)
+  // Also add pre-allocated dynamic pot amounts into monthCommittedLoad for pre-allocated months
+  for (const meta of metas) {
+    if (meta.pacingMode !== 'dynamic') continue;
+    const evenPerMonth = evenAllocMatrix.get(meta.goal.id)!;
+    evenPerMonth.forEach((amt, mIdx) => {
+      if (isMonthPreAllocated[mIdx]) {
+        monthCommittedLoad[mIdx] += amt;
+      }
+    });
+  }
+
+  // PASS 2: Calculate all 'dynamic' pots OVER THE TOP of the fixed pots across non-pre-allocated months (in deadline order)
   for (const meta of metas) {
     if (meta.pacingMode !== 'dynamic') continue;
 
     const daysPerMonth = activeDaysMatrix.get(meta.goal.id)!;
     const evenPerMonth = evenAllocMatrix.get(meta.goal.id)!;
-    const activeMonthIndices = daysPerMonth
-      .map((d, idx) => (d > 0 ? idx : -1))
+    const openActiveMonthIndices = daysPerMonth
+      .map((d, idx) => (d > 0 && !isMonthPreAllocated[idx] ? idx : -1))
       .filter(idx => idx !== -1);
 
-    if (activeMonthIndices.length <= 1) {
+    const remainingForUnallocatedMonths = Math.max(0, meta.targetBase - meta.effectiveFundedBase);
+
+    if (openActiveMonthIndices.length <= 1 || remainingForUnallocatedMonths <= 0.01) {
       finalAllocMatrix.set(meta.goal.id, [...evenPerMonth]);
-      activeMonthIndices.forEach(idx => {
+      openActiveMonthIndices.forEach(idx => {
         monthCommittedLoad[idx] += evenPerMonth[idx];
       });
       continue;
     }
 
     const BASELINE_RATIO = 0.2;
-    const baselinePerMonth = evenPerMonth.map(amt => amt * BASELINE_RATIO);
-    const flexRemaining = meta.remainingToSaveBase * (1 - BASELINE_RATIO);
+    const baselinePerMonth = monthDates.map((_, mIdx) =>
+      isMonthPreAllocated[mIdx] ? evenPerMonth[mIdx] : evenPerMonth[mIdx] * BASELINE_RATIO
+    );
+    const flexRemaining = remainingForUnallocatedMonths * (1 - BASELINE_RATIO);
 
     // Existing daily load u_m includes all FIXED pots + more-urgent DYNAMIC pots
     const dailyLoad = monthDates.map((_, mIdx) => {
       return (monthCommittedLoad[mIdx] + baselinePerMonth[mIdx]) / monthAvailableDays[mIdx];
     });
 
-    let low = Math.min(...activeMonthIndices.map(mIdx => dailyLoad[mIdx]));
+    let low = Math.min(...openActiveMonthIndices.map(mIdx => dailyLoad[mIdx]));
     let high =
-      Math.max(...activeMonthIndices.map(mIdx => dailyLoad[mIdx])) +
-      flexRemaining / Math.min(...activeMonthIndices.map(mIdx => Math.max(1, daysPerMonth[mIdx])));
+      Math.max(...openActiveMonthIndices.map(mIdx => dailyLoad[mIdx])) +
+      flexRemaining / Math.min(...openActiveMonthIndices.map(mIdx => Math.max(1, daysPerMonth[mIdx])));
 
     for (let iter = 0; iter < 45; iter++) {
       const mid = (low + high) / 2;
       let allocated = 0;
-      for (const mIdx of activeMonthIndices) {
+      for (const mIdx of openActiveMonthIndices) {
         if (mid > dailyLoad[mIdx]) {
           allocated += daysPerMonth[mIdx] * (mid - dailyLoad[mIdx]);
         }
@@ -368,19 +480,23 @@ export function computeMonthlyPotSchedule(params: {
 
     const waterLevel = (low + high) / 2;
     const dynPerMonth = monthDates.map((_, mIdx) => {
+      if (isMonthPreAllocated[mIdx]) return evenPerMonth[mIdx];
       if (daysPerMonth[mIdx] <= 0) return 0;
       const flexAdd = daysPerMonth[mIdx] * Math.max(0, waterLevel - dailyLoad[mIdx]);
       return baselinePerMonth[mIdx] + flexAdd;
     });
 
     finalAllocMatrix.set(meta.goal.id, dynPerMonth);
-    activeMonthIndices.forEach(mIdx => {
+    openActiveMonthIndices.forEach(mIdx => {
       monthCommittedLoad[mIdx] += dynPerMonth[mIdx];
     });
   }
 
   const cumulativeByGoal = new Map<string, number>();
-  metas.forEach(m => cumulativeByGoal.set(m.goal.id, m.effectiveFundedBase));
+  metas.forEach(m => {
+    const preAlloc = preAllocatedFutureSumByGoal.get(m.goal.id) || 0;
+    cumulativeByGoal.set(m.goal.id, Math.max(0, m.effectiveFundedBase - preAlloc));
+  });
 
   const series: MonthSeriesPoint[] = monthDates.map((mDate, mIdx) => {
     const mKey = format(mDate, 'yyyy-MM');
@@ -447,6 +563,12 @@ export function computeMonthlyPotSchedule(params: {
     point.dynamicTotal = Math.round(point.dynamicTotal * 100) / 100;
     return point;
   });
+
+  // If the first month (e.g. Nov 26 after Dec 26's paycheck has already landed) has £0 left to schedule,
+  // shift it off the front so the chart starts cleanly at Dec 26!
+  while (series.length > 1 && series[0].total <= 0.01) {
+    series.shift();
+  }
 
   while (series.length > 4 && series[series.length - 1].total <= 0.01) {
     series.pop();
