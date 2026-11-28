@@ -357,10 +357,11 @@ export default function FinanceMonthly() {
   const netProfit = incomeTotal - totalSpent;
   const savingsRate = incomeTotal > 0 ? (netProfit / incomeTotal) * 100 : 0;
 
-  // Pool savings monthly target (strictly aligned with monthAllowancePlan & Living Budget Pot)
+  // Pool savings monthly target (strictly aligned with monthAllowancePlan & Living Budget Pot, including 10% Gamma Emergency Fund)
   const poolSavingsMonthly = useMemo(() => {
+    const emergencyFromGamma = Math.round(((monthAllowancePlan?.gammaMonthlyIncome ?? expectedIncomeVal) || 0) * 0.10 * 100) / 100;
     if (monthAllowancePlan && monthAllowancePlan.potSavingsMonthly > 0) {
-      return monthAllowancePlan.potSavingsMonthly;
+      return monthAllowancePlan.potSavingsMonthly + emergencyFromGamma;
     }
     const directGoalSavings = computeRequiredGoalSavingsMonthly(
       finance.goals,
@@ -369,9 +370,10 @@ export default function FinanceMonthly() {
       incomeTotal || expectedIncomeVal,
       finance.transactions
     );
-    return (snapshot?.split.goalSavingsAmount && snapshot.split.goalSavingsAmount > 0)
+    const goalPart = (snapshot?.split.goalSavingsAmount && snapshot.split.goalSavingsAmount > 0)
       ? snapshot.split.goalSavingsAmount
       : directGoalSavings;
+    return goalPart + (snapshot?.split.baseSavingsAmount || emergencyFromGamma);
   }, [monthAllowancePlan, finance.goals, finance.convertToBase, selectedMonth, incomeTotal, expectedIncomeVal, finance.transactions, snapshot]);
 
   // Savings Stash: shock absorber pool that absorbs weekly/monthly overspend

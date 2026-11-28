@@ -286,9 +286,10 @@ export default function FinanceBalanceSheet() {
     );
   }, [finance.goals, finance.convertToBase, monthStart, stats.income, expectedIncomeValue, finance.transactions]);
 
-  const poolSavingsMonthly = (snapshot?.split.goalSavingsAmount && snapshot.split.goalSavingsAmount > 0)
+  const goalSavingsPart = (snapshot?.split.goalSavingsAmount && snapshot.split.goalSavingsAmount > 0)
     ? snapshot.split.goalSavingsAmount
     : directGoalSavings;
+  const poolSavingsMonthly = goalSavingsPart + (snapshot?.split.baseSavingsAmount ?? Math.round((expectedIncomeValue || 0) * 0.10 * 100) / 100);
   const essentialBudgetMonthly = snapshot 
     ? snapshot.weeklyEssentialBudget * 4.33 
     : (assumptions?.estimated_essential_variable || 400);

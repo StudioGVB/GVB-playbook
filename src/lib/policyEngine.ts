@@ -1110,7 +1110,16 @@ export function computeRequiredGoalSavingsMonthly(
   let scheduledMonthlyTotal = 0;
   for (const g of (goals || [])) {
     const lower = (g.name || '').trim().toLowerCase();
-    if ((g as any)?.is_stash || lower.includes('stash')) continue;
+    if (
+      (g as any)?.is_stash ||
+      (g as any)?.is_emergency ||
+      lower.includes('stash') ||
+      lower.includes('emergency') ||
+      lower === 'savings' ||
+      lower === 'core savings'
+    ) {
+      continue;
+    }
     const plan = schedule.getGoalPlanForMonth(g.id, monthStartAnchor);
     if (plan && !plan.isFutureStart && plan.monthlyAmount > 0) {
       const monthlyPace = Math.min(plan.remainingToSaveBase, plan.monthlyAmount);
@@ -1135,7 +1144,16 @@ export function computeRequiredGoalSavingsMonthly(
   const daysInThisMonth = Math.max(1, differenceInCalendarDays(endOfMonth(now), monthStartAnchor) + 1);
   for (const g of (goals || [])) {
     const lower = (g.name || '').trim().toLowerCase();
-    if ((g as any)?.is_stash || lower.includes('stash')) continue;
+    if (
+      (g as any)?.is_stash ||
+      (g as any)?.is_emergency ||
+      lower.includes('stash') ||
+      lower.includes('emergency') ||
+      lower === 'savings' ||
+      lower === 'core savings'
+    ) {
+      continue;
+    }
     if (g.start_date && new Date(g.start_date) > endOfMonth(now)) continue;
     const targetBase = convertToBase ? convertToBase(g.target_amount || 0, g.currency) : (g.target_amount || 0);
     const assignedBase = convertToBase ? convertToBase(g.assigned_amount || 0, g.currency) : (g.assigned_amount || 0);

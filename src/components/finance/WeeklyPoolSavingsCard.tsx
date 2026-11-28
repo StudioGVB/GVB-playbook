@@ -32,9 +32,18 @@ export default function WeeklyPoolSavingsCard({ finance, spendablePool = 0, funM
 
     const eligibleGoals = finance.goals.filter((g) => {
       const lower = (g.name || '').trim().toLowerCase();
-      if ((g as any).is_stash || lower.includes('stash')) return false;
+      if (
+        (g as any).is_stash ||
+        lower.includes('stash') ||
+        lower === 'savings' ||
+        lower === 'core savings'
+      ) {
+        return false;
+      }
       return true;
     });
+
+    const firstScheduleMonthDate = potSchedule.months[0]?.monthDate || new Date();
 
     return eligibleGoals.map((goal) => {
       const targetNative = goal.target_amount || 0;
@@ -55,7 +64,7 @@ export default function WeeklyPoolSavingsCard({ finance, spendablePool = 0, funM
       const now = new Date();
       const isFutureStart = !!goal.start_date && new Date(goal.start_date) > now;
       const isStash = (goal as any).is_stash || goal.name.toLowerCase().includes('stash');
-      const scheduledPlan = potSchedule.getGoalPlanForMonth(goal.id, now);
+      const scheduledPlan = potSchedule.getGoalPlanForMonth(goal.id, firstScheduleMonthDate);
 
       if (remainingBase <= 0.01) {
         status = 'completed';

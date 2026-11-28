@@ -2413,9 +2413,11 @@ export default function FinancePoolsPage() {
                     const assignedVal = finance.convertToBase(effectiveFundedNative, goal.currency);
                     const remainingToSave = Math.max(0, targetVal - assignedVal);
 
-                    const scheduledPlan = potSchedule.getGoalPlanForMonth(goal.id);
+                    const scheduledPlan = potSchedule.getGoalPlanForMonth(goal.id, targetMonthDate);
                     let weeklyRequired = 0;
-                    if (scheduledPlan) {
+                    if (remainingToSave <= 0.01) {
+                      weeklyRequired = 0;
+                    } else if (scheduledPlan) {
                       weeklyRequired = scheduledPlan.weeklyPace;
                     } else if (isFutureStart) {
                       const st = new Date(goal.start_date!);
@@ -2426,7 +2428,9 @@ export default function FinancePoolsPage() {
                       const weeksRemaining = daysRemainingClamped / 7;
                       weeklyRequired = remainingToSave / weeksRemaining;
                     }
-                    const monthlyRequired = scheduledPlan
+                    const monthlyRequired = remainingToSave <= 0.01
+                      ? 0
+                      : scheduledPlan
                       ? scheduledPlan.monthlyAmount
                       : Math.min(remainingToSave, weeklyRequired * 4.33);
                     
