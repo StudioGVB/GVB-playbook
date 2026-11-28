@@ -398,6 +398,12 @@ export function computeMonthDailyAllowancePlan(params: {
     const targetPoint = potSchedule.months.find(m => m.monthKey === monthKey);
     if (targetPoint) {
       scheduledPotSavings = targetPoint.total;
+    } else if (potSchedule.months.length > 0 && potSchedule.months[0].monthKey > monthKey) {
+      // When next month's paycheck has already landed in the final days of the current month (e.g. Nov 28th for Dec),
+      // potSchedule.months has already shifted its first entry to next month (Dec = £846.64).
+      // Lock the current month's pot deduction to that active monthly schedule total so the final days of the month
+      // never drop potSavingsMonthly to £0.00 or inflate the current week's Safe to Spend!
+      scheduledPotSavings = potSchedule.months[0].total;
     } else {
       for (const g of goals) {
         const lower = (g.name || '').trim().toLowerCase();

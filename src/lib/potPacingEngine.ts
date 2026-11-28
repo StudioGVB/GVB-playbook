@@ -588,9 +588,16 @@ export function computeMonthlyPotSchedule(params: {
     const targetMonthStart = startOfMonth(targetMonth);
     const isBeforeGoalStart = Boolean(meta.rawStart && targetMonthStart < startOfMonth(meta.rawStart));
 
+    // If mIdx === 0 is the current month in its final days after next month's paycheck already landed (`isMonthPreAllocated[1]`),
+    // use mIdx = 1 for current-month pot card display; otherwise NEVER fall back to an earlier month after a pot has finished!
+    let effectiveIdx = mIdx;
+    if (effectiveIdx === 0 && daysArr[0] <= 0 && monthDates.length > 1 && isMonthPreAllocated[1] && daysArr[1] > 0) {
+      effectiveIdx = 1;
+    }
+
     // CRITICAL: If this goal has 0 active days in targetMonth (e.g. it already finished in December or its deadline has passed),
     // NEVER fall back to `firstActive` (December) and repeat December's contribution in January, February, March, and April!
-    if (mIdx === -1 || daysArr[mIdx] <= 0) {
+    if (effectiveIdx === -1 || daysArr[effectiveIdx] <= 0) {
       if (isBeforeGoalStart) {
         const firstActive = daysArr.findIndex(d => d > 0);
         if (firstActive !== -1) {
@@ -616,10 +623,10 @@ export function computeMonthlyPotSchedule(params: {
       return null;
     }
 
-    const activeDays = Math.max(1, daysArr[mIdx] || 30.44);
+    const activeDays = Math.max(1, daysArr[effectiveIdx] || 30.44);
     const weeksInWindow = Math.max(1, activeDays / 7);
-    const evenMonthlyAmount = Math.min(meta.remainingToSaveBase, evenArr[mIdx] || 0);
-    const chosenMonthlyAmount = Math.min(meta.remainingToSaveBase, finalArr[mIdx] || 0);
+    const evenMonthlyAmount = Math.min(meta.remainingToSaveBase, evenArr[effectiveIdx] || 0);
+    const chosenMonthlyAmount = Math.min(meta.remainingToSaveBase, finalArr[effectiveIdx] || 0);
     const evenWeeklyPace = evenMonthlyAmount / weeksInWindow;
     const chosenWeeklyPace = chosenMonthlyAmount / weeksInWindow;
 
@@ -632,7 +639,7 @@ export function computeMonthlyPotSchedule(params: {
       evenWeeklyPace,
       dynamicMonthlyAmount: chosenMonthlyAmount,
       dynamicWeeklyPace: chosenWeeklyPace,
-      activeMonthLabel: format(monthDates[mIdx], 'MMM'),
+      activeMonthLabel: format(monthDates[effectiveIdx], 'MMM'),
       isFutureStart: false,
       isLighterThisMonth:
         meta.pacingMode === 'dynamic' && chosenMonthlyAmount < evenMonthlyAmount * 0.88,
