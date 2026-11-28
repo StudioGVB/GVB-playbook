@@ -584,20 +584,42 @@ export function computeMonthlyPotSchedule(params: {
     if (!daysArr || !evenArr || !finalArr) return null;
 
     const targetKey = format(targetMonth, 'yyyy-MM');
-    let mIdx = monthDates.findIndex(d => format(d, 'yyyy-MM') === targetKey);
-    if (mIdx === -1) mIdx = 0;
+    const mIdx = monthDates.findIndex(d => format(d, 'yyyy-MM') === targetKey);
+    const targetMonthStart = startOfMonth(targetMonth);
+    const isBeforeGoalStart = Boolean(meta.rawStart && targetMonthStart < startOfMonth(meta.rawStart));
 
-    const isFutureStart = Boolean(meta.rawStart && meta.rawStart > today);
-    let displayIdx = mIdx;
-    if (daysArr[displayIdx] <= 0) {
-      const firstActive = daysArr.findIndex(d => d > 0);
-      if (firstActive !== -1) displayIdx = firstActive;
+    // CRITICAL: If this goal has 0 active days in targetMonth (e.g. it already finished in December or its deadline has passed),
+    // NEVER fall back to `firstActive` (December) and repeat December's contribution in January, February, March, and April!
+    if (mIdx === -1 || daysArr[mIdx] <= 0) {
+      if (isBeforeGoalStart) {
+        const firstActive = daysArr.findIndex(d => d > 0);
+        if (firstActive !== -1) {
+          const previewDays = Math.max(1, daysArr[firstActive] || 30.44);
+          const previewWeeks = Math.max(1, previewDays / 7);
+          const previewAmt = Math.min(meta.remainingToSaveBase, finalArr[firstActive] || 0);
+          return {
+            pacingMode: meta.pacingMode,
+            remainingToSaveBase: meta.remainingToSaveBase,
+            monthlyAmount: 0,
+            weeklyPace: previewAmt / previewWeeks,
+            evenMonthlyAmount: 0,
+            evenWeeklyPace: previewAmt / previewWeeks,
+            dynamicMonthlyAmount: 0,
+            dynamicWeeklyPace: previewAmt / previewWeeks,
+            activeMonthLabel: format(monthDates[firstActive], 'MMM'),
+            isFutureStart: true,
+            isLighterThisMonth: false,
+            isBoostedThisMonth: false,
+          };
+        }
+      }
+      return null;
     }
 
-    const activeDays = Math.max(1, daysArr[displayIdx] || 30.44);
+    const activeDays = Math.max(1, daysArr[mIdx] || 30.44);
     const weeksInWindow = Math.max(1, activeDays / 7);
-    const evenMonthlyAmount = Math.min(meta.remainingToSaveBase, evenArr[displayIdx] || 0);
-    const chosenMonthlyAmount = Math.min(meta.remainingToSaveBase, finalArr[displayIdx] || 0);
+    const evenMonthlyAmount = Math.min(meta.remainingToSaveBase, evenArr[mIdx] || 0);
+    const chosenMonthlyAmount = Math.min(meta.remainingToSaveBase, finalArr[mIdx] || 0);
     const evenWeeklyPace = evenMonthlyAmount / weeksInWindow;
     const chosenWeeklyPace = chosenMonthlyAmount / weeksInWindow;
 
@@ -610,8 +632,8 @@ export function computeMonthlyPotSchedule(params: {
       evenWeeklyPace,
       dynamicMonthlyAmount: chosenMonthlyAmount,
       dynamicWeeklyPace: chosenWeeklyPace,
-      activeMonthLabel: format(monthDates[displayIdx], 'MMM'),
-      isFutureStart,
+      activeMonthLabel: format(monthDates[mIdx], 'MMM'),
+      isFutureStart: false,
       isLighterThisMonth:
         meta.pacingMode === 'dynamic' && chosenMonthlyAmount < evenMonthlyAmount * 0.88,
       isBoostedThisMonth:
