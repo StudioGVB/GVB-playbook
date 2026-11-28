@@ -16,6 +16,8 @@ import type { useFinanceData } from '@/hooks/useFinanceData';
 import type { FixedExpense } from '@/hooks/useFixedExpenses';
 import SplitTransactionDialog from './SplitTransactionDialog';
 import PaybackLinkDialog from './PaybackLinkDialog';
+import BillSelectDialog from './BillSelectDialog';
+import PotSelectDialog from './PotSelectDialog';
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -23,9 +25,6 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubTrigger,
-  DropdownMenuSubContent,
 } from '@/components/ui/dropdown-menu';
 
 type Props = { finance: ReturnType<typeof useFinanceData>; initialAccountFilter?: string; fixedExpenses?: FixedExpense[] };
@@ -529,6 +528,13 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
 
   const [paybackDialogOpen, setPaybackDialogOpen] = useState(false);
   const [sourceTxForPayback, setSourceTxForPayback] = useState<any | null>(null);
+
+  // Bill & Pot mobile-friendly selection dialog states
+  const [billDialogOpen, setBillDialogOpen] = useState(false);
+  const [txForBillDialog, setTxForBillDialog] = useState<any | null>(null);
+
+  const [potDialogOpen, setPotDialogOpen] = useState(false);
+  const [txForPotDialog, setTxForPotDialog] = useState<any | null>(null);
 
   const handleConfirmSplit = useCallback(async (
     parentTx: any,
@@ -1272,12 +1278,28 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                           <p className="text-sm font-display font-bold text-slate-900 truncate">{tx.description}</p>
                           {getTransferBadge()}
                           {assignedGoal && (
-                            <Badge variant="secondary" className="text-[9px] px-1.5 py-0 shrink-0 bg-primary/10 text-primary">
+                            <Badge
+                              variant="secondary"
+                              onClick={() => {
+                                setTxForPotDialog(tx);
+                                setPotDialogOpen(true);
+                              }}
+                              className="text-[9px] px-1.5 py-0 shrink-0 bg-primary/10 text-primary cursor-pointer hover:bg-primary/20 transition-colors"
+                              title={`Pot: ${assignedGoal.name} — click to change or remove`}
+                            >
                               <Target className="w-2.5 h-2.5 mr-0.5" />{assignedGoal.name}
                             </Badge>
                           )}
                           {assignedFixedExpense && (
-                            <Badge variant="secondary" className="text-[9px] px-1.5 py-0 shrink-0 bg-destructive/10 text-destructive">
+                            <Badge
+                              variant="secondary"
+                              onClick={() => {
+                                setTxForBillDialog(tx);
+                                setBillDialogOpen(true);
+                              }}
+                              className="text-[9px] px-1.5 py-0 shrink-0 bg-destructive/10 text-destructive cursor-pointer hover:bg-destructive/20 transition-colors"
+                              title={`Bill: ${assignedFixedExpense.name} — click to change or remove`}
+                            >
                               <Receipt className="w-2.5 h-2.5 mr-0.5" />{assignedFixedExpense.name}
                             </Badge>
                           )}
@@ -1830,84 +1852,36 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                                 </DropdownMenuItem>
                               )}
 
-                              {/* Assign to Pot (Submenu) */}
+                              {/* Assign to Pot */}
                               {tx.amount < 0 && goals.length > 0 && (
-                                <DropdownMenuSub>
-                                  <DropdownMenuSubTrigger className="flex items-center gap-2 text-xs py-2 cursor-pointer font-medium">
-                                    <Target className="w-4 h-4 text-primary" />
-                                    <span className="truncate">
-                                      {assignedGoal ? `Pot: ${assignedGoal.name}` : 'Assign to Pot'}
-                                    </span>
-                                  </DropdownMenuSubTrigger>
-                                  <DropdownMenuSubContent className="w-48 p-1 shadow-lg">
-                                    <DropdownMenuLabel className="text-[10px] uppercase font-bold text-muted-foreground px-2 py-1">
-                                      Select Pot
-                                    </DropdownMenuLabel>
-                                    {goals.map(g => (
-                                      <DropdownMenuItem
-                                        key={g.id}
-                                        onClick={() => handlePoolAssign(tx.id, g.id)}
-                                        className="flex items-center gap-2 text-xs py-1.5 cursor-pointer"
-                                      >
-                                        <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: g.color || '#3b82f6' }} />
-                                        <span className="truncate">{g.name}</span>
-                                        {(tx as any).goal_id === g.id && <Check className="w-3.5 h-3.5 ml-auto text-primary" />}
-                                      </DropdownMenuItem>
-                                    ))}
-                                    {(tx as any).goal_id && (
-                                      <>
-                                        <DropdownMenuSeparator />
-                                        <DropdownMenuItem
-                                          onClick={() => handlePoolAssign(tx.id, null)}
-                                          className="text-xs text-destructive flex items-center gap-2 py-1.5 cursor-pointer"
-                                        >
-                                          <X className="w-3.5 h-3.5" /> Remove from pot
-                                        </DropdownMenuItem>
-                                      </>
-                                    )}
-                                  </DropdownMenuSubContent>
-                                </DropdownMenuSub>
+                                <DropdownMenuItem
+                                  onClick={() => {
+                                    setTxForPotDialog(tx);
+                                    setPotDialogOpen(true);
+                                  }}
+                                  className="flex items-center gap-2 text-xs py-2 cursor-pointer font-medium"
+                                >
+                                  <Target className="w-4 h-4 text-primary" />
+                                  <span className="truncate">
+                                    {assignedGoal ? `Pot: ${assignedGoal.name}` : 'Assign to Pot'}
+                                  </span>
+                                </DropdownMenuItem>
                               )}
 
-                              {/* Fixed expense / bill assignment (Submenu) */}
+                              {/* Fixed expense / bill assignment */}
                               {tx.amount < 0 && fixedExpenses.length > 0 && (
-                                <DropdownMenuSub>
-                                  <DropdownMenuSubTrigger className="flex items-center gap-2 text-xs py-2 cursor-pointer font-medium">
-                                    <Receipt className="w-4 h-4 text-amber-600" />
-                                    <span className="truncate">
-                                      {assignedFixedExpense ? `Bill: ${assignedFixedExpense.name}` : 'Mark as Bill'}
-                                    </span>
-                                  </DropdownMenuSubTrigger>
-                                  <DropdownMenuSubContent className="w-52 p-1 shadow-lg">
-                                    <DropdownMenuLabel className="text-[10px] uppercase font-bold text-muted-foreground px-2 py-1">
-                                      Fixed Bills
-                                    </DropdownMenuLabel>
-                                    {fixedExpenses.map(e => (
-                                      <DropdownMenuItem
-                                        key={e.id}
-                                        onClick={() => handleFixedExpenseAssign(tx.id, e.id)}
-                                        className="flex items-center gap-2 text-xs py-1.5 cursor-pointer"
-                                      >
-                                        <span className="truncate">{e.name}</span>
-                                        <span className="ml-auto text-[10px] text-muted-foreground">
-                                          {formatCurrency(e.amount, e.currency)}
-                                        </span>
-                                        {(tx as any).fixed_expense_id === e.id && <Check className="w-3.5 h-3.5 ml-auto text-primary" />}
-                                      </DropdownMenuItem>
-                                    ))}
-                                    {(tx as any).fixed_expense_id && (
-                                      <>
-                                        <DropdownMenuSeparator />
-                                        <DropdownMenuItem
-                                          onClick={() => handleFixedExpenseAssign(tx.id, null)}
-                                          className="text-xs text-destructive flex items-center gap-2 py-1.5 cursor-pointer"
-                                        >
-                                          <X className="w-3.5 h-3.5" /> Remove bill tag
-                                        </DropdownMenuItem>
-                                      </>
-                                    )}
-                                  </DropdownMenuSubContent>
-                                </DropdownMenuSub>
+                                <DropdownMenuItem
+                                  onClick={() => {
+                                    setTxForBillDialog(tx);
+                                    setBillDialogOpen(true);
+                                  }}
+                                  className="flex items-center gap-2 text-xs py-2 cursor-pointer font-medium"
+                                >
+                                  <Receipt className="w-4 h-4 text-amber-600" />
+                                  <span className="truncate">
+                                    {assignedFixedExpense ? `Bill: ${assignedFixedExpense.name}` : 'Mark as Bill'}
+                                  </span>
+                                </DropdownMenuItem>
                               )}
 
                               {/* Work Travel Claim */}
@@ -2040,6 +2014,30 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
         onLinkPayback={handleLinkPayback}
         onUnlinkPayback={handleUnlinkPayback}
         onToggleStandalonePayback={handleToggleStandalonePayback}
+      />
+
+      {/* Bill Assignment Dialog (Mobile & Desktop) */}
+      <BillSelectDialog
+        open={billDialogOpen}
+        onOpenChange={setBillDialogOpen}
+        transaction={txForBillDialog}
+        fixedExpenses={fixedExpenses}
+        baseCurrency={baseCurrency}
+        onAssignBill={handleFixedExpenseAssign}
+      />
+
+      {/* Pot Assignment Dialog (Mobile & Desktop) */}
+      <PotSelectDialog
+        open={potDialogOpen}
+        onOpenChange={setPotDialogOpen}
+        transaction={txForPotDialog}
+        goals={goals}
+        baseCurrency={baseCurrency}
+        onAssignPot={handlePoolAssign}
+        onOpenSplit={(tx) => {
+          setTxToSplit(tx);
+          setSplitDialogOpen(true);
+        }}
       />
     </div>
   );
