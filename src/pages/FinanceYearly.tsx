@@ -543,11 +543,41 @@ export default function FinanceYearly() {
         income: s.income,
       };
 
+      const mEnd = endOfMonth(mDate);
+      let persistedBreakdowns: Array<{ goalId: string; goalName: string; allocatedAmount: number }> = [];
+      let persistedGoalPotTotal = 0;
+
+      if (s.isFuture || s.isCurrent) {
+        for (const tx of transactions) {
+          if (tx.amount < 1000 || tx.is_transfer) continue;
+          const effDate = getEffectiveTxMonthDate(tx, catMap);
+          if (effDate < mDate || effDate > mEnd) continue;
+          const rawObj = (tx.raw as any) || {};
+          const snapFromRaw = rawObj.paycheck_allocation_breakdown;
+          let snapFromLocal: any = null;
+          try {
+            const rawLocal = typeof localStorage !== 'undefined' ? localStorage.getItem(`paycheck_allocation_snapshot_${tx.id}`) : null;
+            if (rawLocal) snapFromLocal = JSON.parse(rawLocal);
+          } catch {
+            snapFromLocal = null;
+          }
+          const breakdownObj = snapFromRaw || snapFromLocal;
+          if (breakdownObj && Array.isArray(breakdownObj.goalAllocations) && breakdownObj.totalGoalAllocations > 0) {
+            persistedBreakdowns = breakdownObj.goalAllocations.filter((a: any) => a.allocatedAmount > 0.01);
+            persistedGoalPotTotal = Math.round(Number(breakdownObj.totalGoalAllocations) || 0);
+            break;
+          }
+        }
+      }
+
       let totalGoalPots = 0;
       const monthPotBreakdowns: Array<{ id: string; name: string; color: string; amount: number; targetBase: number }> = [];
       for (const meta of potSchedule.activeGoalMetas) {
         let amt = 0;
-        if (s.isFuture || s.isCurrent) {
+        if ((s.isFuture || s.isCurrent) && persistedGoalPotTotal > 0) {
+          const matched = persistedBreakdowns.find(b => b.goalId === meta.goal.id);
+          amt = Math.round(matched?.allocatedAmount ?? 0);
+        } else if (s.isFuture || s.isCurrent) {
           const plan = potSchedule.getGoalPlanForMonth(meta.goal.id, mDate);
           amt = Math.round(plan?.monthlyAmount ?? 0);
         } else {
@@ -555,7 +585,7 @@ export default function FinanceYearly() {
             .filter(tx => (tx as any).goal_id === meta.goal.id)
             .filter(tx => {
               const d = getEffectiveTxMonthDate(tx);
-              return d >= mDate && d <= endOfMonth(mDate);
+              return d >= mDate && d <= mEnd;
             })
             .reduce((sum, tx) => sum + Math.abs(baseAmt(tx)), 0);
           amt = Math.round(pastSum);
@@ -570,6 +600,28 @@ export default function FinanceYearly() {
             amount: amt,
             targetBase: meta.targetBase,
           });
+        }
+      }
+
+      // Include any pot from persistedBreakdowns that was just completed (100% funded) by this paycheck
+      // and therefore no longer in activeGoalMetas (e.g. Europe winter after December's paycheck topped it up!)
+      if ((s.isFuture || s.isCurrent) && persistedGoalPotTotal > 0) {
+        for (const pb of persistedBreakdowns) {
+          if (!monthPotBreakdowns.some(m => m.id === pb.goalId)) {
+            const matchedGoal = goals.find(g => g.id === pb.goalId);
+            const amt = Math.round(pb.allocatedAmount);
+            if (amt > 0) {
+              point[pb.goalId] = amt;
+              totalGoalPots += amt;
+              monthPotBreakdowns.push({
+                id: pb.goalId,
+                name: pb.goalName || matchedGoal?.name || 'Savings Pot',
+                color: matchedGoal?.color || '#6366f1',
+                amount: amt,
+                targetBase: matchedGoal ? finance.convertToBase(matchedGoal.target_amount || 0, matchedGoal.currency) : amt,
+              });
+            }
+          }
         }
       }
 
@@ -600,6 +652,7 @@ export default function FinanceYearly() {
         point.predictedWeeklyAllowance = s.daysInMonth > 0 ? ((s.essential + exactLeftoverFun) / s.daysInMonth) * 7 : 0;
         point.predictedDailyAllowance = point.predictedWeeklyAllowance / 7;
         point.pots = totalPotsWithEmergency;
+        point.rawScheduledPots = totalPotsWithEmergency;
       }
 
       point.variable = s.essential + point.fun;
@@ -611,7 +664,7 @@ export default function FinanceYearly() {
 
       return point;
     });
-  }, [full12MonthsSeries, monthWindows, now, potSchedule, finance.transactions]);
+  }, [full12MonthsSeries, monthWindows, now, potSchedule, finance.transactions, catMap, goals, finance.convertToBase]);
 
   // Display series based on time horizon view
   const displayedSeries = useMemo(() => {
