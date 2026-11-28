@@ -24,6 +24,7 @@ interface Props {
   baseCurrency: string;
   onLinkPayback: (expenseTx: FinanceTransaction, incomeTx: FinanceTransaction) => Promise<void>;
   onUnlinkPayback?: (tx: FinanceTransaction) => Promise<void>;
+  onToggleStandalonePayback?: (tx: FinanceTransaction) => Promise<void>;
 }
 
 const getOrigAmount = (tx?: FinanceTransaction | null): number => {
@@ -48,6 +49,7 @@ export default function PaybackLinkDialog({
   baseCurrency,
   onLinkPayback,
   onUnlinkPayback,
+  onToggleStandalonePayback,
 }: Props) {
   const [search, setSearch] = useState('');
   const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);
@@ -57,14 +59,18 @@ export default function PaybackLinkDialog({
   const isSourceIncome = Boolean(sourceTransaction && sourceOrigAmt > 0);
 
   const paybackMeta = (sourceTransaction?.raw as any)?.payback_meta;
+  const isStandaloneRefund = Boolean(
+    isSourceIncome && (sourceTransaction as any)?.is_refund && !paybackMeta?.linked_expense_id && !paybackMeta?.linked_expense_ids?.length
+  );
   const isAlreadyLinked = Boolean(
     paybackMeta?.is_payback ||
       paybackMeta?.has_payback ||
-      (sourceTransaction as any)?.is_payback_pair
+      (sourceTransaction as any)?.is_payback_pair ||
+      isStandaloneRefund
   );
 
   // If source is income, we look for expense candidates.
-  // If source is expense, we look for income candidates.
+  // If source is expense, we look for incoming payback candidates (including bank transfers).
   const candidates = useMemo(() => {
     if (!sourceTransaction) return [];
     const sourceDate = parseUkDate(sourceTransaction.posted_at);
@@ -77,8 +83,8 @@ export default function PaybackLinkDialog({
           // Look for outgoing purchases
           return origAmt < 0 && !tx.is_transfer;
         } else {
-          // Look for incoming transfers / deposits
-          return origAmt > 0 && !tx.is_transfer;
+          // Look for incoming deposits / transfers from friends
+          return origAmt > 0;
         }
       })
       .filter(tx => {
@@ -188,7 +194,28 @@ export default function PaybackLinkDialog({
         </div>
 
         {/* Existing Link Warning / Notice */}
-        {isAlreadyLinked && (
+        {isStandaloneRefund && (
+          <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-900 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span className="truncate font-semibold">Marked as Friend Payback (adds to Fun Money)</span>
+            </div>
+            {onUnlinkPayback && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleUnlink}
+                disabled={isSubmitting}
+                className="text-[11px] h-7 text-destructive border-destructive/30 hover:bg-destructive/10 shrink-0"
+              >
+                Unmark
+              </Button>
+            )}
+          </div>
+        )}
+
+        {isAlreadyLinked && !isStandaloneRefund && (
           <div className="p-2.5 rounded-lg bg-emerald-50 border border-emerald-200 text-xs text-emerald-900 flex items-center justify-between gap-2">
             <div className="flex items-center gap-1.5 min-w-0">
               <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
@@ -212,6 +239,35 @@ export default function PaybackLinkDialog({
                 Unlink
               </Button>
             )}
+          </div>
+        )}
+
+        {/* Standalone Quick Action for Income */}
+        {isSourceIncome && !isAlreadyLinked && onToggleStandalonePayback && (
+          <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs space-y-2">
+            <p className="text-[11px] text-muted-foreground">
+              Don't have a specific tracked purchase to pair with? You can mark this deposit directly as a Friend Payback to credit it to this week's Fun Money:
+            </p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={async () => {
+                if (!sourceTransaction) return;
+                setIsSubmitting(true);
+                try {
+                  await onToggleStandalonePayback(sourceTransaction);
+                  onOpenChange(false);
+                } finally {
+                  setIsSubmitting(false);
+                }
+              }}
+              disabled={isSubmitting}
+              className="w-full text-xs font-bold text-emerald-700 border-emerald-300 hover:bg-emerald-50 h-8"
+            >
+              <Handshake className="w-3.5 h-3.5 mr-1.5 text-emerald-600" />
+              Mark as Friend Payback (Add to Fun Money)
+            </Button>
           </div>
         )}
 

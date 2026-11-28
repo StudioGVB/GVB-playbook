@@ -256,7 +256,7 @@ serve(async (req) => {
     const { data: existingTransactions, error: existingTxError } = dbAccountIds.length > 0
       ? await supabase
           .from('finance_transactions')
-          .select('id, account_id, external_transaction_id, transaction_fingerprint, category_id, is_transfer, goal_id, is_fixed, amount, description, merchant, posted_at, raw')
+          .select('id, account_id, external_transaction_id, transaction_fingerprint, category_id, is_transfer, goal_id, is_fixed, amount, description, merchant, posted_at, is_refund, matched_transaction_id, raw')
           .eq('user_id', userId)
           .in('account_id', dbAccountIds)
           .order('posted_at', { ascending: false })
@@ -300,6 +300,18 @@ serve(async (req) => {
           }
           row.goal_id = existing.goal_id ?? null
           row.is_fixed = existing.is_fixed ?? false
+          if (existing.is_refund !== undefined && existing.is_refund !== null) {
+            (row as any).is_refund = existing.is_refund
+          }
+          if (existing.matched_transaction_id) {
+            (row as any).matched_transaction_id = existing.matched_transaction_id
+          }
+          if (existing.raw && typeof existing.raw === 'object') {
+            row.raw = {
+              ...existing.raw,
+              ...(typeof row.raw === 'object' ? row.raw : {}),
+            }
+          }
         }
         rowsToUpsert.push(row)
         continue

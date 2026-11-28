@@ -401,6 +401,7 @@ export function applyPairedPaybackNetting<T extends any>(transactions: T[]): T[]
       if (other) {
         const otherOrigAmt = Number(other.original_amount) || 0;
         const isPaybackMatch =
+          other.matched_transaction_id === tx.id ||
           Boolean(meta || (other.raw as any)?.payback_meta || tx.is_refund || other.is_refund) ||
           (tx.account_id && tx.account_id === other.account_id && !tx.is_transfer);
         if (isPaybackMatch) {

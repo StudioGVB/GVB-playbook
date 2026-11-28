@@ -739,10 +739,17 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
         : [];
       const nextLinkedExpenseIds = Array.from(new Set([...prevExpIds, expenseTx.id]));
 
+      const incomeRaw = typeof incomeTx.raw === 'object' && incomeTx.raw !== null ? { ...incomeTx.raw } : {};
+      const expenseRaw = typeof expenseTx.raw === 'object' && expenseTx.raw !== null ? { ...expenseTx.raw } : {};
+
       await updateTransaction(incomeTx.id, {
         is_refund: netExcessIncomeBase <= 0.01,
+        matched_transaction_id: expenseTx.id,
+        is_transfer: false,
+        transfer_status: null,
+        transfer_side: null,
         raw: {
-          ...(incomeTx.raw || {}),
+          ...incomeRaw,
           payback_meta: {
             is_payback: true,
             linked_expense_id: expenseTx.id,
@@ -757,8 +764,9 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
       } as any);
 
       await updateTransaction(expenseTx.id, {
+        matched_transaction_id: incomeTx.id,
         raw: {
-          ...(expenseTx.raw || {}),
+          ...expenseRaw,
           payback_meta: {
             has_payback: true,
             linked_income_id: incomeTx.id,
@@ -795,52 +803,52 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
 
     try {
       const meta = (tx.raw as any)?.payback_meta;
-      if (!meta) return;
+      const updatedRaw = typeof tx.raw === 'object' && tx.raw !== null ? { ...tx.raw } : {};
+      delete updatedRaw.payback_meta;
 
-      if (meta.is_payback) {
+      await updateTransaction(tx.id, {
+        is_refund: false,
+        matched_transaction_id: null,
+        raw: updatedRaw,
+      } as any);
+
+      if (meta?.is_payback) {
         const expIds: string[] = Array.isArray(meta.linked_expense_ids)
           ? meta.linked_expense_ids
           : meta.linked_expense_id
           ? [meta.linked_expense_id]
+          : tx.matched_transaction_id
+          ? [tx.matched_transaction_id]
           : [];
-        const updatedIncomeRaw = { ...(tx.raw || {}) };
-        delete updatedIncomeRaw.payback_meta;
-
-        await updateTransaction(tx.id, {
-          is_refund: false,
-          raw: updatedIncomeRaw,
-        } as any);
 
         for (const linkedExpenseId of expIds) {
           const expenseTx = finance.transactions.find(t => t.id === linkedExpenseId);
           if (expenseTx) {
-            const updatedExpenseRaw = { ...(expenseTx.raw || {}) };
+            const updatedExpenseRaw = typeof expenseTx.raw === 'object' && expenseTx.raw !== null ? { ...expenseTx.raw } : {};
             delete updatedExpenseRaw.payback_meta;
             await updateTransaction(expenseTx.id, {
+              matched_transaction_id: null,
               raw: updatedExpenseRaw,
             } as any);
           }
         }
-      } else if (meta.has_payback) {
+      } else if (meta?.has_payback) {
         const incIds: string[] = Array.isArray(meta.linked_income_ids)
           ? meta.linked_income_ids
           : meta.linked_income_id
           ? [meta.linked_income_id]
+          : tx.matched_transaction_id
+          ? [tx.matched_transaction_id]
           : [];
-        const updatedExpenseRaw = { ...(tx.raw || {}) };
-        delete updatedExpenseRaw.payback_meta;
-
-        await updateTransaction(tx.id, {
-          raw: updatedExpenseRaw,
-        } as any);
 
         for (const linkedIncomeId of incIds) {
           const incomeTx = finance.transactions.find(t => t.id === linkedIncomeId);
           if (incomeTx) {
-            const updatedIncomeRaw = { ...(incomeTx.raw || {}) };
+            const updatedIncomeRaw = typeof incomeTx.raw === 'object' && incomeTx.raw !== null ? { ...incomeTx.raw } : {};
             delete updatedIncomeRaw.payback_meta;
             await updateTransaction(incomeTx.id, {
               is_refund: false,
+              matched_transaction_id: null,
               raw: updatedIncomeRaw,
             } as any);
           }
@@ -852,6 +860,37 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
     } catch (err) {
       console.error('Error unlinking payback:', err);
       toast.error('Failed to unlink payback');
+    }
+  }, [finance, updateTransaction]);
+
+  const handleToggleStandalonePayback = useCallback(async (tx: any) => {
+    if (!tx) return;
+    try {
+      const isCurrentlyRefund = Boolean((tx as any).is_refund || (tx.raw as any)?.payback_meta?.is_payback);
+      const newIsRefund = !isCurrentlyRefund;
+      const rawObj = typeof tx.raw === 'object' && tx.raw !== null ? { ...tx.raw } : {};
+      if (newIsRefund) {
+        rawObj.payback_meta = { is_payback: true, is_standalone: true };
+      } else {
+        delete rawObj.payback_meta;
+      }
+      await updateTransaction(tx.id, {
+        is_refund: newIsRefund,
+        matched_transaction_id: null,
+        is_transfer: false,
+        transfer_status: null,
+        transfer_side: null,
+        raw: rawObj,
+      } as any);
+      toast.success(
+        newIsRefund
+          ? 'Marked as Friend Payback — added back to this week\'s Fun Money!'
+          : 'Friend Payback flag removed.'
+      );
+      await finance.refetch();
+    } catch (err) {
+      console.error('Error toggling friend payback:', err);
+      toast.error('Failed to update friend payback');
     }
   }, [finance, updateTransaction]);
 
@@ -1291,7 +1330,7 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                                 : `Payback: +${formatCurrency((tx as any).payback_covered_base ?? (tx.raw as any)?.payback_meta?.payback_amount ?? 0, baseCurrency)} · Net: ${formatCurrency(tx.base_amount ?? tx.amount, baseCurrency)}`}
                             </Badge>
                           )}
-                          {Boolean((tx.raw as any)?.payback_meta?.is_payback || (tx as any).is_paired_payback_income) && (
+                          {Boolean((tx.raw as any)?.payback_meta?.is_payback || (tx as any).is_paired_payback_income || (tx.amount > 0 && (tx as any).is_refund)) && (
                             <Badge
                               variant="secondary"
                               onClick={() => {
@@ -1299,12 +1338,14 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                                 setPaybackDialogOpen(true);
                               }}
                               className="text-[9px] px-1.5 py-0 shrink-0 cursor-pointer bg-emerald-100 text-emerald-800 hover:bg-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 border border-emerald-300 transition-colors"
-                              title="Friend payback linked to purchase — click to view or unlink"
+                              title="Friend payback / refund — click to view or unlink"
                             >
                               <Handshake className="w-2.5 h-2.5 mr-0.5" />
                               {(tx as any).is_payback_neutral
                                 ? `Payback for: ${(tx.raw as any)?.payback_meta?.expense_description || 'Purchase'} · Neutral (£0 income)`
-                                : `Covered ${formatCurrency((tx as any).payback_used_base ?? 0, baseCurrency)} · +${formatCurrency(tx.base_amount ?? tx.amount, baseCurrency)} net income`}
+                                : (tx as any).is_paired_payback_income
+                                ? `Covered ${formatCurrency((tx as any).payback_used_base ?? 0, baseCurrency)} · +${formatCurrency(tx.base_amount ?? tx.amount, baseCurrency)} net income`
+                                : 'Friend Payback (adds to Fun Money)'}
                             </Badge>
                           )}
                           {tx.is_reimbursable && (
@@ -1501,15 +1542,19 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                                 </button>
                               </PopoverContent>
                             </Popover>
-                          ) : tx.amount > 0 && !tx.is_transfer ? (
+                          ) : tx.amount > 0 ? (
                             <button
-                              onClick={() => {
-                                const newIsRefund = !(tx as any).is_refund;
-                                updateTransaction(tx.id, { is_refund: newIsRefund } as any);
-                                toast(newIsRefund ? 'Marked as refund — added back to this week\'s Fun Money' : 'Refund flag removed');
-                              }}
-                              className={`p-1 rounded shrink-0 transition-colors ${(tx as any).is_refund ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-300 hover:text-slate-600'}`}
-                              title={(tx as any).is_refund ? 'Refund (boosts Fun Money) — click to unmark' : 'Mark as refund (adds to Fun Money this week)'}
+                              onClick={() => handleToggleStandalonePayback(tx)}
+                              className={`p-1 rounded shrink-0 transition-colors ${
+                                (tx as any).is_refund
+                                  ? 'text-emerald-600 dark:text-emerald-400 font-bold'
+                                  : 'text-slate-300 hover:text-slate-600'
+                              }`}
+                              title={
+                                (tx as any).is_refund
+                                  ? 'Friend Payback (boosts Fun Money) — click to unmark'
+                                  : 'Mark as Friend Payback (adds to Fun Money this week)'
+                              }
                             >
                               <Undo2 className="w-4 h-4" />
                             </button>
@@ -1538,28 +1583,26 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                           )}
 
                           {/* Payback Link button (for friend paybacks / repayments) */}
-                          {!tx.is_transfer && (
-                            <button
-                              onClick={() => {
-                                setSourceTxForPayback(tx);
-                                setPaybackDialogOpen(true);
-                              }}
-                              className={`p-1 rounded shrink-0 transition-colors ${
-                                (tx.raw as any)?.payback_meta
-                                  ? 'text-emerald-600 font-bold'
-                                  : 'text-slate-300 hover:text-slate-600'
-                              }`}
-                              title={
-                                (tx.raw as any)?.payback_meta
-                                  ? 'Linked Payback (click to view or unlink)'
-                                  : tx.amount > 0
-                                  ? 'Link friend payback to a purchase'
-                                  : 'Link friend payback received for this expense'
-                              }
-                            >
-                              <Handshake className="w-4 h-4" />
-                            </button>
-                          )}
+                          <button
+                            onClick={() => {
+                              setSourceTxForPayback(tx);
+                              setPaybackDialogOpen(true);
+                            }}
+                            className={`p-1 rounded shrink-0 transition-colors ${
+                              (tx.raw as any)?.payback_meta || (tx as any).is_refund
+                                ? 'text-emerald-600 font-bold'
+                                : 'text-slate-300 hover:text-slate-600'
+                            }`}
+                            title={
+                              (tx.raw as any)?.payback_meta || (tx as any).is_refund
+                                ? 'Friend Payback linked — click to view or unlink'
+                                : tx.amount > 0
+                                ? 'Pair friend payback with a purchase'
+                                : 'Link friend payback received for this expense'
+                            }
+                          >
+                            <Handshake className="w-4 h-4" />
+                          </button>
 
                           {/* Fixed expense / bill assignment */}
                           {tx.amount < 0 && fixedExpenses.length > 0 && (
@@ -1757,21 +1800,32 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
                               )}
 
                               {/* Friend Payback */}
-                              {!tx.is_transfer && (
+                              <DropdownMenuItem
+                                onClick={() => {
+                                  setSourceTxForPayback(tx);
+                                  setPaybackDialogOpen(true);
+                                }}
+                                className="flex items-center gap-2 text-xs py-2 cursor-pointer font-medium"
+                              >
+                                <Handshake className="w-4 h-4 text-emerald-600" />
+                                <span>
+                                  {(tx.raw as any)?.payback_meta || (tx as any).is_refund
+                                    ? 'View / Unlink Payback'
+                                    : tx.amount > 0
+                                    ? 'Pair or Mark as Friend Payback'
+                                    : 'Link Friend Payback Received'}
+                                </span>
+                              </DropdownMenuItem>
+                              {tx.amount > 0 && (
                                 <DropdownMenuItem
-                                  onClick={() => {
-                                    setSourceTxForPayback(tx);
-                                    setPaybackDialogOpen(true);
-                                  }}
+                                  onClick={() => handleToggleStandalonePayback(tx)}
                                   className="flex items-center gap-2 text-xs py-2 cursor-pointer font-medium"
                                 >
-                                  <Handshake className="w-4 h-4 text-emerald-600" />
+                                  <Undo2 className="w-4 h-4 text-emerald-600" />
                                   <span>
-                                    {(tx.raw as any)?.payback_meta
-                                      ? 'View / Unlink Payback'
-                                      : tx.amount > 0
-                                      ? 'Link Payback to Purchase'
-                                      : 'Link Friend Payback Received'}
+                                    {(tx as any).is_refund
+                                      ? 'Unmark Friend Payback'
+                                      : 'Mark as Friend Payback (Add to Fun Money)'}
                                   </span>
                                 </DropdownMenuItem>
                               )}
@@ -1985,6 +2039,7 @@ export default function FinanceTransactions({ finance, initialAccountFilter, fix
         baseCurrency={baseCurrency}
         onLinkPayback={handleLinkPayback}
         onUnlinkPayback={handleUnlinkPayback}
+        onToggleStandalonePayback={handleToggleStandalonePayback}
       />
     </div>
   );

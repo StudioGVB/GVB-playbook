@@ -511,11 +511,11 @@ export function useFinanceDataState() {
               (isJointAccountExcluded &&
                 (fullDesc.includes('joint') ||
                   rawJsonStr.includes('joint') ||
-                  (isMonzoAccount && Math.abs(Math.abs(numAmt) - 5) < 0.01 && (hasKiriName || t.is_refund || fullDesc.includes('gabriella')))));
+                  (isMonzoAccount && Math.abs(Math.abs(numAmt) - 5) < 0.01 && (hasKiriName || fullDesc.includes('gabriella')))));
 
             const isTransferToHiddenAccount =
               Boolean(matchedExcludedCounterpart && Number(matchedExcludedCounterpart.amount) > 0) ||
-              (matchesExcludedAccountByName && (numAmt < 0 || t.is_refund || (t.transfer_group_id && excludedGroupIds.has(t.transfer_group_id))));
+              (matchesExcludedAccountByName && (numAmt < 0 || (t.transfer_group_id && excludedGroupIds.has(t.transfer_group_id))));
 
             if (isTransferToHiddenAccount) {
               const expenseAmt = -Math.abs(numAmt);
@@ -1228,9 +1228,18 @@ export function useFinanceDataState() {
         finalUpdates.transfer_status = null;
       }
     }
+    if (updates.is_refund || updates.matched_transaction_id || (updates.raw as any)?.payback_meta) {
+      finalUpdates.is_transfer = false;
+      finalUpdates.transfer_status = null;
+      finalUpdates.transfer_side = null;
+    }
     const { error } = await supabase.from('finance_transactions').update(finalUpdates).eq('id', id);
-    if (error) { toast.error('Update failed'); return; }
-    fetchAll();
+    if (error) {
+      console.error('Update transaction error:', error);
+      toast.error('Update failed: ' + error.message);
+      return;
+    }
+    await fetchAll();
   };
 
   /**
@@ -1981,7 +1990,7 @@ export function useFinanceDataState() {
     const { data: existingTxs } = dbAccountIds.length > 0
       ? await supabase
           .from('finance_transactions')
-          .select('id, account_id, external_transaction_id, transaction_fingerprint, category_id, is_transfer, goal_id, is_fixed, is_reimbursable, reimbursement_status, amount, description, merchant, posted_at, raw')
+          .select('id, account_id, external_transaction_id, transaction_fingerprint, category_id, is_transfer, goal_id, is_fixed, is_reimbursable, reimbursement_status, amount, description, merchant, posted_at, is_refund, matched_transaction_id, raw')
           .eq('user_id', user.id)
           .in('account_id', dbAccountIds)
           .order('posted_at', { ascending: false })
@@ -2111,13 +2120,22 @@ export function useFinanceDataState() {
           }
         }
 
+        let existingRawObj: any = {};
+        if (typeof existing?.raw === 'object' && existing?.raw !== null) {
+          existingRawObj = existing.raw;
+        } else if (typeof existing?.raw === 'string') {
+          try { existingRawObj = JSON.parse(existing.raw); } catch {}
+        }
+
         const mergedRaw =
           existing?.raw || localPaycheckMeta
             ? {
-                ...(typeof existing?.raw === 'object' && existing.raw !== null ? existing.raw : {}),
+                ...existingRawObj,
                 ...(localPaycheckMeta || {}),
               }
             : null;
+
+        const isExistingPayback = Boolean((existing as any)?.is_refund || existingRawObj?.payback_meta || (existing as any)?.matched_transaction_id);
 
         rowsToUpsert.push({
           user_id: user.id,
@@ -2130,18 +2148,21 @@ export function useFinanceDataState() {
           currency: tx.currency || 'GBP',
           category_id: existing?.category_id ?? defaultCatId ?? null,
           is_refund: rawAmount < 0 ? false : Boolean((existing as any)?.is_refund),
+          matched_transaction_id: (existing as any)?.matched_transaction_id ?? null,
           is_transfer:
-            isGammaSalary || isToHiddenJointOrExternalPerson
+            isExistingPayback || isGammaSalary || isToHiddenJointOrExternalPerson
               ? false
-              : isOutgoingTransfer,
+              : existing && existing.is_transfer !== undefined && existing.is_transfer !== null
+                ? existing.is_transfer
+                : isOutgoingTransfer,
           transfer_side:
-            isGammaSalary || isToHiddenJointOrExternalPerson
+            isExistingPayback || isGammaSalary || isToHiddenJointOrExternalPerson
               ? null
               : isOutgoingTransfer
                 ? 'out'
                 : null,
           transfer_status:
-            isGammaSalary || isToHiddenJointOrExternalPerson
+            isExistingPayback || isGammaSalary || isToHiddenJointOrExternalPerson
               ? null
               : isOutgoingTransfer
                 ? 'auto_confirmed'

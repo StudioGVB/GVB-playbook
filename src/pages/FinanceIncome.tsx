@@ -495,10 +495,17 @@ export default function FinanceIncome() {
         : [];
       const nextLinkedExpenseIds = Array.from(new Set([...prevExpIds, expenseTx.id]));
 
+      const incomeRaw = typeof incomeTx.raw === 'object' && incomeTx.raw !== null ? { ...incomeTx.raw } : {};
+      const expenseRaw = typeof expenseTx.raw === 'object' && expenseTx.raw !== null ? { ...expenseTx.raw } : {};
+
       await updateTransaction(incomeTx.id, {
         is_refund: netExcessIncomeBase <= 0.01,
+        matched_transaction_id: expenseTx.id,
+        is_transfer: false,
+        transfer_status: null,
+        transfer_side: null,
         raw: {
-          ...(incomeTx.raw || {}),
+          ...incomeRaw,
           payback_meta: {
             is_payback: true,
             linked_expense_id: expenseTx.id,
@@ -513,8 +520,9 @@ export default function FinanceIncome() {
       } as any);
 
       await updateTransaction(expenseTx.id, {
+        matched_transaction_id: incomeTx.id,
         raw: {
-          ...(expenseTx.raw || {}),
+          ...expenseRaw,
           payback_meta: {
             has_payback: true,
             linked_income_id: incomeTx.id,
@@ -534,6 +542,7 @@ export default function FinanceIncome() {
       } else {
         toast.success(`Paired payback! "${expenseTx.description}" is neutral (£0 spend) and only the extra +${formatCurrency(netExcessIncomeBase, baseCurrency)} is added to income.`);
       }
+      await refetch();
     } catch (err) {
       console.error('Error linking payback:', err);
       toast.error('Failed to link payback');
@@ -544,29 +553,93 @@ export default function FinanceIncome() {
     if (!tx) return;
     try {
       const meta = (tx.raw as any)?.payback_meta;
-      if (!meta) return;
-      if (meta.is_payback) {
+      const updatedRaw = typeof tx.raw === 'object' && tx.raw !== null ? { ...tx.raw } : {};
+      delete updatedRaw.payback_meta;
+
+      await updateTransaction(tx.id, {
+        is_refund: false,
+        matched_transaction_id: null,
+        raw: updatedRaw,
+      } as any);
+
+      if (meta?.is_payback) {
         const expIds: string[] = Array.isArray(meta.linked_expense_ids)
           ? meta.linked_expense_ids
           : meta.linked_expense_id
           ? [meta.linked_expense_id]
+          : tx.matched_transaction_id
+          ? [tx.matched_transaction_id]
           : [];
-        const updatedIncomeRaw = { ...(tx.raw || {}) };
-        delete updatedIncomeRaw.payback_meta;
-        await updateTransaction(tx.id, { is_refund: false, raw: updatedIncomeRaw } as any);
+
         for (const eid of expIds) {
           const expenseTx = transactions.find(t => t.id === eid);
           if (expenseTx) {
-            const updatedExpenseRaw = { ...(expenseTx.raw || {}) };
+            const updatedExpenseRaw = typeof expenseTx.raw === 'object' && expenseTx.raw !== null ? { ...expenseTx.raw } : {};
             delete updatedExpenseRaw.payback_meta;
-            await updateTransaction(expenseTx.id, { raw: updatedExpenseRaw } as any);
+            await updateTransaction(expenseTx.id, {
+              matched_transaction_id: null,
+              raw: updatedExpenseRaw,
+            } as any);
+          }
+        }
+      } else if (meta?.has_payback) {
+        const incIds: string[] = Array.isArray(meta.linked_income_ids)
+          ? meta.linked_income_ids
+          : meta.linked_income_id
+          ? [meta.linked_income_id]
+          : tx.matched_transaction_id
+          ? [tx.matched_transaction_id]
+          : [];
+
+        for (const iid of incIds) {
+          const incTx = transactions.find(t => t.id === iid);
+          if (incTx) {
+            const updatedIncRaw = typeof incTx.raw === 'object' && incTx.raw !== null ? { ...incTx.raw } : {};
+            delete updatedIncRaw.payback_meta;
+            await updateTransaction(incTx.id, {
+              is_refund: false,
+              matched_transaction_id: null,
+              raw: updatedIncRaw,
+            } as any);
           }
         }
       }
       toast.success('Payback link removed.');
+      await refetch();
     } catch (err) {
       console.error(err);
       toast.error('Failed to unlink payback');
+    }
+  };
+
+  const handleToggleStandalonePayback = async (tx: any) => {
+    if (!tx) return;
+    try {
+      const isCurrentlyRefund = Boolean((tx as any).is_refund || (tx.raw as any)?.payback_meta?.is_payback);
+      const newIsRefund = !isCurrentlyRefund;
+      const rawObj = typeof tx.raw === 'object' && tx.raw !== null ? { ...tx.raw } : {};
+      if (newIsRefund) {
+        rawObj.payback_meta = { is_payback: true, is_standalone: true };
+      } else {
+        delete rawObj.payback_meta;
+      }
+      await updateTransaction(tx.id, {
+        is_refund: newIsRefund,
+        matched_transaction_id: null,
+        is_transfer: false,
+        transfer_status: null,
+        transfer_side: null,
+        raw: rawObj,
+      } as any);
+      toast.success(
+        newIsRefund
+          ? 'Marked as Friend Payback — added back to this week\'s Fun Money!'
+          : 'Friend Payback flag removed.'
+      );
+      await refetch();
+    } catch (err) {
+      console.error('Error toggling friend payback:', err);
+      toast.error('Failed to update friend payback');
     }
   };
 
@@ -1717,6 +1790,7 @@ export default function FinanceIncome() {
         baseCurrency={baseCurrency}
         onLinkPayback={handleLinkPayback}
         onUnlinkPayback={handleUnlinkPayback}
+        onToggleStandalonePayback={handleToggleStandalonePayback}
       />
     </div>
   );

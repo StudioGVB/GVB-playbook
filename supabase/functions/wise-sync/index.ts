@@ -476,7 +476,7 @@ serve(async (req) => {
     const { data: existingDbTxs } = dbAccountIds.length > 0
       ? await supabaseAdmin
           .from('finance_transactions')
-          .select('account_id, external_transaction_id, category_id, is_transfer, is_fixed, goal_id')
+          .select('account_id, external_transaction_id, category_id, is_transfer, is_fixed, goal_id, is_refund, matched_transaction_id, raw')
           .eq('user_id', userId)
           .in('account_id', dbAccountIds)
       : { data: [] }
@@ -500,6 +500,18 @@ serve(async (req) => {
         }
         if (existing.is_fixed !== undefined) {
           (row as any).is_fixed = existing.is_fixed
+        }
+        if (existing.is_refund !== undefined && existing.is_refund !== null) {
+          (row as any).is_refund = existing.is_refund
+        }
+        if (existing.matched_transaction_id) {
+          (row as any).matched_transaction_id = existing.matched_transaction_id
+        }
+        if (existing.raw && typeof existing.raw === 'object') {
+          row.raw = {
+            ...existing.raw,
+            ...(typeof row.raw === 'object' ? row.raw : {}),
+          }
         }
       }
     }
