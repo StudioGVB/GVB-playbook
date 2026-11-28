@@ -546,9 +546,7 @@ export default function FinancePoolsPage() {
         const effDate = getEffectiveTxMonthDate(tx, catMap);
         if (effDate < mStart || effDate > mEnd) continue;
         const rawObj = (tx.raw as any) || {};
-        const snapFromRaw = rawObj.paycheck_allocation_breakdown;
-        const snapFromLocal = getPaycheckAllocationMeta(tx.id)?.breakdown;
-        const breakdownObj = snapFromRaw || snapFromLocal;
+        const breakdownObj = rawObj.paycheck_allocation_breakdown;
         if (breakdownObj && Array.isArray(breakdownObj.goalAllocations) && breakdownObj.totalGoalAllocations > 0) {
           persistedPotAllocations = breakdownObj.goalAllocations.filter((a: any) => a.allocatedAmount > 0.01);
           persistedPotTotal = Number(breakdownObj.totalGoalAllocations) || 0;
@@ -1006,14 +1004,23 @@ export default function FinancePoolsPage() {
     const isProc = isPaycheckProcessed(paycheckTx);
     setPaycheckAllocated(isProc);
 
-    // If marked processed locally, sync to database so mobile sees it as already sorted
-    if (localStorage.getItem(`paycheck_processed_${paycheckTx.id}`) === 'true' && !paycheckTx.raw?.paycheck_allocated) {
+    // If marked processed or snapshot cached locally, sync full breakdown to database so mobile & laptop stay 100% identical
+    const localSnap = getPaycheckAllocationMeta(paycheckTx.id)?.breakdown;
+    const isLocalProc = localStorage.getItem(`paycheck_processed_${paycheckTx.id}`) === 'true';
+    const rawObj = (paycheckTx.raw as any) || {};
+    if (
+      (isLocalProc || localSnap) &&
+      (!rawObj.paycheck_allocated || (localSnap && !rawObj.paycheck_allocation_breakdown))
+    ) {
       finance.updateTransaction(paycheckTx.id, {
         raw: {
-          ...((paycheckTx.raw as any) || {}),
+          ...rawObj,
           paycheck_allocated: true,
-          allocated_at: Date.now(),
-        }
+          allocated_at: rawObj.allocated_at || Date.now(),
+          ...(localSnap && !rawObj.paycheck_allocation_breakdown
+            ? { paycheck_allocation_breakdown: localSnap }
+            : {}),
+        },
       });
     }
 

@@ -378,16 +378,8 @@ export function computeMonthDailyAllowancePlan(params: {
   if (gammaCandidates.length > 0) {
     const primaryGammaTx = dedupedTxs.find(t => t.id === gammaCandidates[0].txId);
     const rawSnap = (primaryGammaTx?.raw as any)?.paycheck_allocation_breakdown;
-    let localSnap: any = null;
-    try {
-      const s = typeof localStorage !== 'undefined' ? localStorage.getItem(`paycheck_allocation_snapshot_${gammaCandidates[0].txId}`) : null;
-      if (s) localSnap = JSON.parse(s);
-    } catch {
-      localSnap = null;
-    }
-    const snap = rawSnap || localSnap;
-    if (snap && Number(snap.totalGoalAllocations) > 0) {
-      persistedPaycheckPotTotal = Number(snap.totalGoalAllocations);
+    if (rawSnap && Number(rawSnap.totalGoalAllocations) > 0) {
+      persistedPaycheckPotTotal = Number(rawSnap.totalGoalAllocations);
     }
   }
 

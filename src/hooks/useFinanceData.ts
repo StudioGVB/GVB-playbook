@@ -1981,7 +1981,7 @@ export function useFinanceDataState() {
     const { data: existingTxs } = dbAccountIds.length > 0
       ? await supabase
           .from('finance_transactions')
-          .select('id, account_id, external_transaction_id, transaction_fingerprint, category_id, is_transfer, goal_id, is_fixed, is_reimbursable, reimbursement_status, amount, description, merchant, posted_at')
+          .select('id, account_id, external_transaction_id, transaction_fingerprint, category_id, is_transfer, goal_id, is_fixed, is_reimbursable, reimbursement_status, amount, description, merchant, posted_at, raw')
           .eq('user_id', user.id)
           .in('account_id', dbAccountIds)
           .order('posted_at', { ascending: false })
@@ -2095,6 +2095,30 @@ export function useFinanceDataState() {
             ? gammaCat.id
             : autoCategorizeTx(`${description} ${merchant || ''}`, catList);
 
+        let localPaycheckMeta: any = null;
+        if (existing?.id && typeof localStorage !== 'undefined') {
+          try {
+            const snapStr = localStorage.getItem(`paycheck_allocation_snapshot_${existing.id}`);
+            const isProcLocal = localStorage.getItem(`paycheck_processed_${existing.id}`) === 'true';
+            if (snapStr || isProcLocal) {
+              localPaycheckMeta = {
+                paycheck_allocated: true,
+                ...(snapStr ? { paycheck_allocation_breakdown: JSON.parse(snapStr) } : {}),
+              };
+            }
+          } catch {
+            localPaycheckMeta = null;
+          }
+        }
+
+        const mergedRaw =
+          existing?.raw || localPaycheckMeta
+            ? {
+                ...(typeof existing?.raw === 'object' && existing.raw !== null ? existing.raw : {}),
+                ...(localPaycheckMeta || {}),
+              }
+            : null;
+
         rowsToUpsert.push({
           user_id: user.id,
           account_id: dbAccountId,
@@ -2127,7 +2151,7 @@ export function useFinanceDataState() {
           is_reimbursable: existing?.is_reimbursable ?? isGammaReimb,
           reimbursement_status: existing?.reimbursement_status ?? (isGammaReimb ? 'reimbursed' : null),
           transaction_fingerprint: fingerprint,
-          raw: existing?.raw?.paycheck_allocated ? { paycheck_allocated: true } : null,
+          raw: mergedRaw,
         });
       }
 
